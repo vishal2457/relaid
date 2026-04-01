@@ -1,0 +1,127 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Rajdhani:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans: "Rajdhani", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  --color-vermilion: #ff4400;
+  --color-panel: #0d0d0d;
+  --color-grid: #222222;
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: #030303;
+  --foreground: #e0e0e0;
+  --card: #0d0d0d;
+  --card-foreground: #e0e0e0;
+  --popover: #0d0d0d;
+  --popover-foreground: #e0e0e0;
+  --primary: #ff4400;
+  --primary-foreground: #030303;
+  --secondary: #050505;
+  --secondary-foreground: #e0e0e0;
+  --muted: #050505;
+  --muted-foreground: #777777;
+  --accent: #ff4400;
+  --accent-foreground: #030303;
+  --destructive: #ff4400;
+  --border: #333333;
+  --input: #222222;
+  --ring: #ff4400;
+  --chart-1: #ff4400;
+  --chart-2: #00ff41;
+  --chart-3: #f2a900;
+  --chart-4: #e0e0e0;
+  --chart-5: #777777;
+  --sidebar: #050505;
+  --sidebar-foreground: #e0e0e0;
+  --sidebar-primary: #ff4400;
+  --sidebar-primary-foreground: #030303;
+  --sidebar-accent: #ff4400;
+  --sidebar-accent-foreground: #030303;
+  --sidebar-border: #333333;
+  --sidebar-ring: #ff4400;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    background-image:
+      linear-gradient(#222222 1px, transparent 1px),
+      linear-gradient(90deg, #222222 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-position: -1px -1px;
+  }
+
+  /* Custom Scrollbar Styles */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #030303;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #333333;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #ff4400;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: #030303;
+  }
+
+  /* Firefox scrollbar styles */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #333333 #030303;
+  }
+}

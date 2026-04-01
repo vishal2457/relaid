@@ -1,0 +1,30 @@
+import { Router, Response as ExpressResponse } from "express";
+import { jobQueueRepository } from "../repositories/job-queue-repository";
+import { success } from "../shared/api-response";
+
+export function createJobsRouter(): Router {
+  const router = Router();
+
+  router.get("/running", (_req, res) => {
+    const runningJobs = jobQueueRepository.getRunningJobs();
+    success(
+      res,
+      runningJobs.map((job) => ({
+        id: job.id,
+        projectId: job.projectId,
+        status: job.status,
+        prompt: job.prompt,
+        authorTag: job.authorTag,
+        channelId: job.channelId,
+        threadId: job.threadId,
+        workerId: job.workerId,
+        startedAt: job.startedAt?.toISOString() || null,
+        createdAt: job.createdAt.toISOString(),
+        sdkType: job.sdkType,
+      })),
+      "Running jobs fetched successfully",
+    );
+  });
+
+  return router;
+}
