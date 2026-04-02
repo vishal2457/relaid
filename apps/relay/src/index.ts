@@ -2,15 +2,17 @@ import express from "express";
 import { createServer } from "http";
 import cors from "cors";
 import dotenv from "dotenv";
+import morgan from "morgan";
 import { eq } from "drizzle-orm";
 import { createSocketServer } from "./socket";
-import { projectsRouter } from "./routes/projects";
-import { sessionsRouter } from "./routes/sessions";
 import { localServersRouter } from "./routes/local-servers";
 import { usersRouter } from "./routes/users";
-import { messagesRouter } from "./routes/messages";
 import { providersRouter } from "./routes/providers";
-import { logger } from "./shared/logger";
+import { gitRouter } from "./routes/git";
+import { projectsRouter } from "./routes/projects";
+import { sessionsRouter } from "./routes/sessions";
+import { messagesRouter } from "./routes/messages";
+import { logger, stream } from "./shared/logger";
 import { getDb } from "./db";
 import { localServers } from "./db/schema";
 
@@ -25,29 +27,51 @@ const app = express();
 const httpServer = createServer(app);
 
 app.use(cors());
+app.use(morgan("combined", { stream }));
 app.use(express.json());
-
-app.use((req, res, next) => {
-  logger.info("Incoming request", {
-    method: req.method,
-    path: req.path,
-    userId: req.headers["x-user-id"],
-  });
-  next();
-});
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+app.get("/api/debug/servers", async (req, res) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    const db = getDb();
+    const servers = await db
+      .select()
+      .from(localServers)
+      .where(eq(localServers.userId, userId));
+
+    res.json({
+      userId,
+      totalServers: servers.length,
+      connectedServers: servers.filter((s) => s.isConnected).length,
+      servers: servers.map((s) => ({
+        id: s.id,
+        name: s.name,
+        isConnected: s.isConnected,
+        lastConnected: s.lastConnected,
+      })),
+    });
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: errMsg });
+  }
+});
+
 app.use("/api/users", usersRouter);
+app.use("/api/local-servers", localServersRouter);
+app.use("/api/providers", providersRouter);
+app.use("/api/git", gitRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/sessions", sessionsRouter);
-app.use("/api/local-servers", localServersRouter);
 app.use("/api/messages", messagesRouter);
-app.use("/api/providers", providersRouter);
-
-
 
 const io = createSocketServer(httpServer);
 

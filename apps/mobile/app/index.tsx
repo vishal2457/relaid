@@ -8,17 +8,27 @@ import {
   NativeSyntheticEvent,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
-  TextInput,
   TextInputSelectionChangeEventData,
   View,
   type FlatList as FlatListType,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  ChatComposer,
+  COMPOSER_BOTTOM_PADDING,
+  COMPOSER_TOP_PADDING,
+  MAX_INPUT_HEIGHT,
+  MIN_INPUT_HEIGHT,
+} from "@/components/ChatComposer";
 import { SessionDrawer } from "@/components/SessionDrawer";
 import { Stack } from "expo-router";
-import { ActivityIndicator, Text, useTheme } from "react-native-paper";
+import {
+  ActivityIndicator,
+  Text,
+  useTheme,
+  type MD3Theme,
+} from "react-native-paper";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -37,6 +47,7 @@ import {
 } from "@/lib/api/projects";
 import { useProviders, type Provider } from "@/lib/api/providers";
 import { sessionsKeys, useCreateSession } from "@/lib/api/sessions";
+import { useGitStagedFiles } from "@/lib/api/git";
 import { queryClient } from "@/lib/query-client";
 import { getChatSocket } from "@/lib/socket/chat";
 import {
@@ -143,10 +154,142 @@ const formatThinkingLabel = (seconds: number | null) => {
   return "Thinking...";
 };
 
-const MIN_INPUT_HEIGHT = 44;
-const MAX_INPUT_HEIGHT = 150;
-const COMPOSER_TOP_PADDING = 12;
-const COMPOSER_BOTTOM_PADDING = 12;
+const statusIconMap: Record<string, string> = {
+  added: "plus-circle",
+  modified: "circle-edit-outline",
+  deleted: "minus-circle",
+  renamed: "swap-horizontal",
+};
+
+const statusColorMap: Record<string, string> = {
+  added: "#22C55E",
+  modified: "#F59E0B",
+  deleted: "#EF4444",
+  renamed: "#8B5CF6",
+};
+
+function GitDrawerContent({
+  activeProject,
+  borderColor,
+  metaColor,
+  theme,
+}: {
+  activeProject: Project | null;
+  borderColor: string;
+  metaColor: string;
+  theme: MD3Theme;
+}) {
+  const {
+    data: stagedFiles,
+    isLoading,
+    error,
+  } = useGitStagedFiles(activeProject?.id ?? "", Boolean(activeProject));
+
+  if (!activeProject) {
+    return (
+      <View style={styles.gitDrawerContent}>
+        <MaterialCommunityIcons
+          name="folder-outline"
+          size={32}
+          color={metaColor}
+        />
+        <Text variant="bodyMedium" style={{ color: metaColor, marginTop: 12 }}>
+          Select a project first
+        </Text>
+      </View>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.gitDrawerContent}>
+        <ActivityIndicator />
+        <Text variant="bodyMedium" style={{ color: metaColor, marginTop: 12 }}>
+          Loading staged files...
+        </Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.gitDrawerContent}>
+        <MaterialCommunityIcons
+          name="alert-circle-outline"
+          size={32}
+          color={theme.colors.error}
+        />
+        <Text
+          variant="bodyMedium"
+          style={{ color: theme.colors.onSurfaceVariant, marginTop: 12 }}
+        >
+          Failed to load staged files
+        </Text>
+      </View>
+    );
+  }
+
+  if (!stagedFiles || stagedFiles.length === 0) {
+    return (
+      <View style={styles.gitDrawerContent}>
+        <MaterialCommunityIcons
+          name="source-branch-check"
+          size={32}
+          color={metaColor}
+        />
+        <Text variant="bodyMedium" style={{ color: metaColor, marginTop: 12 }}>
+          No staged files
+        </Text>
+        <Text variant="bodySmall" style={{ color: metaColor, marginTop: 4 }}>
+          Stage changes to see them here
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <FlatList
+      data={stagedFiles}
+      keyExtractor={(item) => item.path}
+      style={styles.gitFileList}
+      contentContainerStyle={styles.gitFileListContent}
+      renderItem={({ item }) => (
+        <View style={[styles.gitFileItem, { borderBottomColor: borderColor }]}>
+          <MaterialCommunityIcons
+            name={(statusIconMap[item.status] ?? "file-outline") as any}
+            size={18}
+            color={statusColorMap[item.status] ?? metaColor}
+          />
+          <View style={styles.gitFileInfo}>
+            <Text
+              variant="bodyMedium"
+              style={{ color: theme.colors.onSurface }}
+              numberOfLines={1}
+            >
+              {item.path.split("/").pop()}
+            </Text>
+            <Text
+              variant="bodySmall"
+              style={{ color: metaColor }}
+              numberOfLines={1}
+            >
+              {item.path}
+            </Text>
+          </View>
+          <Text
+            variant="labelSmall"
+            style={{
+              color: statusColorMap[item.status] ?? metaColor,
+              textTransform: "uppercase",
+            }}
+          >
+            {item.status}
+          </Text>
+        </View>
+      )}
+    />
+  );
+}
 
 const LAST_SELECTED_PROJECT_ID = "LAST_SELECTED_PROJECT_ID";
 
@@ -189,11 +332,6 @@ type ActiveMention = {
   query: string;
 };
 
-type HighlightSegment = {
-  text: string;
-  isPath: boolean;
-};
-
 function getActiveMention(
   value: string,
   selection: ComposerSelection,
@@ -231,37 +369,14 @@ function getActiveMention(
   };
 }
 
-function getHighlightedSegments(
-  value: string,
-  selectedPaths: Set<string>,
-): HighlightSegment[] {
-  if (!value) {
-    return [{ text: "", isPath: false }];
-  }
-
-  const segments: HighlightSegment[] = [];
-  const tokens = value.match(/(\S+|\s+)/g) ?? [value];
-
-  tokens.forEach((token) => {
-    segments.push({
-      text: token,
-      isPath: !/\s+/.test(token) && selectedPaths.has(token),
-    });
-  });
-
-  return segments;
-}
-
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const flatListRef = React.useRef<FlatListType<SessionMessage>>(null);
-  const inputRef = React.useRef<TextInput>(null);
   const [expandedThinking, setExpandedThinking] = React.useState<
     Record<string, boolean>
   >({});
   const [inputText, setInputText] = React.useState("");
-  const [selectedFilePaths, setSelectedFilePaths] = React.useState<string[]>([]);
   const [inputSelection, setInputSelection] = React.useState<ComposerSelection>(
     {
       start: 0,
@@ -289,6 +404,7 @@ export default function ChatScreen() {
     null,
   );
   const [showDrawer, setShowDrawer] = React.useState(false);
+  const [showGitDrawer, setShowGitDrawer] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
 
   const createSessionMutation = useCreateSession();
@@ -298,15 +414,15 @@ export default function ChatScreen() {
     () => getActiveMention(inputText, inputSelection),
     [inputSelection, inputText],
   );
-  const deferredMentionQuery = React.useDeferredValue(activeMention?.query ?? "");
-  const {
-    data: fileSuggestions,
-    isLoading: fileSuggestionsLoading,
-  } = useProjectFileSearch(
-    activeProject?.id ?? "",
-    deferredMentionQuery,
-    Boolean(activeProject && activeMention && deferredMentionQuery.trim()),
+  const deferredMentionQuery = React.useDeferredValue(
+    activeMention?.query ?? "",
   );
+  const { data: fileSuggestions, isLoading: fileSuggestionsLoading } =
+    useProjectFileSearch(
+      activeProject?.id ?? "",
+      deferredMentionQuery,
+      Boolean(activeProject && activeMention && deferredMentionQuery.trim()),
+    );
 
   React.useEffect(() => {
     (async () => {
@@ -338,10 +454,6 @@ export default function ChatScreen() {
       );
     }
   }, [activeProject, hydrated]);
-
-  React.useEffect(() => {
-    setSelectedFilePaths([]);
-  }, [activeProject?.id]);
 
   const {
     data: messages,
@@ -531,25 +643,11 @@ export default function ChatScreen() {
   const systemBubble = theme.dark ? "#3F3F46" : "#E2E8F0";
   const thinkingSurface = theme.dark ? "#111827" : "#F8FAFC";
   const sheetBg = theme.dark ? "#1E293B" : "#FFFFFF";
-  const selectedPathSet = React.useMemo(
-    () => new Set(selectedFilePaths),
-    [selectedFilePaths],
-  );
-  const highlightedSegments = React.useMemo(
-    () => getHighlightedSegments(inputText, selectedPathSet),
-    [inputText, selectedPathSet],
-  );
-  const pathHighlightBackground = theme.dark
-    ? "rgba(59, 130, 246, 0.2)"
-    : "rgba(191, 219, 254, 0.9)";
-  const pathHighlightText = theme.dark ? "#DBEAFE" : "#1E3A8A";
   const showMentionSuggestions = Boolean(activeProject && activeMention);
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-        mentionSuggestionCount > 0
-          ? mentionSuggestionCount * 52 + 16
-          : 88,
+        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
         220,
       ) + 8
     : 0;
@@ -602,7 +700,6 @@ export default function ChatScreen() {
     });
     setStreamingContent("");
     setInputText("");
-    setSelectedFilePaths([]);
     setInputSelection({ start: 0, end: 0 });
     setInputHeight(MIN_INPUT_HEIGHT);
 
@@ -854,9 +951,7 @@ export default function ChatScreen() {
   };
 
   const handleInputSelectionChange = React.useCallback(
-    (
-      event: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
-    ) => {
+    (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
       setInputSelection(event.nativeEvent.selection);
     },
     [],
@@ -877,211 +972,9 @@ export default function ChatScreen() {
       const cursor = activeMention.start + replacement.length;
 
       setInputText(nextText);
-      setSelectedFilePaths((current) =>
-        current.includes(match.path) ? current : [...current, match.path],
-      );
       setInputSelection({ start: cursor, end: cursor });
-
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-      });
     },
     [activeMention, inputText],
-  );
-
-  const inputBar = (
-    <View
-      style={[
-        styles.inputContainer,
-        {
-          backgroundColor: theme.colors.surface,
-          borderColor,
-          paddingBottom: Math.max(insets.bottom, COMPOSER_BOTTOM_PADDING),
-        },
-      ]}
-    >
-      {showMentionSuggestions ? (
-        <View
-          style={[
-            styles.mentionPanel,
-            {
-              backgroundColor: theme.colors.background,
-              borderColor,
-            },
-          ]}
-        >
-          <Text
-            variant="labelMedium"
-            style={[styles.mentionPanelTitle, { color: metaColor }]}
-          >
-            Project files
-          </Text>
-          {!activeMention?.query.trim() ? (
-            <View style={styles.mentionEmptyState}>
-              <Text variant="bodySmall" style={{ color: metaColor }}>
-                Type to search for files
-              </Text>
-            </View>
-          ) : fileSuggestionsLoading ? (
-            <View style={styles.mentionEmptyState}>
-              <ActivityIndicator size="small" />
-            </View>
-          ) : fileSuggestions && fileSuggestions.length > 0 ? (
-            <ScrollView
-              style={styles.mentionResults}
-              contentContainerStyle={styles.mentionResultsContent}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-            >
-              {fileSuggestions.map((item) => (
-                <Pressable
-                  key={`${item.type}:${item.path}`}
-                  onPress={() => handleSelectFileSuggestion(item)}
-                  style={styles.mentionItem}
-                >
-                  <MaterialCommunityIcons
-                    name={
-                      item.type === "directory"
-                        ? "folder-outline"
-                        : "file-outline"
-                    }
-                    size={18}
-                    color={
-                      item.type === "directory"
-                        ? theme.colors.primary
-                        : theme.colors.onSurfaceVariant
-                    }
-                  />
-                  <View style={styles.mentionItemContent}>
-                    <Text
-                      variant="bodyMedium"
-                      style={{ color: theme.colors.onSurface }}
-                      numberOfLines={1}
-                    >
-                      {item.name}
-                    </Text>
-                    <Text
-                      variant="bodySmall"
-                      style={{ color: metaColor }}
-                      numberOfLines={1}
-                    >
-                      {item.path}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
-          ) : (
-            <View style={styles.mentionEmptyState}>
-              <Text variant="bodySmall" style={{ color: metaColor }}>
-                No matching files or folders
-              </Text>
-            </View>
-          )}
-        </View>
-      ) : null}
-
-      <View style={styles.inputRow}>
-        <View style={styles.textInputWrap}>
-          <TextInput
-            ref={inputRef}
-            style={[
-              styles.textInput,
-              {
-                backgroundColor: theme.colors.background,
-                borderColor,
-                color: "transparent",
-                height: Math.min(
-                  MAX_INPUT_HEIGHT,
-                  Math.max(MIN_INPUT_HEIGHT, inputHeight),
-                ),
-              },
-            ]}
-            placeholder=""
-            value={inputText}
-            selection={inputSelection}
-            onChangeText={setInputText}
-            onSelectionChange={handleInputSelectionChange}
-            multiline
-            scrollEnabled={inputHeight >= MAX_INPUT_HEIGHT}
-            onContentSizeChange={(e) =>
-              setInputHeight(e.nativeEvent.contentSize.height)
-            }
-          />
-          <View
-            pointerEvents="none"
-            style={[
-              styles.textInputOverlay,
-              {
-                minHeight: Math.min(
-                  MAX_INPUT_HEIGHT,
-                  Math.max(MIN_INPUT_HEIGHT, inputHeight),
-                ),
-              },
-            ]}
-          >
-            {inputText ? (
-              <Text
-                style={[
-                  styles.textInputOverlayText,
-                  { color: theme.colors.onSurface },
-                ]}
-              >
-                {highlightedSegments.map((segment, index) =>
-                  segment.isPath ? (
-                    <Text
-                      key={index}
-                      style={[
-                        styles.pathHighlight,
-                        {
-                          backgroundColor: pathHighlightBackground,
-                          color: pathHighlightText,
-                        },
-                      ]}
-                    >
-                      {segment.text}
-                    </Text>
-                  ) : (
-                    <Text key={index}>{segment.text}</Text>
-                  ),
-                )}
-              </Text>
-            ) : (
-              <Text
-                style={[
-                  styles.textInputOverlayText,
-                  styles.textInputPlaceholder,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                Send a message...
-              </Text>
-            )}
-          </View>
-        </View>
-        <Pressable
-          disabled={!trimmedInput || isSending || !activeProject}
-          onPress={() => void handleSend()}
-          style={[
-            styles.sendButton,
-            {
-              backgroundColor: theme.colors.primary,
-              opacity: !trimmedInput || isSending || !activeProject ? 0.7 : 1,
-            },
-          ]}
-        >
-          {isSending ? (
-            <ActivityIndicator size={18} color={theme.colors.onPrimary} />
-          ) : (
-            <MaterialCommunityIcons
-              name="send"
-              size={20}
-              color={theme.colors.onPrimary}
-            />
-          )}
-        </Pressable>
-      </View>
-    </View>
   );
 
   return (
@@ -1187,6 +1080,31 @@ export default function ChatScreen() {
               color={theme.colors.onSurface}
             />
           </Pressable>
+          <View
+            style={[
+              styles.buttonGroupDivider,
+              { backgroundColor: borderColor },
+            ]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open Git drawer"
+            onPress={() => setShowGitDrawer(true)}
+            style={[
+              styles.gitButton,
+              {
+                backgroundColor: theme.dark
+                  ? "rgba(17, 24, 39, 0.92)"
+                  : "rgba(255, 255, 255, 0.96)",
+              },
+            ]}
+          >
+            <MaterialCommunityIcons
+              name="source-branch"
+              size={18}
+              color={theme.colors.onSurface}
+            />
+          </Pressable>
         </View>
       </View>
 
@@ -1250,7 +1168,25 @@ export default function ChatScreen() {
             />
           )}
         </View>
-        {inputBar}
+        <ChatComposer
+          activeProject={Boolean(activeProject)}
+          borderColor={borderColor}
+          fileSuggestions={fileSuggestions}
+          fileSuggestionsLoading={fileSuggestionsLoading}
+          inputHeight={inputHeight}
+          inputSelection={inputSelection}
+          inputText={inputText}
+          isSending={isSending}
+          mentionQuery={activeMention?.query ?? ""}
+          metaColor={metaColor}
+          onChangeText={setInputText}
+          onInputHeightChange={setInputHeight}
+          onSelectionChange={handleInputSelectionChange}
+          onSelectFileSuggestion={handleSelectFileSuggestion}
+          onSend={() => void handleSend()}
+          showMentionSuggestions={showMentionSuggestions}
+          trimmedInput={trimmedInput}
+        />
       </KeyboardAvoidingView>
 
       <Modal
@@ -1461,6 +1397,54 @@ export default function ChatScreen() {
           }
         }}
       />
+
+      {showGitDrawer ? (
+        <>
+          <Pressable
+            style={styles.gitBackdrop}
+            onPress={() => setShowGitDrawer(false)}
+          />
+          <View
+            style={[
+              styles.gitDrawer,
+              {
+                backgroundColor: sheetBg,
+                borderLeftWidth: 1,
+                borderColor,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.gitDrawerHeader,
+                { borderBottomColor: borderColor },
+              ]}
+            >
+              <Text variant="titleLarge" style={styles.gitDrawerTitle}>
+                Git
+              </Text>
+              <Pressable
+                onPress={() => setShowGitDrawer(false)}
+                style={[styles.closeButton, { borderColor }]}
+                accessibilityRole="button"
+                accessibilityLabel="Close Git drawer"
+              >
+                <MaterialCommunityIcons
+                  name="close"
+                  size={20}
+                  color={theme.colors.onSurface}
+                />
+              </Pressable>
+            </View>
+            <GitDrawerContent
+              activeProject={activeProject}
+              borderColor={borderColor}
+              metaColor={metaColor}
+              theme={theme}
+            />
+          </View>
+        </>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1626,92 +1610,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 12,
   },
-  inputContainer: {
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: COMPOSER_TOP_PADDING,
-    borderTopWidth: 1,
-  },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 12,
-  },
-  textInputWrap: {
-    flex: 1,
-    position: "relative",
-  },
-  textInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 16,
-    textAlignVertical: "top",
-  },
-  textInputOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    justifyContent: "center",
-  },
-  textInputOverlayText: {
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  textInputPlaceholder: {
-    opacity: 0.7,
-  },
-  pathHighlight: {
-    borderRadius: 6,
-    overflow: "hidden",
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  mentionPanel: {
-    borderWidth: 1,
-    borderRadius: 14,
-    maxHeight: 220,
-    overflow: "hidden",
-  },
-  mentionPanelTitle: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 6,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  },
-  mentionResults: {
-    maxHeight: 180,
-  },
-  mentionResultsContent: {
-    paddingBottom: 8,
-  },
-  mentionItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  mentionItemContent: {
-    flex: 1,
-  },
-  mentionEmptyState: {
-    paddingHorizontal: 12,
-    paddingVertical: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   typingIndicator: {
     flexDirection: "row",
     alignItems: "center",
@@ -1781,5 +1679,74 @@ const styles = StyleSheet.create({
   sheetEmpty: {
     padding: 32,
     alignItems: "center",
+  },
+  gitButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    height: 40,
+    width: 40,
+  },
+  gitBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    zIndex: 100,
+  },
+  gitDrawer: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 300,
+    zIndex: 101,
+    shadowColor: "#000",
+    shadowOffset: { width: -2, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  gitDrawerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+  },
+  gitDrawerTitle: {
+    fontWeight: "700",
+    flex: 1,
+  },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gitDrawerContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  gitFileList: {
+    flex: 1,
+  },
+  gitFileListContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  gitFileItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  gitFileInfo: {
+    flex: 1,
   },
 });

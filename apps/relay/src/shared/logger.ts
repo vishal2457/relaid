@@ -42,3 +42,12 @@ export const logger = winston.createLogger({
     }),
   ],
 });
+
+export const stream = {
+  write: (message: string) => {
+    const trimmed = message.trim();
+    if (trimmed) {
+      logger.info(trimmed);
+    }
+  },
+};

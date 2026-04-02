@@ -34,10 +34,20 @@ instance.interceptors.response.use(
     if (error.response?.status === 401) {
       console.error("Unauthorized: Redirecting to login...");
     }
+
+    const status = error.response?.status;
+    const data = error.response?.data;
     const message =
-      error.response?.data?.error ||
-      error.response?.data?.message ||
-      "An error occurred";
+      data?.error || data?.message || error.message || "An error occurred";
+
+    console.error("API Error:", {
+      url: error.config?.url,
+      status,
+      data,
+      message,
+      error: error.message,
+    });
+
     if (Platform.OS === "android") {
       ToastAndroid.show(message, ToastAndroid.SHORT);
     }

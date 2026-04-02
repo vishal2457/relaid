@@ -5,6 +5,7 @@ import express, {
   NextFunction,
 } from "express";
 import * as fs from "fs";
+import morgan from "morgan";
 import * as path from "path";
 import {
   createAgentRouter,
@@ -19,6 +20,7 @@ import {
   createTelemetryRouter,
 } from "./routes";
 import { error, StatusCodes } from "./shared/api-response";
+import { stream } from "./shared/logger";
 import { opencodeCatalogService } from "./services/opencode-catalog-service";
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
@@ -29,6 +31,7 @@ export function createServer(): express.Application {
   const webBuildPath = path.join(__dirname, "..", "dist", "web");
 
   app.use(cors());
+  app.use(morgan("combined", { stream }));
   app.use(express.json());
 
   function requireSecret(
@@ -60,7 +63,6 @@ export function createServer(): express.Application {
   app.use("/api/telemetry", createTelemetryRouter());
 
   console.log(opencodeCatalogService.listProviders());
-
 
   if (fs.existsSync(webBuildPath)) {
     app.use("/web", express.static(webBuildPath));
