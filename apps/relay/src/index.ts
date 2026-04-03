@@ -14,7 +14,7 @@ import { sessionsRouter } from "./routes/sessions";
 import { messagesRouter } from "./routes/messages";
 import { logger, stream } from "./shared/logger";
 import { getDb } from "./db";
-import { localServers } from "./db/schema";
+import { expoPushTokens, localServers } from "./db/schema";
 
 dotenv.config();
 
@@ -89,7 +89,35 @@ async function cleanupStaleConnections() {
   }
 }
 
+async function ensurePushTokensTable() {
+  try {
+    const db = getDb();
+    await db.select({ id: expoPushTokens.id }).from(expoPushTokens).limit(1);
+    logger.info("Push tokens table exists");
+  } catch {
+    try {
+      const db = getDb();
+      const sqlite = db.$client;
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS expo_push_tokens (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id),
+          token TEXT NOT NULL,
+          platform TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+      logger.info("Created expo_push_tokens table");
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to create push tokens table", { error: errMsg });
+    }
+  }
+}
+
 cleanupStaleConnections();
+ensurePushTokensTable();
 
 httpServer.listen(PORT, HOST, () => {
   logger.info(`Chat server started`, {

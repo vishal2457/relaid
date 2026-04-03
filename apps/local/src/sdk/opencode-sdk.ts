@@ -1063,7 +1063,11 @@ class OpencodeSdk extends BaseCodingSdk {
 
           // Fall back to fetching full message content only when direct deltas
           // are not available from the SDK event stream.
-          if (!sawPartDelta && !fetchThrottleTimer && latestAssistantMessageId) {
+          if (
+            !sawPartDelta &&
+            !fetchThrottleTimer &&
+            latestAssistantMessageId
+          ) {
             fetchThrottleTimer = setTimeout(async () => {
               fetchThrottleTimer = null;
               await fetchAndStreamMessage();
@@ -2257,11 +2261,14 @@ class OpencodeSdk extends BaseCodingSdk {
         throw new Error(this.formatUnknownError(result.error));
       }
 
-      if (!Array.isArray(result.data)) {
+      const data = result.data as { all?: unknown } | undefined;
+      const providersArray = data?.all;
+
+      if (!Array.isArray(providersArray)) {
         return [];
       }
 
-      return (result.data as OpencodeProviderRecord[]).map((provider) => ({
+      return (providersArray as OpencodeProviderRecord[]).map((provider) => ({
         id: provider.id,
         name: provider.name,
         models: Array.isArray(provider.models)

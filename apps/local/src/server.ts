@@ -21,7 +21,6 @@ import {
 } from "./routes";
 import { error, StatusCodes } from "./shared/api-response";
 import { stream } from "./shared/logger";
-import { opencodeCatalogService } from "./services/opencode-catalog-service";
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
 
@@ -49,7 +48,7 @@ export function createServer(): express.Application {
       return;
     }
     next();
-  }
+  }  
 
   app.use("/health", createHealthRouter());
   app.use("/api/logs", createLogsRouter());
@@ -61,8 +60,6 @@ export function createServer(): express.Application {
   app.use("/api/cron-jobs", createCronJobsRouter());
   app.use("/api/jobs", createJobsRouter());
   app.use("/api/telemetry", createTelemetryRouter());
-
-  console.log(opencodeCatalogService.listProviders());
 
   if (fs.existsSync(webBuildPath)) {
     app.use("/web", express.static(webBuildPath));

@@ -7,13 +7,18 @@ import { logger } from "../shared/logger";
 
 const router: Router = Router();
 
-type GitStagedFile = {
+type GitFileStatus = {
   path: string;
-  status: "added" | "modified" | "deleted" | "renamed";
+  status: string;
 };
 
 type GitStagedFilesResponse = {
-  files: GitStagedFile[];
+  staged: GitFileStatus[];
+  unstaged: GitFileStatus[];
+};
+
+type GitStageFilesResponse = {
+  success: boolean;
   error?: string;
 };
 
@@ -38,8 +43,6 @@ router.get("/:projectId/staged", async (req: Request, res: Response) => {
     const { projectId } = req.params;
     const serverId = req.headers["x-server-id"] as string | undefined;
 
-    logger.info("Git staged files request", { userId, projectId, serverId });
-
     if (!userId) {
       res.status(401).json({ error: "x-user-id header is required" });
       return;
@@ -58,22 +61,90 @@ router.get("/:projectId/staged", async (req: Request, res: Response) => {
       serverId,
     );
 
-    logger.info("Git staged files response received", {
-      requestId: result.requestId,
-      serverId: result.serverId,
-      response: result.response,
+    res.json({
+      staged: result.response.staged || [],
+      unstaged: result.response.unstaged || [],
     });
-
-    res.json({ files: result.response.files || [] });
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error("Failed to get staged files", {
-      error: errMsg,
-      stack: error instanceof Error ? error.stack : undefined,
-      userId: req.headers["x-user-id"],
-      projectId: req.params.projectId,
+    handleRouteError(res, "Failed to get file status", error);
+  }
+});
+
+router.post("/:projectId/stage", async (req: Request, res: Response) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    const { projectId } = req.params;
+    const serverId = req.headers["x-server-id"] as string | undefined;
+    const { files } = req.body as { files: string[] };
+
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      res.status(400).json({ error: "files array is required" });
+      return;
+    }
+
+    const result = await requestConnectedServer<GitStageFilesResponse>(
+      userId,
+      "git_stage_files_request",
+      "git_stage_files_response",
+      { projectId, files },
+      serverId,
+    );
+
+    res.json({
+      success: result.response.success,
+      error: result.response.error,
     });
-    handleRouteError(res, "Failed to get staged files", error);
+  } catch (error) {
+    handleRouteError(res, "Failed to stage files", error);
+  }
+});
+
+router.post("/:projectId/unstage", async (req: Request, res: Response) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    const { projectId } = req.params;
+    const serverId = req.headers["x-server-id"] as string | undefined;
+    const { files } = req.body as { files: string[] };
+
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      res.status(400).json({ error: "files array is required" });
+      return;
+    }
+
+    const result = await requestConnectedServer<GitStageFilesResponse>(
+      userId,
+      "git_unstage_files_request",
+      "git_unstage_files_response",
+      { projectId, files },
+      serverId,
+    );
+
+    res.json({
+      success: result.response.success,
+      error: result.response.error,
+    });
+  } catch (error) {
+    handleRouteError(res, "Failed to unstage files", error);
   }
 });
 

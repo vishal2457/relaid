@@ -425,9 +425,7 @@ class OpencodeCatalogService {
   }
 
   async listProviders(): Promise<OpencodeProviderSummary[]> {
-    const providers = await this.sdk.listProviders();
-    console.log(providers, "providers");
-    
+    const providers = await this.sdk.listProviders();    
     return providers.map((provider) => ({
       id: provider.id,
       name: provider.name,

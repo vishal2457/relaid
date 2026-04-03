@@ -11,10 +11,7 @@ import {
 } from "./services/open-code-runner";
 import { opencodeCatalogService } from "./services/opencode-catalog-service";
 import { logger } from "./shared/logger";
-import type {
-  MessagePayload,
-  SessionStreamChunkPayload
-} from "./types";
+import type { MessagePayload, SessionStreamChunkPayload } from "./types";
 
 const PORT = parseInt(process.env.PORT || "0", 10);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -225,9 +222,18 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("uncaughtException", (err) => {
+    console.log(err, "err");
+
     logger.error("Uncaught exception", { error: err });
   });
   process.on("unhandledRejection", (reason) => {
+    if (
+      reason != null &&
+      typeof reason === "object" &&
+      Object.keys(reason as object).length === 0
+    ) {
+      return;
+    }
     logger.error("Unhandled rejection", { reason });
   });
 }

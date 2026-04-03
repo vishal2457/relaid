@@ -1,6 +1,12 @@
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
-import { AppState, AppStateStatus } from "react-native";
+import { AppState, AppStateStatus, Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import { getChatSocket } from "./socket/chat";
+
+const EXPO_PUSH_TOKEN_KEY = "expo_push_token";
+const EXPO_PUSH_TOKEN_REGISTERED_KEY = "expo_push_token_registered";
 
 const isNotificationsEnabled =
   process.env.EXPO_PUBLIC_NOTIFICATIONS_ENABLED !== "false" && __DEV__ !== true;
@@ -52,6 +58,60 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   }
 }
 
+export async function getExpoPushToken(): Promise<string | null> {
+  try {
+    const cached = await AsyncStorage.getItem(EXPO_PUSH_TOKEN_KEY);
+    if (cached) {
+      return cached;
+    }
+
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+
+    const { data: tokenData } = await Notifications.getExpoPushTokenAsync({
+      projectId,
+    });
+
+    if (tokenData) {
+      await AsyncStorage.setItem(EXPO_PUSH_TOKEN_KEY, tokenData);
+      return tokenData;
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Failed to get Expo push token:", error);
+    return null;
+  }
+}
+
+export async function registerPushTokenWithServer(): Promise<boolean> {
+  try {
+    const alreadyRegistered = await AsyncStorage.getItem(
+      EXPO_PUSH_TOKEN_REGISTERED_KEY,
+    );
+    const token = await getExpoPushToken();
+
+    if (!token) {
+      return false;
+    }
+
+    const socket = getChatSocket();
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    socket.emit("register_push_token", {
+      token,
+      platform: Platform.OS,
+    });
+
+    await AsyncStorage.setItem(EXPO_PUSH_TOKEN_REGISTERED_KEY, "true");
+    return true;
+  } catch (error) {
+    console.error("Failed to register push token with server:", error);
+    return false;
+  }
+}
+
 export async function showNewMessageNotification(
   title: string,
   body: string,
@@ -77,3 +137,10 @@ export async function showNewMessageNotification(
     // silent fail
   }
 }
+
+Notifications.addNotificationResponseReceivedListener((response) => {
+  const data = response.notification.request.content.data;
+  if (data?.type === "request_completed") {
+    // Navigate or refresh handled by the app
+  }
+});

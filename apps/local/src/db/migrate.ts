@@ -1,5 +1,4 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -17,31 +16,6 @@ function getMigrationsFolder(): string {
   return path.join(__dirname, "..", "..", "drizzle");
 }
 
-function ensureMigrationsTable(sqlite: Database.Database): void {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      hash TEXT NOT NULL UNIQUE,
-      created_at INTEGER NOT NULL
-    )
-  `);
-}
-
-function getAppliedMigrations(sqlite: Database.Database): string[] {
-  const stmt = sqlite.prepare(
-    `SELECT hash FROM ${MIGRATIONS_TABLE} ORDER BY created_at`,
-  );
-  const rows = stmt.all() as { hash: string }[];
-  return rows.map((row) => row.hash);
-}
-
-function markMigrationApplied(sqlite: Database.Database, hash: string): void {
-  const stmt = sqlite.prepare(
-    `INSERT INTO ${MIGRATIONS_TABLE} (hash, created_at) VALUES (?, ?)`,
-  );
-  stmt.run(hash, Date.now());
-}
-
 export async function runMigrations(): Promise<void> {
   const dbPath = getDbPath();
   const migrationsFolder = getMigrationsFolder();
@@ -51,10 +25,22 @@ export async function runMigrations(): Promise<void> {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  const sqlite = new Database(dbPath);
-  ensureMigrationsTable(sqlite);
+  const client = createClient({ url: `file:${dbPath}` });
 
-  const appliedMigrations = getAppliedMigrations(sqlite);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hash TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  const appliedResult = await client.execute(
+    `SELECT hash FROM ${MIGRATIONS_TABLE} ORDER BY created_at`,
+  );
+  const appliedMigrations = appliedResult.rows.map(
+    (row) => (row as unknown as { hash: string }).hash,
+  );
 
   const files = fs
     .readdirSync(migrationsFolder)
@@ -70,17 +56,18 @@ export async function runMigrations(): Promise<void> {
       logger.info(`Running migration: ${file}`);
 
       try {
-        sqlite.exec(sql);
-        markMigrationApplied(sqlite, hash);
+        await client.executeMultiple(sql);
+        await client.execute({
+          sql: `INSERT INTO ${MIGRATIONS_TABLE} (hash, created_at) VALUES (?, ?)`,
+          args: [hash, Date.now()],
+        });
         logger.info(`Migration completed: ${file}`);
       } catch (error) {
         logger.error(`Migration failed: ${file}`, { error });
-        sqlite.close();
         throw error;
       }
     }
   }
 
-  sqlite.close();
   logger.info("All migrations completed");
 }

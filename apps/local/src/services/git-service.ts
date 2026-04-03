@@ -198,31 +198,87 @@ export class GitService {
     GitResult<
       Array<{
         path: string;
-        status: "added" | "modified" | "deleted" | "renamed";
+        status: string;
       }>
     >
   > {
     try {
       const status = await this.git.status();
-      const files = status.files
-        .filter((f) => f.index && f.index !== " " && f.index !== "?")
-        .map((f) => {
-          let fileStatus: "added" | "modified" | "deleted" | "renamed" =
-            "modified";
-          if (f.index === "A") {
-            fileStatus = "added";
-          } else if (f.index === "M") {
-            fileStatus = "modified";
-          } else if (f.index === "D") {
-            fileStatus = "deleted";
-          } else if (f.index === "R") {
-            fileStatus = "renamed";
-          }
-          return { path: f.path, status: fileStatus };
-        });
+      const files: Array<{ path: string; status: string }> = [];
+
+      status.modified.forEach((f) => {
+        files.push({ path: f, status: "modified" });
+      });
+      status.deleted.forEach((f) => {
+        files.push({ path: f, status: "deleted" });
+      });
+      status.not_added.forEach((f) => {
+        files.push({ path: f, status: "added" });
+      });
+      status.conflicted.forEach((f) => {
+        files.push({ path: f, status: "conflicted" });
+      });
+      status.renamed.forEach((f) => {
+        files.push({ path: f.to, status: "renamed" });
+      });
+      status.created.forEach((f) => {
+        files.push({ path: f, status: "created" });
+      });
+      status.staged.forEach((f) => {
+        files.push({ path: f, status: "staged" });
+      });
+
       return { success: true, data: files };
     } catch (error) {
       return this.handleError("getStagedFilesWithStatus", error);
+    }
+  }
+
+  async getFileStatusLists(): Promise<
+    GitResult<{
+      staged: Array<{ path: string; status: string }>;
+      unstaged: Array<{ path: string; status: string }>;
+    }>
+  > {
+    try {
+      const status = await this.git.status();
+      const staged: Array<{ path: string; status: string }> = [];
+      const unstaged: Array<{ path: string; status: string }> = [];
+
+      const stagedSet = new Set(status.staged);
+
+      status.staged.forEach((f) => {
+        staged.push({ path: f, status: "staged" });
+      });
+
+      status.modified.forEach((f) => {
+        if (!stagedSet.has(f)) {
+          unstaged.push({ path: f, status: "modified" });
+        }
+      });
+      status.deleted.forEach((f) => {
+        if (!stagedSet.has(f)) {
+          unstaged.push({ path: f, status: "deleted" });
+        }
+      });
+      status.not_added.forEach((f) => {
+        unstaged.push({ path: f, status: "added" });
+      });
+      status.conflicted.forEach((f) => {
+        unstaged.push({ path: f, status: "conflicted" });
+      });
+      status.renamed.forEach((f) => {
+        if (!stagedSet.has(f.to)) {
+          unstaged.push({ path: f.to, status: "renamed" });
+        }
+      });
+      status.created.forEach((f) => {
+        unstaged.push({ path: f, status: "created" });
+      });
+
+      return { success: true, data: { staged, unstaged } };
+    } catch (error) {
+      return this.handleError("getFileStatusLists", error);
     }
   }
 
@@ -278,6 +334,35 @@ export class GitService {
       return { success: true, data: `Unstaged ${files.length} file(s)` };
     } catch (error) {
       return this.handleError("unstageFiles", error);
+    }
+  }
+
+  async discardChanges(files: string[]): Promise<GitResult<string>> {
+    if (files.length === 0) {
+      return { success: false, error: "No files specified" };
+    }
+    try {
+      await this.git.checkout(["--", ...files]);
+      logger.info("Discarded changes", { files, cwd: this.cwd });
+      return {
+        success: true,
+        data: `Discarded changes in ${files.length} file(s)`,
+      };
+    } catch (error) {
+      return this.handleError("discardChanges", error);
+    }
+  }
+
+  async getFileContent(filePath: string): Promise<GitResult<string>> {
+    try {
+      const content = await this.git.show([`HEAD:${filePath}`]);
+      return { success: true, data: content };
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errMsg.includes("does not exist")) {
+        return { success: false, error: "File does not exist in HEAD" };
+      }
+      return this.handleError("getFileContent", error);
     }
   }
 

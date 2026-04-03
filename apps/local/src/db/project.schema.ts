@@ -8,8 +8,12 @@ export const projects = sqliteTable("projects", {
 
   linearProjectId: text("linear_project_id"),
   linearProjectName: text("linear_project_name"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
 });
 
 export type Project = typeof projects.$inferSelect;

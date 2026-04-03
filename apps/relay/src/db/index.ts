@@ -1,12 +1,11 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { createClient } from "@libsql/client";
+import { drizzle } from "drizzle-orm/libsql";
 import path from "path";
 import fs from "fs";
 import os from "os";
 import * as schema from "./schema";
 
 let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
-let sqlite: Database.Database | null = null;
 
 export function getDb() {
   if (db) {
@@ -22,18 +21,10 @@ export function getDb() {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  sqlite = new Database(dbPath);
-  db = drizzle(sqlite, { schema });
+  const client = createClient({ url: `file:${dbPath}` });
+  db = drizzle(client, { schema });
 
   return db;
-}
-
-export function getSqlite(): Database.Database | null {
-  if (sqlite) {
-    return sqlite;
-  }
-  getDb();
-  return sqlite;
 }
 
 export * from "./schema";

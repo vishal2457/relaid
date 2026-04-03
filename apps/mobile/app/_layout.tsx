@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { PaperProvider } from "react-native-paper";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -8,9 +9,20 @@ import { AppThemeProvider, useAppTheme } from "@/components/ThemeContext";
 import { ServerUrlProvider } from "@/components/ServerUrlContext";
 import { defaultTheme, THEMES } from "@/constants/themes";
 import { queryClient } from "@/lib/query-client";
-import { requestNotificationPermissions } from "@/lib/notifications";
+import {
+  requestNotificationPermissions,
+  registerPushTokenWithServer,
+} from "@/lib/notifications";
 
 requestNotificationPermissions();
+
+function PushTokenRegistration() {
+  useEffect(() => {
+    void registerPushTokenWithServer();
+  }, []);
+
+  return null;
+}
 
 export const unstable_settings = {
   anchor: "index",
@@ -44,6 +56,7 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <ServerUrlProvider>
         <AppThemeProvider>
+          <PushTokenRegistration />
           <RootLayoutInner />
         </AppThemeProvider>
       </ServerUrlProvider>

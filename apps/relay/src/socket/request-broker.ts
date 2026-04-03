@@ -1,7 +1,8 @@
 import { Socket } from "socket.io";
 import { logger } from "../shared/logger";
 
-const REQUEST_TIMEOUT_MS = Number(process.env.SOCKET_REQUEST_TIMEOUT_MS) || 15000;
+const REQUEST_TIMEOUT_MS =
+  Number(process.env.SOCKET_REQUEST_TIMEOUT_MS) || 30000;
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -13,7 +14,10 @@ type PendingRequest = {
 const localServerSockets = new Map<string, Socket>();
 const pendingRequests = new Map<string, PendingRequest>();
 
-function getPendingRequestKey(responseEvent: string, requestId: string): string {
+function getPendingRequestKey(
+  responseEvent: string,
+  requestId: string,
+): string {
   return `${responseEvent}:${requestId}`;
 }
 
@@ -131,9 +135,11 @@ export function refreshPendingRequest(
   return true;
 }
 
-export function rejectPendingRequest(
-  payload: { requestId?: string; code?: string; message?: string },
-): boolean {
+export function rejectPendingRequest(payload: {
+  requestId?: string;
+  code?: string;
+  message?: string;
+}): boolean {
   if (!payload.requestId) {
     return false;
   }
@@ -148,7 +154,9 @@ export function rejectPendingRequest(
     pendingRequests.delete(pendingKey);
     clearTimeout(pendingRequest.timeout);
     pendingRequest.reject(
-      new Error(payload.message || payload.code || "Local server request failed"),
+      new Error(
+        payload.message || payload.code || "Local server request failed",
+      ),
     );
     rejected = true;
   }

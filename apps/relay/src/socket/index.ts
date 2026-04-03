@@ -2,7 +2,7 @@ import { Server as HttpServer } from "http";
 import { and, eq } from "drizzle-orm";
 import { Server, Socket } from "socket.io";
 import { getDb } from "../db";
-import { localServers, users } from "../db/schema";
+import { expoPushTokens, localServers, users } from "../db/schema";
 import {
   getConnectedServerForUser,
   getConnectedServersForUser,
@@ -11,6 +11,10 @@ import {
   requestUntilMatch,
   RouteError,
 } from "../services/local-server-proxy";
+import {
+  sendPushNotification,
+  savePushToken,
+} from "../services/push-notification";
 import { logger } from "../shared/logger";
 import type {
   ProjectPayload,
@@ -203,6 +207,33 @@ async function handleLocalServerConnection(
       }
       resolvePendingRequest(eventName, payload);
       io.to(`user:${userId}`).emit(eventName, payload);
+
+      if (eventName === "session_prompt_response") {
+        const responsePayload = payload as SessionPromptResponseEvent;
+        if (responsePayload.success && responsePayload.messages?.length) {
+          const lastMessage =
+            responsePayload.messages[responsePayload.messages.length - 1];
+          const preview = lastMessage.content.slice(0, 100);
+          void sendPushNotification(userId, "Request Completed", preview, {
+            type: "request_completed",
+            sessionId: responsePayload.sessionId,
+            projectId: responsePayload.projectId,
+            success: responsePayload.success,
+          });
+        } else if (!responsePayload.success) {
+          void sendPushNotification(
+            userId,
+            "Request Failed",
+            responsePayload.error || "The request failed with an error",
+            {
+              type: "request_completed",
+              sessionId: responsePayload.sessionId,
+              projectId: responsePayload.projectId,
+              success: responsePayload.success,
+            },
+          );
+        }
+      }
     });
   };
 
@@ -227,6 +258,9 @@ async function handleLocalServerConnection(
   pipeResponse("local_servers_list_response");
   pipeResponse("local_server_register_response");
   pipeResponse("providers_list_response");
+  pipeResponse("git_staged_files_response");
+  pipeResponse("git_stage_files_response");
+  pipeResponse("git_unstage_files_response");
 
   socket.on(
     "error_response",
@@ -239,6 +273,22 @@ async function handleLocalServerConnection(
 
 function handleMobileConnection(socket: Socket, userId: string): void {
   logger.info("Mobile client registered", { userId });
+
+  socket.on(
+    "register_push_token",
+    async (data: { token: string; platform: string }) => {
+      try {
+        await savePushToken(userId, data.token, data.platform);
+        logger.info("Push token registered", {
+          userId,
+          platform: data.platform,
+        });
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error("Failed to save push token", { userId, error: errMsg });
+      }
+    },
+  );
 
   socket.on("run_request", async (data: RunRequestEvent) => {
     try {

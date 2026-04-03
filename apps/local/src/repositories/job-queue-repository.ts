@@ -1,4 +1,3 @@
-import Database from "better-sqlite3";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { jobs, type Job, type NewJob } from "../db/job.schema";
@@ -36,20 +35,18 @@ export class JobQueueRepository {
     return this.db.select().from(jobs).where(eq(jobs.id, id)).get();
   }
 
-  claimJobAtomic(jobId: string, workerId: string): JobClaimResult {
-    const sqlite = getDb().$client as Database.Database;
+  async claimJobAtomic(
+    jobId: string,
+    workerId: string,
+  ): Promise<JobClaimResult> {
+    const client = getDb().$client;
 
-    const updateResult = sqlite
-      .prepare(
-        `
-      UPDATE jobs 
-      SET status = 'running', worker_id = ?, started_at = ?
-      WHERE id = ? AND status = 'pending'
-    `,
-      )
-      .run(workerId, Date.now(), jobId);
+    const result = await client.execute({
+      sql: `UPDATE jobs SET status = 'running', worker_id = ?, started_at = ? WHERE id = ? AND status = 'pending'`,
+      args: [workerId, Date.now(), jobId],
+    });
 
-    if (updateResult.changes === 0) {
+    if (result.rowsAffected === 0) {
       return { success: false };
     }
 
@@ -61,13 +58,13 @@ export class JobQueueRepository {
     return { success: true, job: claimedJob };
   }
 
-  claimNextPendingJob(workerId: string): JobClaimResult {
+  async claimNextPendingJob(workerId: string): Promise<JobClaimResult> {
     const pendingJobs = this.getPendingJobs(1);
     if (pendingJobs.length === 0) {
       return { success: false };
     }
 
-    return this.claimJobAtomic(pendingJobs[0].id, workerId);
+    return await this.claimJobAtomic(pendingJobs[0].id, workerId);
   }
 
   markJobCompleted(

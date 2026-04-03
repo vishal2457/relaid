@@ -18,9 +18,9 @@ async function buildAll() {
       js: "#!/usr/bin/env node",
     },
     external: [
-      "better-sqlite3",
+      "@libsql/client",
       "drizzle-orm",
-      "drizzle-orm/better-sqlite3",
+      "drizzle-orm/libsql",
       "keytar",
       "extract-zip",
     ],
@@ -37,12 +37,7 @@ async function buildAll() {
     banner: {
       js: "#!/usr/bin/env node",
     },
-    external: [
-      "better-sqlite3",
-      "drizzle-orm",
-      "drizzle-orm/better-sqlite3",
-      "keytar",
-    ],
+    external: ["@libsql/client", "drizzle-orm", "drizzle-orm/libsql", "keytar"],
   });
 
   console.log("Build complete!");

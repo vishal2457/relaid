@@ -300,6 +300,20 @@ export class ChatServerClient {
         void this.handleGitStagedFilesRequest(payload);
       },
     );
+
+    this.socket.on(
+      "git_stage_files_request",
+      (payload: { requestId: string; projectId: string; files: string[] }) => {
+        void this.handleGitStageFilesRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "git_unstage_files_request",
+      (payload: { requestId: string; projectId: string; files: string[] }) => {
+        void this.handleGitUnstageFilesRequest(payload);
+      },
+    );
   }
 
   private scheduleReconnect(): void {
@@ -324,7 +338,6 @@ export class ChatServerClient {
       );
       return;
     }
-
     this.socket.emit(event, payload);
   }
 
@@ -772,9 +785,52 @@ export class ChatServerClient {
     requestId: string;
     projectId: string;
   }): Promise<void> {
-    logger.info("Git staged files request received", {
+    try {
+      const project = await opencodeCatalogService.getProject(
+        payload.projectId,
+      );
+
+      if (!project) {
+        this.emit("git_staged_files_response", {
+          requestId: payload.requestId,
+          staged: [],
+          unstaged: [],
+        });
+        return;
+      }
+
+      const gitService = new GitService(project.folder);
+      const result = await gitService.getFileStatusLists();
+
+      this.emit("git_staged_files_response", {
+        requestId: payload.requestId,
+        staged: result.data?.staged ?? [],
+        unstaged: result.data?.unstaged ?? [],
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to get file status", {
+        error: errMsg,
+        projectId: payload.projectId,
+        requestId: payload.requestId,
+      });
+      this.emit("git_staged_files_response", {
+        requestId: payload.requestId,
+        staged: [],
+        unstaged: [],
+      });
+    }
+  }
+
+  private async handleGitStageFilesRequest(payload: {
+    requestId: string;
+    projectId: string;
+    files: string[];
+  }): Promise<void> {
+    logger.info("Git stage files request received", {
       requestId: payload.requestId,
       projectId: payload.projectId,
+      fileCount: payload.files.length,
     });
 
     try {
@@ -782,46 +838,77 @@ export class ChatServerClient {
         payload.projectId,
       );
 
-      logger.info("Git staged files - project lookup", {
-        requestId: payload.requestId,
-        projectId: payload.projectId,
-        projectFound: Boolean(project),
-        projectFolder: project?.folder,
-      });
-
       if (!project) {
-        this.emit("git_staged_files_response", {
+        this.emit("git_stage_files_response", {
           requestId: payload.requestId,
-          files: [],
+          success: false,
+          error: "Project not found",
         });
         return;
       }
 
       const gitService = new GitService(project.folder);
-      const result = await gitService.getStagedFilesWithStatus();
+      const result = await gitService.addFiles(payload.files);
 
-      logger.info("Git staged files - result", {
+      this.emit("git_stage_files_response", {
         requestId: payload.requestId,
         success: result.success,
-        fileCount: result.data?.length ?? 0,
         error: result.error,
-      });
-
-      this.emit("git_staged_files_response", {
-        requestId: payload.requestId,
-        files: result.success ? result.data : [],
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      logger.error("Failed to get staged files", {
+      logger.error("Failed to stage files", {
         error: errMsg,
         stack: error instanceof Error ? error.stack : undefined,
         projectId: payload.projectId,
         requestId: payload.requestId,
       });
-      this.emit("git_staged_files_response", {
+      this.emit("git_stage_files_response", {
         requestId: payload.requestId,
-        files: [],
+        success: false,
+        error: errMsg,
+      });
+    }
+  }
+
+  private async handleGitUnstageFilesRequest(payload: {
+    requestId: string;
+    projectId: string;
+    files: string[];
+  }): Promise<void> {
+    try {
+      const project = await opencodeCatalogService.getProject(
+        payload.projectId,
+      );
+
+      if (!project) {
+        this.emit("git_unstage_files_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Project not found",
+        });
+        return;
+      }
+
+      const gitService = new GitService(project.folder);
+      const result = await gitService.unstageFiles(payload.files);
+
+      this.emit("git_unstage_files_response", {
+        requestId: payload.requestId,
+        success: result.success,
+        error: result.error,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to unstage files", {
+        error: errMsg,
+        projectId: payload.projectId,
+        requestId: payload.requestId,
+      });
+      this.emit("git_unstage_files_response", {
+        requestId: payload.requestId,
+        success: false,
+        error: errMsg,
       });
     }
   }

@@ -20,7 +20,7 @@
     "automation"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "bin": {
     "mx-bot": "dist/cli.js"
@@ -53,22 +53,23 @@
   "dependencies": {
     "@chat-adapter/discord": "^4.20.1",
     "@chat-adapter/state-memory": "^4.20.1",
+    "@libsql/client": "^0.17.2",
     "@openai/codex-sdk": "^0.114.0",
     "@opencode-ai/sdk": "^1.2.24",
     "axios": "^1.6.2",
-    "better-sqlite3": "^12.6.2",
     "cac": "^6.7.14",
     "chat": "^4.20.1",
     "cors": "^2.8.6",
     "discord.js": "^14.19.3",
     "dotenv": "^16.3.1",
-    "drizzle-orm": "^0.45.1",
+    "drizzle-orm": "^0.45.2",
     "express": "^4.18.2",
     "extract-zip": "^2.0.1",
     "fast-glob": "^3.3.3",
     "fuse.js": "^7.1.0",
     "ignore": "^7.0.5",
     "keytar": "^7.9.0",
+    "morgan": "^1.10.1",
     "p-queue": "^9.1.0",
     "simple-git": "^3.27.0",
     "socket.io-client": "^4.8.1",
@@ -77,13 +78,12 @@
     "ws": "^8.20.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
     "@types/morgan": "^1.9.10",
-    "@types/node": "^25.4.0",
+    "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
-    "drizzle-kit": "^0.31.9",
+    "drizzle-kit": "^0.31.10",
     "esbuild": "^0.20.2",
     "esbuild-register": "^3.5.0",
     "nodemon": "^3.1.0",

@@ -8,6 +8,7 @@ import {
   NativeSyntheticEvent,
   Platform,
   Pressable,
+  StatusBar,
   StyleSheet,
   TextInputSelectionChangeEventData,
   View,
@@ -23,12 +24,7 @@ import {
 } from "@/components/ChatComposer";
 import { SessionDrawer } from "@/components/SessionDrawer";
 import { Stack } from "expo-router";
-import {
-  ActivityIndicator,
-  Text,
-  useTheme,
-  type MD3Theme,
-} from "react-native-paper";
+import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -47,7 +43,6 @@ import {
 } from "@/lib/api/projects";
 import { useProviders, type Provider } from "@/lib/api/providers";
 import { sessionsKeys, useCreateSession } from "@/lib/api/sessions";
-import { useGitStagedFiles } from "@/lib/api/git";
 import { queryClient } from "@/lib/query-client";
 import { getChatSocket } from "@/lib/socket/chat";
 import {
@@ -55,6 +50,7 @@ import {
   isAppInForeground,
 } from "@/lib/notifications";
 import { AppState } from "react-native";
+import { GitDrawer } from "@/components/GitDrawer";
 
 type TextSegment = {
   type: "normal" | "bold" | "code";
@@ -153,143 +149,6 @@ const formatThinkingLabel = (seconds: number | null) => {
   }
   return "Thinking...";
 };
-
-const statusIconMap: Record<string, string> = {
-  added: "plus-circle",
-  modified: "circle-edit-outline",
-  deleted: "minus-circle",
-  renamed: "swap-horizontal",
-};
-
-const statusColorMap: Record<string, string> = {
-  added: "#22C55E",
-  modified: "#F59E0B",
-  deleted: "#EF4444",
-  renamed: "#8B5CF6",
-};
-
-function GitDrawerContent({
-  activeProject,
-  borderColor,
-  metaColor,
-  theme,
-}: {
-  activeProject: Project | null;
-  borderColor: string;
-  metaColor: string;
-  theme: MD3Theme;
-}) {
-  const {
-    data: stagedFiles,
-    isLoading,
-    error,
-  } = useGitStagedFiles(activeProject?.id ?? "", Boolean(activeProject));
-
-  if (!activeProject) {
-    return (
-      <View style={styles.gitDrawerContent}>
-        <MaterialCommunityIcons
-          name="folder-outline"
-          size={32}
-          color={metaColor}
-        />
-        <Text variant="bodyMedium" style={{ color: metaColor, marginTop: 12 }}>
-          Select a project first
-        </Text>
-      </View>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <View style={styles.gitDrawerContent}>
-        <ActivityIndicator />
-        <Text variant="bodyMedium" style={{ color: metaColor, marginTop: 12 }}>
-          Loading staged files...
-        </Text>
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={styles.gitDrawerContent}>
-        <MaterialCommunityIcons
-          name="alert-circle-outline"
-          size={32}
-          color={theme.colors.error}
-        />
-        <Text
-          variant="bodyMedium"
-          style={{ color: theme.colors.onSurfaceVariant, marginTop: 12 }}
-        >
-          Failed to load staged files
-        </Text>
-      </View>
-    );
-  }
-
-  if (!stagedFiles || stagedFiles.length === 0) {
-    return (
-      <View style={styles.gitDrawerContent}>
-        <MaterialCommunityIcons
-          name="source-branch-check"
-          size={32}
-          color={metaColor}
-        />
-        <Text variant="bodyMedium" style={{ color: metaColor, marginTop: 12 }}>
-          No staged files
-        </Text>
-        <Text variant="bodySmall" style={{ color: metaColor, marginTop: 4 }}>
-          Stage changes to see them here
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <FlatList
-      data={stagedFiles}
-      keyExtractor={(item) => item.path}
-      style={styles.gitFileList}
-      contentContainerStyle={styles.gitFileListContent}
-      renderItem={({ item }) => (
-        <View style={[styles.gitFileItem, { borderBottomColor: borderColor }]}>
-          <MaterialCommunityIcons
-            name={(statusIconMap[item.status] ?? "file-outline") as any}
-            size={18}
-            color={statusColorMap[item.status] ?? metaColor}
-          />
-          <View style={styles.gitFileInfo}>
-            <Text
-              variant="bodyMedium"
-              style={{ color: theme.colors.onSurface }}
-              numberOfLines={1}
-            >
-              {item.path.split("/").pop()}
-            </Text>
-            <Text
-              variant="bodySmall"
-              style={{ color: metaColor }}
-              numberOfLines={1}
-            >
-              {item.path}
-            </Text>
-          </View>
-          <Text
-            variant="labelSmall"
-            style={{
-              color: statusColorMap[item.status] ?? metaColor,
-              textTransform: "uppercase",
-            }}
-          >
-            {item.status}
-          </Text>
-        </View>
-      )}
-    />
-  );
-}
 
 const LAST_SELECTED_PROJECT_ID = "LAST_SELECTED_PROJECT_ID";
 
@@ -844,12 +703,14 @@ export default function ChatScreen() {
                     key={`${item.id}-${part.type}-${index}`}
                     style={styles.thinkingBlock}
                   >
-                    <Text
-                      variant="labelSmall"
-                      style={[styles.thinkingLabel, { color: metaColor }]}
-                    >
-                      {part.type}
-                    </Text>
+                    {part.type !== "reasoning" && (
+                      <Text
+                        variant="labelSmall"
+                        style={[styles.thinkingLabel, { color: metaColor }]}
+                      >
+                        {part.type}
+                      </Text>
+                    )}
                     <FormattedText
                       text={part.content}
                       baseStyle={[
@@ -927,12 +788,14 @@ export default function ChatScreen() {
                     key={`${item.id}-${part.type}-${index}`}
                     style={styles.thinkingBlock}
                   >
-                    <Text
-                      variant="labelSmall"
-                      style={[styles.thinkingLabel, { color: metaColor }]}
-                    >
-                      {part.type}
-                    </Text>
+                    {part.type !== "reasoning" && (
+                      <Text
+                        variant="labelSmall"
+                        style={[styles.thinkingLabel, { color: metaColor }]}
+                      >
+                        {part.type}
+                      </Text>
+                    )}
                     <FormattedText
                       text={part.content}
                       baseStyle={[
@@ -983,6 +846,10 @@ export default function ChatScreen() {
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
       <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar
+        barStyle={theme.dark ? "light-content" : "dark-content"}
+        backgroundColor={theme.colors.background}
+      />
 
       <View style={[styles.headerRow, { top: insets.top + 12 }]}>
         <Pressable
@@ -1398,53 +1265,14 @@ export default function ChatScreen() {
         }}
       />
 
-      {showGitDrawer ? (
-        <>
-          <Pressable
-            style={styles.gitBackdrop}
-            onPress={() => setShowGitDrawer(false)}
-          />
-          <View
-            style={[
-              styles.gitDrawer,
-              {
-                backgroundColor: sheetBg,
-                borderLeftWidth: 1,
-                borderColor,
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.gitDrawerHeader,
-                { borderBottomColor: borderColor },
-              ]}
-            >
-              <Text variant="titleLarge" style={styles.gitDrawerTitle}>
-                Git
-              </Text>
-              <Pressable
-                onPress={() => setShowGitDrawer(false)}
-                style={[styles.closeButton, { borderColor }]}
-                accessibilityRole="button"
-                accessibilityLabel="Close Git drawer"
-              >
-                <MaterialCommunityIcons
-                  name="close"
-                  size={20}
-                  color={theme.colors.onSurface}
-                />
-              </Pressable>
-            </View>
-            <GitDrawerContent
-              activeProject={activeProject}
-              borderColor={borderColor}
-              metaColor={metaColor}
-              theme={theme}
-            />
-          </View>
-        </>
-      ) : null}
+      <GitDrawer
+        visible={showGitDrawer}
+        onClose={() => setShowGitDrawer(false)}
+        activeProject={activeProject}
+        borderColor={borderColor}
+        metaColor={metaColor}
+        backgroundColor={sheetBg}
+      />
     </SafeAreaView>
   );
 }
@@ -1686,67 +1514,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     height: 40,
     width: 40,
-  },
-  gitBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    zIndex: 100,
-  },
-  gitDrawer: {
-    position: "absolute",
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 300,
-    zIndex: 101,
-    shadowColor: "#000",
-    shadowOffset: { width: -2, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  gitDrawerHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-  },
-  gitDrawerTitle: {
-    fontWeight: "700",
-    flex: 1,
-  },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  gitDrawerContent: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-  },
-  gitFileList: {
-    flex: 1,
-  },
-  gitFileListContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  gitFileItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-  },
-  gitFileInfo: {
-    flex: 1,
   },
 });
