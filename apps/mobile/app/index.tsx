@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   NativeSyntheticEvent,
+  NativeScrollEvent,
   Platform,
   Pressable,
   StatusBar,
@@ -289,6 +290,7 @@ export default function ChatScreen() {
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showGitDrawer, setShowGitDrawer] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
+  const [isNearBottom, setIsNearBottom] = React.useState(true);
 
   const createSessionMutation = useCreateSession();
   const { data: projects, isLoading: projectsLoading } = useProjects();
@@ -987,6 +989,21 @@ export default function ChatScreen() {
     [],
   );
 
+  const handleScroll = React.useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { layoutMeasurement, contentOffset, contentSize } =
+        event.nativeEvent;
+      const distanceFromBottom =
+        contentSize.height - layoutMeasurement.height - contentOffset.y;
+      setIsNearBottom(distanceFromBottom < 150);
+    },
+    [],
+  );
+
+  const scrollToBottom = React.useCallback(() => {
+    flatListRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
   const handleSelectFileSuggestion = React.useCallback(
     (match: ProjectFileMatch) => {
       if (!activeMention) {
@@ -1188,6 +1205,8 @@ export default function ChatScreen() {
               }
               keyboardShouldPersistTaps="handled"
               maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <Text
@@ -1224,6 +1243,27 @@ export default function ChatScreen() {
           trimmedInput={trimmedInput}
         />
       </KeyboardAvoidingView>
+
+      {!isNearBottom && (
+        <Pressable
+          onPress={scrollToBottom}
+          style={[
+            styles.scrollToBottomButton,
+            {
+              backgroundColor: theme.dark ? "#1E293B" : "#FFFFFF",
+              borderColor,
+              shadowColor: theme.dark ? "#000" : "#000",
+              bottom: composerHeight + 12,
+            },
+          ]}
+        >
+          <MaterialCommunityIcons
+            name="chevron-down"
+            size={20}
+            color={theme.colors.onSurface}
+          />
+        </Pressable>
+      )}
 
       <Modal
         visible={showProjectSheet}
@@ -1681,5 +1721,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     height: 40,
     width: 40,
+  },
+  scrollToBottomButton: {
+    position: "absolute",
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 20,
   },
 });

@@ -1,3 +1,6 @@
+import { createServer } from "net";
+import { resolve } from "path";
+import { existsSync, statSync } from "fs";
 import {
   BaseCodingSdk,
   CodingSdkOptions,
@@ -122,6 +125,14 @@ class OpencodeSdk extends BaseCodingSdk {
     return "allow";
   }
 
+  private resolvePermissionMode(): "ask" | "allow" | "deny" {
+    const envMode = process.env.OPENCODE_PERMISSION_MODE;
+    if (envMode === "allow" || envMode === "ask" || envMode === "deny") {
+      return envMode;
+    }
+    return this.options.permissionMode ?? "allow";
+  }
+
   private async loadSdk(): Promise<{
     createOpencode(options?: ServerOptions): Promise<{
       client: OpencodeClient;
@@ -168,9 +179,7 @@ class OpencodeSdk extends BaseCodingSdk {
       serverStartTimeoutMs,
     );
 
-    const PERMISSION_MODE =
-      this.normalizePermissionMode(process.env.OPENCODE_PERMISSION_MODE) ??
-      permissionMode;
+    const PERMISSION_MODE = this.resolvePermissionMode();
 
     const port =
       SERVER_PORT !== null
@@ -272,6 +281,52 @@ class OpencodeSdk extends BaseCodingSdk {
     this.runtimePromise = null;
   }
 
+  private async executeWithRetry(
+    executor: () => Promise<CodingSdkResult>,
+    retryCount: number,
+    start: number,
+    sessionId?: string,
+  ): Promise<CodingSdkResult> {
+    for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+      try {
+        return await executor();
+      } catch (error: unknown) {
+        const canRetry = attempt < retryCount;
+        const duration = Date.now() - start;
+        const errMsg = this.formatUnknownError(error);
+
+        logger.error("OpenCode run attempt failed", {
+          attempt: attempt + 1,
+          duration,
+          error: errMsg,
+        });
+
+        if (errMsg === "OpenCode run aborted." || !canRetry) {
+          await this.resetRuntime();
+          return {
+            success: false,
+            output: "",
+            error: errMsg,
+            exitCode: -1,
+            duration,
+            sessionId,
+          };
+        }
+
+        await this.resetRuntime();
+      }
+    }
+
+    await this.resetRuntime();
+    return {
+      success: false,
+      output: "",
+      error: "OpenCode failed unexpectedly.",
+      exitCode: -1,
+      duration: Date.now() - start,
+    };
+  }
+
   async run(
     prompt: string,
     workingDir: string,
@@ -290,12 +345,12 @@ class OpencodeSdk extends BaseCodingSdk {
       };
     }
 
-    const MAX_PROMPT_LENGTH = this.options.maxPromptLength ?? 8000;
-    if (normalizedPrompt.length > MAX_PROMPT_LENGTH) {
+    const maxPromptLength = this.options.maxPromptLength ?? 8000;
+    if (normalizedPrompt.length > maxPromptLength) {
       return {
         success: false,
         output: "",
-        error: `Prompt exceeds max length of ${MAX_PROMPT_LENGTH} characters.`,
+        error: `Prompt exceeds max length of ${maxPromptLength} characters.`,
         exitCode: -1,
         duration: 0,
       };
@@ -313,69 +368,27 @@ class OpencodeSdk extends BaseCodingSdk {
       };
     }
 
-    const MAX_OUTPUT_LENGTH = this.options.maxOutputLength ?? 1800;
-    const RUN_TIMEOUT_MS = this.options.timeoutMs ?? 5 * 60 * 1000;
-    const RUN_RETRY_COUNT = this.options.retryCount ?? 2;
+    const maxOutputLength = this.options.maxOutputLength ?? 1800;
+    const timeoutMs = this.options.timeoutMs ?? 5 * 60 * 1000;
+    const retryCount = this.options.retryCount ?? 2;
 
-    for (let attempt = 0; attempt <= RUN_RETRY_COUNT; attempt += 1) {
-      try {
-        return await this.runWithSdk(
+    return this.executeWithRetry(
+      () =>
+        this.runWithSdk(
           normalizedPrompt,
           resolvedDir.path,
           start,
           options?.sessionId,
           options?.interactionHandler,
-          MAX_OUTPUT_LENGTH,
-          RUN_TIMEOUT_MS,
+          maxOutputLength,
+          timeoutMs,
           options?.abortSignal,
           options?.systemPrompt,
-        );
-      } catch (error: unknown) {
-        const canRetry = attempt < RUN_RETRY_COUNT;
-        const duration = Date.now() - start;
-        const errMsg = this.formatUnknownError(error);
-
-        logger.error("OpenCode run attempt failed", {
-          attempt: attempt + 1,
-          duration,
-          error: errMsg,
-        });
-
-        if (errMsg === "OpenCode run aborted.") {
-          await this.resetRuntime();
-          return {
-            success: false,
-            output: "",
-            error: errMsg,
-            exitCode: -1,
-            duration,
-            sessionId: options?.sessionId,
-          };
-        }
-
-        if (!canRetry) {
-          await this.resetRuntime();
-          return {
-            success: false,
-            output: "",
-            error: errMsg,
-            exitCode: -1,
-            duration,
-          };
-        }
-
-        await this.resetRuntime();
-      }
-    }
-
-    await this.resetRuntime();
-    return {
-      success: false,
-      output: "",
-      error: "OpenCode failed unexpectedly.",
-      exitCode: -1,
-      duration: Date.now() - start,
-    };
+        ),
+      retryCount,
+      start,
+      options?.sessionId,
+    );
   }
 
   async runStream(
@@ -385,7 +398,7 @@ class OpencodeSdk extends BaseCodingSdk {
     options?: RunOptions,
   ): Promise<CodingSdkResult> {
     const start = Date.now();
-    logger.info("runStream called", {
+    logger.debug("runStream called", {
       workingDir,
       hasOnChunk: typeof onChunk === "function",
     });
@@ -401,12 +414,12 @@ class OpencodeSdk extends BaseCodingSdk {
       };
     }
 
-    const MAX_PROMPT_LENGTH = this.options.maxPromptLength ?? 8000;
-    if (normalizedPrompt.length > MAX_PROMPT_LENGTH) {
+    const maxPromptLength = this.options.maxPromptLength ?? 8000;
+    if (normalizedPrompt.length > maxPromptLength) {
       return {
         success: false,
         output: "",
-        error: `Prompt exceeds max length of ${MAX_PROMPT_LENGTH} characters.`,
+        error: `Prompt exceeds max length of ${maxPromptLength} characters.`,
         exitCode: -1,
         duration: 0,
       };
@@ -424,70 +437,28 @@ class OpencodeSdk extends BaseCodingSdk {
       };
     }
 
-    const MAX_OUTPUT_LENGTH = this.options.maxOutputLength ?? 1800;
-    const RUN_TIMEOUT_MS = this.options.timeoutMs ?? 5 * 60 * 1000;
-    const RUN_RETRY_COUNT = this.options.retryCount ?? 2;
+    const maxOutputLength = this.options.maxOutputLength ?? 1800;
+    const timeoutMs = this.options.timeoutMs ?? 5 * 60 * 1000;
+    const retryCount = this.options.retryCount ?? 2;
 
-    for (let attempt = 0; attempt <= RUN_RETRY_COUNT; attempt += 1) {
-      try {
-        return await this.runWithSdkStream(
+    return this.executeWithRetry(
+      () =>
+        this.runWithSdkStream(
           normalizedPrompt,
           resolvedDir.path,
           start,
           options?.sessionId,
           options?.interactionHandler,
-          MAX_OUTPUT_LENGTH,
-          RUN_TIMEOUT_MS,
+          maxOutputLength,
+          timeoutMs,
           options?.abortSignal,
           options?.systemPrompt,
           onChunk,
-        );
-      } catch (error: unknown) {
-        const canRetry = attempt < RUN_RETRY_COUNT;
-        const duration = Date.now() - start;
-        const errMsg = this.formatUnknownError(error);
-
-        logger.error("OpenCode run attempt failed", {
-          attempt: attempt + 1,
-          duration,
-          error: errMsg,
-        });
-
-        if (errMsg === "OpenCode run aborted.") {
-          await this.resetRuntime();
-          return {
-            success: false,
-            output: "",
-            error: errMsg,
-            exitCode: -1,
-            duration,
-            sessionId: options?.sessionId,
-          };
-        }
-
-        if (!canRetry) {
-          await this.resetRuntime();
-          return {
-            success: false,
-            output: "",
-            error: errMsg,
-            exitCode: -1,
-            duration,
-          };
-        }
-
-        await this.resetRuntime();
-      }
-    }
-
-    await this.resetRuntime();
-    return {
-      success: false,
-      output: "",
-      error: "OpenCode failed unexpectedly.",
-      exitCode: -1,
-      duration: Date.now() - start,
-    };
+        ),
+      retryCount,
+      start,
+      options?.sessionId,
+    );
   }
 
   private async runWithSdkStream(
@@ -779,7 +750,8 @@ class OpencodeSdk extends BaseCodingSdk {
     try {
       const resolvedDir = this.resolveWorkingDir(directory);
       if (!resolvedDir.ok) {
-        throw new Error(resolvedDir.error);
+        const errorDir = resolvedDir as { ok: false; error: string };
+        throw new Error(errorDir.error);
       }
 
       const opencode = await this.getRuntime();
@@ -1259,17 +1231,6 @@ class OpencodeSdk extends BaseCodingSdk {
     );
   }
 
-  private getArray(
-    value: Record<string, unknown> | undefined,
-    key: string,
-  ): unknown[] {
-    if (!value) {
-      return [];
-    }
-    const result = value[key];
-    return Array.isArray(result) ? result : [];
-  }
-
   private async fetchFinalAssistantMessage(
     client: OpencodeClient,
     sessionId: string,
@@ -1484,48 +1445,7 @@ class OpencodeSdk extends BaseCodingSdk {
   }
 
   private formatRequestError(prefix: string, error: unknown): string {
-    if (!error) {
-      return prefix;
-    }
-
-    if (typeof error === "string") {
-      return `${prefix}: ${error}`;
-    }
-
-    if (typeof error === "object") {
-      const obj = error as Record<string, unknown>;
-
-      for (const value of Object.values(obj)) {
-        if (value && typeof value === "object") {
-          const message = this.extractMessageFromObject(
-            value as Record<string, unknown>,
-          );
-          if (message) return `${prefix}: ${message}`;
-        }
-      }
-
-      const message = this.extractMessageFromObject(obj);
-      if (message) return `${prefix}: ${message}`;
-    }
-
-    return `${prefix}: ${String(error)}`;
-  }
-
-  private extractMessageFromObject(
-    value: Record<string, unknown>,
-  ): string | null {
-    if (typeof value.message === "string" && value.message.trim()) {
-      return value.message.trim();
-    }
-
-    if (value.data && typeof value.data === "object") {
-      const nested = value.data as Record<string, unknown>;
-      if (typeof nested.message === "string" && nested.message.trim()) {
-        return nested.message.trim();
-      }
-    }
-
-    return null;
+    return `${prefix}: ${this.formatUnknownError(error)}`;
   }
 
   private trimOutput(output: string, maxOutputLength: number): string {
@@ -1768,26 +1688,21 @@ class OpencodeSdk extends BaseCodingSdk {
   private resolveWorkingDir(
     workingDir: string,
   ): { ok: true; path: string } | { ok: false; error: string } {
-    if (!workingDir || !workingDir.trim()) {
+    const trimmedDir = workingDir?.trim();
+    if (!trimmedDir) {
       return { ok: false, error: "Working directory is empty." };
     }
 
-    const importPath = require("path");
-    const importFs = require("fs");
-    const path = importPath;
-    const fs = importFs;
+    const absolute = resolve(trimmedDir);
 
-    const absolute = path.resolve(workingDir);
-
-    if (!fs.existsSync(absolute)) {
+    if (!existsSync(absolute)) {
       return {
         ok: false,
         error: `Working directory does not exist: ${absolute}`,
       };
     }
 
-    const stats = fs.statSync(absolute);
-    if (!stats.isDirectory()) {
+    if (!statSync(absolute).isDirectory()) {
       return {
         ok: false,
         error: `Working directory is not a directory: ${absolute}`,
@@ -1806,15 +1721,14 @@ class OpencodeSdk extends BaseCodingSdk {
     }
 
     return new Promise<number>((resolve, reject) => {
-      const importNet = require("net");
-      const server = importNet.createServer();
+      const server = createServer();
       server.unref();
       server.on("error", reject);
       server.listen(0, host, () => {
         const address = server.address();
         const port =
           address && typeof address === "object" ? address.port : undefined;
-        server.close((error: unknown) => {
+        server.close((error: Error | undefined) => {
           if (error) {
             reject(error);
             return;
@@ -1833,8 +1747,7 @@ class OpencodeSdk extends BaseCodingSdk {
 
   private async canListenOnPort(port: number, host: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      const importNet = require("net");
-      const server = importNet.createServer();
+      const server = createServer();
       server.unref();
       server.once("error", () => resolve(false));
       server.listen(port, host, () => {
