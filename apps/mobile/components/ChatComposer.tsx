@@ -18,6 +18,7 @@ export const MIN_INPUT_HEIGHT = 44;
 export const MAX_INPUT_HEIGHT = 150;
 export const COMPOSER_TOP_PADDING = 12;
 export const COMPOSER_BOTTOM_PADDING = 12;
+export const KEYBOARD_ADDITIONAL_PADDING = 16;
 
 type ComposerSelection = {
   start: number;
@@ -75,7 +76,10 @@ export function ChatComposer({
 
   const updateInputHeight = React.useCallback(
     (nextHeight: number) => {
-      const normalizedHeight = Math.max(MIN_INPUT_HEIGHT, Math.ceil(nextHeight));
+      const normalizedHeight = Math.max(
+        MIN_INPUT_HEIGHT,
+        Math.ceil(nextHeight),
+      );
       if (normalizedHeight !== inputHeight) {
         onInputHeightChange(normalizedHeight);
       }

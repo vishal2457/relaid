@@ -61,6 +61,10 @@ export interface RunOptions {
   interactionHandler?: CodingSdkInteractionHandler;
   abortSignal?: AbortSignal;
   systemPrompt?: string;
+  model?: {
+    providerId: string;
+    modelId: string;
+  };
 }
 
 export abstract class BaseCodingSdk {

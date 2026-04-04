@@ -222,6 +222,9 @@ async function main(): Promise<void> {
         project.folder,
         streamCallback,
         payload.sessionId,
+        undefined,
+        undefined,
+        payload.model,
       );
 
       const resolvedSessionId = result.sessionId || payload.sessionId;

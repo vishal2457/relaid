@@ -102,6 +102,10 @@ export interface SessionPromptRequestPayload {
   sessionId: string;
   prompt: string;
   userId?: string;
+  model?: {
+    providerId: string;
+    modelId: string;
+  };
 }
 
 export interface SessionPromptStartedPayload {

@@ -4,7 +4,7 @@ import {
   Alert,
   AppState,
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Pressable,
   RefreshControl,
@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
   type FlatList as FlatListType,
+  type KeyboardEvent,
 } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { ActivityIndicator, Button, Text, useTheme } from "react-native-paper";
@@ -141,6 +142,7 @@ const MIN_INPUT_HEIGHT = 44;
 const MAX_INPUT_HEIGHT = 150;
 const COMPOSER_TOP_PADDING = 12;
 const COMPOSER_BOTTOM_PADDING = 12;
+const KEYBOARD_ADDITIONAL_PADDING = 16;
 
 type SessionPromptStartedEvent = {
   requestId: string;
@@ -187,6 +189,24 @@ export default function SessionMessagesScreen() {
   const [streamingContent, setStreamingContent] = React.useState<string>("");
   const [optimisticMessage, setOptimisticMessage] =
     React.useState<SessionMessage | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+
+  React.useEffect(() => {
+    const showListener = Keyboard.addListener(
+      "keyboardDidShow",
+      (e: KeyboardEvent) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideListener = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showListener.remove();
+      hideListener.remove();
+    };
+  }, []);
+
   const followUpRefreshTimeoutRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -231,7 +251,7 @@ export default function SessionMessagesScreen() {
   React.useEffect(() => {
     if (displayedMessages.length > prevMessageCount.current) {
       prevMessageCount.current = displayedMessages.length;
-      // Delay to let FlatList render + KeyboardAvoidingView animate
+      // Delay to let FlatList render + keyboard animation complete
       const timer = setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 300);
@@ -471,7 +491,9 @@ export default function SessionMessagesScreen() {
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
     COMPOSER_TOP_PADDING +
-    Math.max(insets.bottom, COMPOSER_BOTTOM_PADDING);
+    Math.max(insets.bottom, COMPOSER_BOTTOM_PADDING) +
+    keyboardHeight +
+    (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
   const trimmedInput = inputText.trim();
   const isSending = pendingRequestId !== null;
 
@@ -862,10 +884,15 @@ export default function SessionMessagesScreen() {
           )}
         </Pressable>
       </View>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
-        style={styles.keyboardContainer}
+      <View
+        style={[
+          styles.keyboardContainer,
+          {
+            paddingBottom:
+              keyboardHeight +
+              (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0),
+          },
+        ]}
       >
         <View style={styles.messagesContainer}>
           <View style={styles.fadeOverlay} pointerEvents="none">
@@ -939,7 +966,7 @@ export default function SessionMessagesScreen() {
           )}
         </View>
         {inputBar}
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

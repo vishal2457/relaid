@@ -3,7 +3,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   Alert,
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
   Modal,
   NativeSyntheticEvent,
   NativeScrollEvent,
@@ -14,12 +14,14 @@ import {
   TextInputSelectionChangeEventData,
   View,
   type FlatList as FlatListType,
+  type KeyboardEvent,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ChatComposer,
   COMPOSER_BOTTOM_PADDING,
   COMPOSER_TOP_PADDING,
+  KEYBOARD_ADDITIONAL_PADDING,
   MAX_INPUT_HEIGHT,
   MIN_INPUT_HEIGHT,
 } from "@/components/ChatComposer";
@@ -60,11 +62,12 @@ import {
 import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
 import { queryClient } from "@/lib/query-client";
 import { getChatSocket } from "@/lib/socket/chat";
+import type { Socket } from "socket.io-client";
 import {
   showNewMessageNotification,
   isAppInForeground,
 } from "@/lib/notifications";
-import { AppState } from "react-native";
+import { AppState, type AppStateStatus } from "react-native";
 import { GitDrawer } from "@/components/GitDrawer";
 
 type TextSegment = {
@@ -109,40 +112,41 @@ const parseFormattedText = (text: string): TextSegment[] => {
 const BOLD_COLOR = "#F97316";
 const CODE_COLOR = "#22C55E";
 
-const FormattedText = ({
-  text,
-  baseStyle,
-}: {
-  text: string;
-  baseStyle: object;
-}) => {
-  const segments = parseFormattedText(text);
+const FormattedText = React.memo(
+  ({ text, baseStyle }: { text: string; baseStyle: object }) => {
+    const segments = parseFormattedText(text);
 
-  return (
-    <Text style={baseStyle}>
-      {segments.map((segment, index) => {
-        if (segment.type === "bold") {
-          return (
-            <Text key={index} style={{ fontWeight: "bold", color: BOLD_COLOR }}>
-              {segment.content}
-            </Text>
-          );
-        }
-        if (segment.type === "code") {
-          return (
-            <Text
-              key={index}
-              style={{ color: CODE_COLOR, fontFamily: "monospace" }}
-            >
-              {segment.content}
-            </Text>
-          );
-        }
-        return <Text key={index}>{segment.content}</Text>;
-      })}
-    </Text>
-  );
-};
+    return (
+      <Text style={baseStyle}>
+        {segments.map((segment, index) => {
+          if (segment.type === "bold") {
+            return (
+              <Text
+                key={index}
+                style={{ fontWeight: "bold", color: BOLD_COLOR }}
+              >
+                {segment.content}
+              </Text>
+            );
+          }
+          if (segment.type === "code") {
+            return (
+              <Text
+                key={index}
+                style={{ color: CODE_COLOR, fontFamily: "monospace" }}
+              >
+                {segment.content}
+              </Text>
+            );
+          }
+          return <Text key={index}>{segment.content}</Text>;
+        })}
+      </Text>
+    );
+  },
+);
+
+FormattedText.displayName = "FormattedText";
 
 const formatDateTime = (value: string | null | undefined) => {
   if (!value) return null;
@@ -166,6 +170,7 @@ const formatThinkingLabel = (seconds: number | null) => {
 };
 
 const LAST_SELECTED_PROJECT_ID = "LAST_SELECTED_PROJECT_ID";
+const LAST_SELECTED_MODEL = "LAST_SELECTED_MODEL";
 
 type SessionPromptStartedEvent = {
   requestId: string;
@@ -243,6 +248,13 @@ function getActiveMention(
   };
 }
 
+// Connection state type
+type ConnectionState = "connected" | "disconnected" | "connecting" | "error";
+
+// Exponential backoff for reconnection
+const RECONNECT_BASE_DELAY = 1000;
+const RECONNECT_MAX_DELAY = 30000;
+
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -265,6 +277,7 @@ export default function ChatScreen() {
   const activeSessionIdRef = React.useRef<string | null>(null);
   const allowSessionChangeRecoveryRef = React.useRef(false);
   const [streamingContent, setStreamingContent] = React.useState("");
+  const streamingContentRef = React.useRef("");
   const followUpRefreshTimeoutRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -291,6 +304,39 @@ export default function ChatScreen() {
   const [showGitDrawer, setShowGitDrawer] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
   const [isNearBottom, setIsNearBottom] = React.useState(true);
+  const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+
+  React.useEffect(() => {
+    const showListener = Keyboard.addListener(
+      "keyboardDidShow",
+      (e: KeyboardEvent) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideListener = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showListener.remove();
+      hideListener.remove();
+    };
+  }, []);
+
+  // Connection state tracking
+  const [connectionState, setConnectionState] =
+    React.useState<ConnectionState>("disconnected");
+  const reconnectAttemptRef = React.useRef(0);
+  const reconnectTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const heartbeatIntervalRef = React.useRef<ReturnType<
+    typeof setInterval
+  > | null>(null);
+  const lastPongRef = React.useRef<number>(Date.now());
+  const socketRef = React.useRef<Socket | null>(null);
+  const isMountedRef = React.useRef(true);
+  const appStateRef = React.useRef<AppStateStatus>(AppState.currentState);
 
   const createSessionMutation = useCreateSession();
   const { data: projects, isLoading: projectsLoading } = useProjects();
@@ -309,13 +355,44 @@ export default function ChatScreen() {
       Boolean(activeProject && activeMention && deferredMentionQuery.trim()),
     );
 
+  // Keep refs in sync with state
+  React.useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  React.useEffect(() => {
+    pendingRequestIdRef.current = pendingRequestId;
+  }, [pendingRequestId]);
+
+  React.useEffect(() => {
+    streamingContentRef.current = streamingContent;
+  }, [streamingContent]);
+
+  // Cleanup on unmount
+  React.useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (socketRef.current) {
+        socketRef.current.removeAllListeners();
+        socketRef.current.disconnect();
+      }
+    };
+  }, []);
+
+  // Hydration effect
   React.useEffect(() => {
     let cancelled = false;
 
     void (async () => {
       try {
         const activeStream = await getActiveSessionStream();
-        if (cancelled) {
+        if (cancelled || !isMountedRef.current) {
           return;
         }
 
@@ -337,7 +414,7 @@ export default function ChatScreen() {
         }
 
         const savedId = await AsyncStorage.getItem(LAST_SELECTED_PROJECT_ID);
-        if (cancelled) {
+        if (cancelled || !isMountedRef.current) {
           return;
         }
 
@@ -354,7 +431,7 @@ export default function ChatScreen() {
       } catch {
         // noop
       } finally {
-        if (!cancelled) {
+        if (!cancelled && isMountedRef.current) {
           setHydrated(true);
         }
       }
@@ -374,6 +451,42 @@ export default function ChatScreen() {
     }
   }, [activeProject, hydrated]);
 
+  // Persist active model selection
+  React.useEffect(() => {
+    if (!hydrated) return;
+    if (activeModel) {
+      AsyncStorage.setItem(
+        LAST_SELECTED_MODEL,
+        JSON.stringify(activeModel),
+      ).catch(() => {});
+    }
+  }, [activeModel, hydrated]);
+
+  // Load saved model on initial hydration
+  React.useEffect(() => {
+    if (!hydrated || !providers) return;
+
+    (async () => {
+      try {
+        const savedModelJson = await AsyncStorage.getItem(LAST_SELECTED_MODEL);
+        if (savedModelJson) {
+          const savedModel = JSON.parse(savedModelJson) as ActiveModel;
+          // Verify the saved model still exists in the providers list
+          const modelExists = providers.some(
+            (p) =>
+              p.id === savedModel.providerId &&
+              p.models.some((m) => m.id === savedModel.id),
+          );
+          if (modelExists) {
+            setActiveModel(savedModel);
+          }
+        }
+      } catch {
+        // noop
+      }
+    })();
+  }, [hydrated, providers]);
+
   const {
     data: messages,
     isLoading: messagesLoading,
@@ -389,13 +502,34 @@ export default function ChatScreen() {
     return [...(messages ?? []), optimisticMessage];
   }, [messages, optimisticMessage]);
 
+  const sortedModels = React.useMemo(() => {
+    const models = flattenProvidersToModels(providers ?? []);
+    if (!activeModel) return models;
+    const sorted = [...models];
+    sorted.sort((a, b) =>
+      a.id === activeModel.id ? -1 : b.id === activeModel.id ? 1 : 0,
+    );
+    return sorted;
+  }, [providers, activeModel]);
+
+  const sortedProjects = React.useMemo(() => {
+    if (!activeProject) return projects ?? [];
+    const sorted = [...(projects ?? [])];
+    sorted.sort((a, b) =>
+      a.id === activeProject.id ? -1 : b.id === activeProject.id ? 1 : 0,
+    );
+    return sorted;
+  }, [projects, activeProject]);
+
+  // Scroll handling
   const hasScrolledToBottom = React.useRef(false);
   React.useEffect(() => {
     if (messages && messages.length > 0 && !hasScrolledToBottom.current) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: false });
         hasScrolledToBottom.current = true;
       }, 100);
+      return () => clearTimeout(timer);
     }
   }, [messages]);
 
@@ -423,14 +557,6 @@ export default function ChatScreen() {
 
     return () => clearTimeout(timer);
   }, [streamingContent]);
-
-  React.useEffect(() => {
-    activeSessionIdRef.current = activeSessionId;
-  }, [activeSessionId]);
-
-  React.useEffect(() => {
-    pendingRequestIdRef.current = pendingRequestId;
-  }, [pendingRequestId]);
 
   const clearFollowUpRefreshTimeout = React.useCallback(() => {
     if (followUpRefreshTimeoutRef.current) {
@@ -470,12 +596,26 @@ export default function ChatScreen() {
     [clearFollowUpRefreshTimeout, refetch, refetchActiveSession],
   );
 
+  const handleRefreshPress = React.useCallback(async () => {
+    if (isRefreshing || !activeSessionIdRef.current) {
+      return;
+    }
+
+    setIsRefreshing(true);
+    try {
+      await Promise.all([refetch(), refetchActiveSession()]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing, refetch, refetchActiveSession]);
+
   const clearPendingStreamState = React.useCallback(
     (requestId?: string) => {
       pendingRequestIdRef.current = null;
       setPendingRequestId(null);
       setOptimisticMessage(null);
       setStreamingContent("");
+      streamingContentRef.current = "";
       clearFollowUpRefreshTimeout();
       clearRequestRecoveryTimeout();
       void clearActiveSessionStream(requestId);
@@ -498,6 +638,7 @@ export default function ChatScreen() {
     setPendingRequestId(activeStream.requestId);
     setOptimisticMessage(null);
     setStreamingContent("");
+    streamingContentRef.current = "";
 
     const [sessionResult, messagesResult] = await Promise.allSettled([
       refetchActiveSession(),
@@ -524,6 +665,7 @@ export default function ChatScreen() {
     }
   }, [clearPendingStreamState, refetch, refetchActiveSession]);
 
+  // Cleanup timeouts on unmount
   React.useEffect(() => {
     return () => {
       clearFollowUpRefreshTimeout();
@@ -531,6 +673,7 @@ export default function ChatScreen() {
     };
   }, [clearFollowUpRefreshTimeout, clearRequestRecoveryTimeout]);
 
+  // Recovery on session change
   React.useEffect(() => {
     if (
       allowSessionChangeRecoveryRef.current &&
@@ -542,22 +685,84 @@ export default function ChatScreen() {
     }
   }, [activeSessionId, recoverPendingStream]);
 
-  React.useEffect(() => {
+  // Socket connection management
+  const connectSocket = React.useCallback(() => {
+    if (!isMountedRef.current) return;
+
     const socket = getChatSocket();
+    socketRef.current = socket;
+
     if (!socket.connected) {
+      setConnectionState("connecting");
       socket.connect();
+    } else {
+      setConnectionState("connected");
+    }
+  }, []);
+
+  const scheduleReconnect = React.useCallback(() => {
+    if (!isMountedRef.current) return;
+
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
     }
 
-    const handlePromptStarted = (payload: SessionPromptStartedEvent) => {
+    const delay = Math.min(
+      RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptRef.current),
+      RECONNECT_MAX_DELAY,
+    );
+
+    reconnectAttemptRef.current += 1;
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        connectSocket();
+      }
+    }, delay);
+  }, [connectSocket]);
+
+  const startHeartbeat = React.useCallback(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
+
+    // Send ping every 30 seconds
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("ping");
+
+        // Check if we haven't received a pong in 60 seconds
+        if (Date.now() - lastPongRef.current > 60000) {
+          console.log("[Chat] Heartbeat timeout, reconnecting...");
+          socketRef.current.disconnect();
+          setConnectionState("error");
+          scheduleReconnect();
+        }
+      }
+    }, 30000);
+  }, [scheduleReconnect]);
+
+  const stopHeartbeat = React.useCallback(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+  }, []);
+
+  // Socket event handlers - using refs for stable callbacks
+  const handlePromptStartedRef = React.useRef(
+    (payload: SessionPromptStartedEvent) => {
       if (
         payload.requestId === pendingRequestIdRef.current &&
         payload.sessionId === activeSessionIdRef.current
       ) {
         setPendingRequestId(payload.requestId);
       }
-    };
+    },
+  );
 
-    const handleStreamChunk = (payload: SessionStreamChunkEvent) => {
+  const handleStreamChunkRef = React.useRef(
+    (payload: SessionStreamChunkEvent) => {
       if (
         payload.requestId !== pendingRequestIdRef.current ||
         payload.sessionId !== activeSessionIdRef.current
@@ -568,9 +773,11 @@ export default function ChatScreen() {
       if (payload.type === "text" || payload.type === "reasoning") {
         setStreamingContent((prev) => prev + payload.chunk);
       }
-    };
+    },
+  );
 
-    const handlePromptResponse = (payload: SessionPromptResponseEvent) => {
+  const handlePromptResponseRef = React.useRef(
+    (payload: SessionPromptResponseEvent) => {
       if (
         payload.requestId !== pendingRequestIdRef.current ||
         payload.sessionId !== activeSessionIdRef.current
@@ -609,56 +816,141 @@ export default function ChatScreen() {
           lastMessage.content.slice(0, 100),
         );
       }
-    };
+    },
+  );
 
-    const handleErrorResponse = (payload: {
-      requestId?: string;
-      message?: string;
-    }) => {
+  const handleErrorResponseRef = React.useRef(
+    (payload: { requestId?: string; message?: string }) => {
       if (payload.requestId !== pendingRequestIdRef.current) {
         return;
       }
 
       clearPendingStreamState(payload.requestId);
       Alert.alert("Socket error", payload.message || "Failed to send message");
-    };
+    },
+  );
 
-    socket.on("session_prompt_started", handlePromptStarted);
-    socket.on("session_stream_chunk", handleStreamChunk);
-    socket.on("session_prompt_response", handlePromptResponse);
-    socket.on("error_response", handleErrorResponse);
+  const handleConnectRef = React.useRef(() => {
+    if (!isMountedRef.current) return;
 
-    const handleReconnect = () => {
-      if (activeSessionIdRef.current && pendingRequestIdRef.current) {
-        void recoverPendingStream();
-      }
-    };
-    socket.on("connect", handleReconnect);
+    console.log("[Chat] Socket connected");
+    setConnectionState("connected");
+    reconnectAttemptRef.current = 0;
+    lastPongRef.current = Date.now();
+    startHeartbeat();
+
+    // Recover any pending stream on reconnect
+    if (activeSessionIdRef.current && pendingRequestIdRef.current) {
+      void recoverPendingStream();
+    }
+  });
+
+  const handleDisconnectRef = React.useRef((reason: string) => {
+    if (!isMountedRef.current) return;
+
+    console.log("[Chat] Socket disconnected:", reason);
+    setConnectionState("disconnected");
+    stopHeartbeat();
+
+    // Auto reconnect if not manually disconnected
+    if (reason !== "io client disconnect") {
+      scheduleReconnect();
+    }
+  });
+
+  const handleConnectErrorRef = React.useRef((error: Error) => {
+    if (!isMountedRef.current) return;
+
+    console.log("[Chat] Socket connection error:", error.message);
+    setConnectionState("error");
+    stopHeartbeat();
+    scheduleReconnect();
+  });
+
+  const handlePongRef = React.useRef(() => {
+    lastPongRef.current = Date.now();
+  });
+
+  // Main socket effect
+  React.useEffect(() => {
+    const socket = getChatSocket();
+    socketRef.current = socket;
+
+    // Set up event listeners
+    socket.on("session_prompt_started", handlePromptStartedRef.current);
+    socket.on("session_stream_chunk", handleStreamChunkRef.current);
+    socket.on("session_prompt_response", handlePromptResponseRef.current);
+    socket.on("error_response", handleErrorResponseRef.current);
+    socket.on("connect", handleConnectRef.current);
+    socket.on("disconnect", handleDisconnectRef.current);
+    socket.on("connect_error", handleConnectErrorRef.current);
+    socket.on("pong", handlePongRef.current);
+
+    // Initial connection
+    if (!socket.connected) {
+      connectSocket();
+    } else {
+      setConnectionState("connected");
+      startHeartbeat();
+    }
 
     return () => {
-      socket.off("session_prompt_started", handlePromptStarted);
-      socket.off("session_stream_chunk", handleStreamChunk);
-      socket.off("session_prompt_response", handlePromptResponse);
-      socket.off("error_response", handleErrorResponse);
-      socket.off("connect", handleReconnect);
+      socket.off("session_prompt_started", handlePromptStartedRef.current);
+      socket.off("session_stream_chunk", handleStreamChunkRef.current);
+      socket.off("session_prompt_response", handlePromptResponseRef.current);
+      socket.off("error_response", handleErrorResponseRef.current);
+      socket.off("connect", handleConnectRef.current);
+      socket.off("disconnect", handleDisconnectRef.current);
+      socket.off("connect_error", handleConnectErrorRef.current);
+      socket.off("pong", handlePongRef.current);
     };
   }, [
-    clearPendingStreamState,
+    connectSocket,
+    startHeartbeat,
+    stopHeartbeat,
+    scheduleReconnect,
     recoverPendingStream,
+    clearPendingStreamState,
     refreshActiveSessionSnapshot,
   ]);
 
+  // App state handling - reconnect when app comes to foreground
   React.useEffect(() => {
-    if (!activeSessionId) return;
+    const subscription = AppState.addEventListener(
+      "change",
+      (nextState: AppStateStatus) => {
+        const prevState = appStateRef.current;
+        appStateRef.current = nextState;
 
-    const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active" && pendingRequestIdRef.current) {
-        void recoverPendingStream();
-      }
-    });
+        if (!isMountedRef.current) return;
+
+        if (nextState === "active" && prevState !== "active") {
+          console.log("[Chat] App became active, checking connection...");
+
+          // Force reconnect socket when app comes to foreground
+          if (socketRef.current) {
+            if (!socketRef.current.connected) {
+              console.log("[Chat] Socket disconnected, reconnecting...");
+              connectSocket();
+            } else {
+              // Even if connected, refresh the connection
+              socketRef.current.emit("ping");
+            }
+          }
+
+          // Recover any pending stream
+          if (pendingRequestIdRef.current) {
+            void recoverPendingStream();
+          }
+        } else if (nextState === "background" && prevState === "active") {
+          console.log("[Chat] App went to background");
+          // Don't disconnect, keep socket alive for background notifications
+        }
+      },
+    );
 
     return () => subscription.remove();
-  }, [activeSessionId, recoverPendingStream]);
+  }, [connectSocket, recoverPendingStream]);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
   const metaColor = theme.dark ? "#B8C2D1" : "#526277";
@@ -679,13 +971,32 @@ export default function ChatScreen() {
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
     COMPOSER_TOP_PADDING +
     Math.max(insets.bottom, COMPOSER_BOTTOM_PADDING) +
-    mentionSuggestionHeight;
+    mentionSuggestionHeight +
+    keyboardHeight +
+    (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
   const trimmedInput = inputText.trim();
   const isSending = pendingRequestId !== null;
 
   const handleSend = React.useCallback(async () => {
     if (!activeProject || !trimmedInput || isSending) {
       return;
+    }
+
+    // Ensure socket is connected before sending
+    const socket = getChatSocket();
+    if (!socket.connected) {
+      console.log("[Chat] Socket not connected, connecting...");
+      socket.connect();
+      // Wait a bit for connection
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      if (!socket.connected) {
+        Alert.alert(
+          "Connection Error",
+          "Unable to connect to server. Please try again.",
+        );
+        return;
+      }
     }
 
     let sessionId = activeSessionId;
@@ -724,6 +1035,7 @@ export default function ChatScreen() {
       createdAt: new Date().toISOString(),
     });
     setStreamingContent("");
+    streamingContentRef.current = "";
     setInputText("");
     setInputSelection({ start: 0, end: 0 });
     setInputHeight(MIN_INPUT_HEIGHT);
@@ -742,16 +1054,17 @@ export default function ChatScreen() {
       }
     }, 60_000);
 
-    const socket = getChatSocket();
-    if (!socket.connected) {
-      socket.connect();
-    }
-
     socket.emit("session_prompt_request", {
       requestId,
       projectId: activeProject.id,
       sessionId,
       prompt: trimmedInput,
+      model: activeModel
+        ? {
+            providerId: activeModel.providerId,
+            modelId: activeModel.id,
+          }
+        : undefined,
     });
   }, [
     activeProject,
@@ -762,16 +1075,17 @@ export default function ChatScreen() {
     createSessionMutation,
     clearRequestRecoveryTimeout,
     recoverPendingStream,
+    activeModel,
   ]);
 
-  const toggleThinking = (messageId: string) => {
+  const toggleThinking = React.useCallback((messageId: string) => {
     setExpandedThinking((current: Record<string, boolean>) => ({
       ...current,
       [messageId]: !current[messageId],
     }));
-  };
+  }, []);
 
-  const TypingIndicator = () => (
+  const TypingIndicator = React.memo(() => (
     <View style={[styles.messageRow, styles.messageRowLeft]}>
       <View
         style={[
@@ -802,185 +1116,201 @@ export default function ChatScreen() {
         )}
       </View>
     </View>
-  );
+  ));
 
-  const renderMessage = ({ item }: { item: SessionMessage }) => {
-    const isUser = item.role === "user";
-    const isSystem = item.role === "system";
-    const isAssistant = item.role === "assistant";
-    const hasThinking = Boolean(item.thinkingContent?.trim());
-    const hasVisibleContent = Boolean(item.visibleContent.trim());
-    const bubbleColor = isSystem
-      ? systemBubble
-      : isUser
-        ? userBubble
-        : assistantBubble;
-    const textColor = isUser ? "#0F172A" : theme.colors.onSurface;
-    const mainContent =
-      item.role === "assistant" ? item.visibleContent : item.content;
-    const isThinkingExpanded = Boolean(expandedThinking[item.id]);
-    const thinkingParts = item.parts.filter((part) => part.type !== "text");
-    const thinkingLabel = formatThinkingLabel(item.thinkingDurationSeconds);
-    const shouldUsePlainThoughtRow =
-      isAssistant && hasThinking && !hasVisibleContent;
-    const canToggleThinking = isAssistant && hasThinking;
+  TypingIndicator.displayName = "TypingIndicator";
 
-    return (
-      <View
-        style={[
-          styles.messageRow,
-          isUser ? styles.messageRowRight : styles.messageRowLeft,
-        ]}
-      >
-        {shouldUsePlainThoughtRow ? (
-          <View style={styles.plainThoughtWrap}>
-            <Pressable
-              onPress={() => toggleThinking(item.id)}
-              style={styles.plainThoughtTrigger}
-            >
-              <View style={styles.plainThoughtHeader}>
-                <MaterialCommunityIcons
-                  name="brain"
-                  size={16}
-                  color={metaColor}
-                />
-                <Text variant="bodyMedium" style={{ color: metaColor }}>
-                  {thinkingLabel}
-                </Text>
-              </View>
-            </Pressable>
+  // Memoized message renderer to prevent unnecessary re-renders
+  const renderMessage = React.useCallback(
+    ({ item }: { item: SessionMessage }) => {
+      const isUser = item.role === "user";
+      const isSystem = item.role === "system";
+      const isAssistant = item.role === "assistant";
+      const hasThinking = Boolean(item.thinkingContent?.trim());
+      const hasVisibleContent = Boolean(item.visibleContent.trim());
+      const bubbleColor = isSystem
+        ? systemBubble
+        : isUser
+          ? userBubble
+          : assistantBubble;
+      const textColor = isUser ? "#0F172A" : theme.colors.onSurface;
+      const mainContent =
+        item.role === "assistant" ? item.visibleContent : item.content;
+      const isThinkingExpanded = Boolean(expandedThinking[item.id]);
+      const thinkingParts = item.parts.filter((part) => part.type !== "text");
+      const thinkingLabel = formatThinkingLabel(item.thinkingDurationSeconds);
+      const shouldUsePlainThoughtRow =
+        isAssistant && hasThinking && !hasVisibleContent;
+      const canToggleThinking = isAssistant && hasThinking;
 
-            {isThinkingExpanded ? (
-              <View
-                style={[
-                  styles.thinkingPanel,
-                  {
-                    borderColor,
-                    backgroundColor: thinkingSurface,
-                    alignSelf: "flex-start",
-                  },
-                ]}
+      return (
+        <View
+          style={[
+            styles.messageRow,
+            isUser ? styles.messageRowRight : styles.messageRowLeft,
+          ]}
+        >
+          {shouldUsePlainThoughtRow ? (
+            <View style={styles.plainThoughtWrap}>
+              <Pressable
+                onPress={() => toggleThinking(item.id)}
+                style={styles.plainThoughtTrigger}
               >
-                <Text
-                  variant="labelSmall"
-                  style={[styles.reasoningTitle, { color: metaColor }]}
-                >
-                  Reasoning
-                </Text>
-                {thinkingParts.map((part, index) => (
-                  <View
-                    key={`${item.id}-${part.type}-${index}`}
-                    style={styles.thinkingBlock}
-                  >
-                    {part.type !== "reasoning" && (
-                      <Text
-                        variant="labelSmall"
-                        style={[styles.thinkingLabel, { color: metaColor }]}
-                      >
-                        {part.type}
-                      </Text>
-                    )}
-                    <FormattedText
-                      text={part.content}
-                      baseStyle={[
-                        styles.thinkingText,
-                        { color: theme.colors.onSurface },
-                      ]}
-                    />
-                  </View>
-                ))}
-              </View>
-            ) : null}
-          </View>
-        ) : (
-          <View
-            style={[
-              styles.messageBubble,
-              {
-                backgroundColor: bubbleColor,
-                borderColor,
-                alignSelf: isUser ? "flex-end" : "flex-start",
-              },
-            ]}
-          >
-            <View style={styles.messageHeader}>
-              <Text
-                variant="labelMedium"
-                style={[styles.roleLabel, { color: metaColor }]}
-              >
-                {roleLabelMap[item.role]}
-              </Text>
-              <Text variant="labelSmall" style={{ color: metaColor }}>
-                {formatDateTime(item.createdAt)}
-              </Text>
-            </View>
-
-            <Pressable
-              disabled={!canToggleThinking}
-              onPress={() => toggleThinking(item.id)}
-              style={styles.messageBodyPressable}
-            >
-              <FormattedText
-                text={mainContent}
-                baseStyle={[styles.messageText, { color: textColor }]}
-              />
-
-              {canToggleThinking ? (
-                <View style={styles.thinkingInlineLabel}>
+                <View style={styles.plainThoughtHeader}>
                   <MaterialCommunityIcons
                     name="brain"
-                    size={14}
+                    size={16}
                     color={metaColor}
                   />
-                  <Text variant="labelSmall" style={{ color: metaColor }}>
+                  <Text variant="bodyMedium" style={{ color: metaColor }}>
                     {thinkingLabel}
                   </Text>
                 </View>
-              ) : null}
-            </Pressable>
+              </Pressable>
 
-            {canToggleThinking && isThinkingExpanded ? (
-              <View
-                style={[
-                  styles.thinkingPanel,
-                  { borderColor, backgroundColor: thinkingSurface },
-                ]}
-              >
-                <Text
-                  variant="labelSmall"
-                  style={[styles.reasoningTitle, { color: metaColor }]}
+              {isThinkingExpanded ? (
+                <View
+                  style={[
+                    styles.thinkingPanel,
+                    {
+                      borderColor,
+                      backgroundColor: thinkingSurface,
+                      alignSelf: "flex-start",
+                    },
+                  ]}
                 >
-                  Reasoning
-                </Text>
-                {thinkingParts.map((part, index) => (
-                  <View
-                    key={`${item.id}-${part.type}-${index}`}
-                    style={styles.thinkingBlock}
+                  <Text
+                    variant="labelSmall"
+                    style={[styles.reasoningTitle, { color: metaColor }]}
                   >
-                    {part.type !== "reasoning" && (
-                      <Text
-                        variant="labelSmall"
-                        style={[styles.thinkingLabel, { color: metaColor }]}
-                      >
-                        {part.type}
-                      </Text>
-                    )}
-                    <FormattedText
-                      text={part.content}
-                      baseStyle={[
-                        styles.thinkingText,
-                        { color: theme.colors.onSurface },
-                      ]}
-                    />
-                  </View>
-                ))}
+                    Reasoning
+                  </Text>
+                  {thinkingParts.map((part, index) => (
+                    <View
+                      key={`${item.id}-${part.type}-${index}`}
+                      style={styles.thinkingBlock}
+                    >
+                      {part.type !== "reasoning" && (
+                        <Text
+                          variant="labelSmall"
+                          style={[styles.thinkingLabel, { color: metaColor }]}
+                        >
+                          {part.type}
+                        </Text>
+                      )}
+                      <FormattedText
+                        text={part.content}
+                        baseStyle={[
+                          styles.thinkingText,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.messageBubble,
+                {
+                  backgroundColor: bubbleColor,
+                  borderColor,
+                  alignSelf: isUser ? "flex-end" : "flex-start",
+                },
+              ]}
+            >
+              <View style={styles.messageHeader}>
+                <Text
+                  variant="labelMedium"
+                  style={[styles.roleLabel, { color: metaColor }]}
+                >
+                  {roleLabelMap[item.role]}
+                </Text>
+                <Text variant="labelSmall" style={{ color: metaColor }}>
+                  {formatDateTime(item.createdAt)}
+                </Text>
               </View>
-            ) : null}
-          </View>
-        )}
-      </View>
-    );
-  };
+
+              <Pressable
+                disabled={!canToggleThinking}
+                onPress={() => toggleThinking(item.id)}
+                style={styles.messageBodyPressable}
+              >
+                <FormattedText
+                  text={mainContent}
+                  baseStyle={[styles.messageText, { color: textColor }]}
+                />
+
+                {canToggleThinking ? (
+                  <View style={styles.thinkingInlineLabel}>
+                    <MaterialCommunityIcons
+                      name="brain"
+                      size={14}
+                      color={metaColor}
+                    />
+                    <Text variant="labelSmall" style={{ color: metaColor }}>
+                      {thinkingLabel}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+
+              {canToggleThinking && isThinkingExpanded ? (
+                <View
+                  style={[
+                    styles.thinkingPanel,
+                    { borderColor, backgroundColor: thinkingSurface },
+                  ]}
+                >
+                  <Text
+                    variant="labelSmall"
+                    style={[styles.reasoningTitle, { color: metaColor }]}
+                  >
+                    Reasoning
+                  </Text>
+                  {thinkingParts.map((part, index) => (
+                    <View
+                      key={`${item.id}-${part.type}-${index}`}
+                      style={styles.thinkingBlock}
+                    >
+                      {part.type !== "reasoning" && (
+                        <Text
+                          variant="labelSmall"
+                          style={[styles.thinkingLabel, { color: metaColor }]}
+                        >
+                          {part.type}
+                        </Text>
+                      )}
+                      <FormattedText
+                        text={part.content}
+                        baseStyle={[
+                          styles.thinkingText,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          )}
+        </View>
+      );
+    },
+    [
+      expandedThinking,
+      assistantBubble,
+      borderColor,
+      thinkingSurface,
+      metaColor,
+      systemBubble,
+      userBubble,
+      theme.colors.onSurface,
+      toggleThinking,
+    ],
+  );
 
   const handleInputSelectionChange = React.useCallback(
     (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
@@ -1072,22 +1402,7 @@ export default function ChatScreen() {
           >
             <MaterialCommunityIcons
               name="cube-outline"
-              size={18}
-              color={theme.colors.onSurface}
-            />
-            <Text
-              variant="labelMedium"
-              style={[
-                styles.buttonGroupText,
-                { color: theme.colors.onSurface },
-              ]}
-              numberOfLines={1}
-            >
-              {activeModel?.name ?? "Model"}
-            </Text>
-            <MaterialCommunityIcons
-              name="chevron-down"
-              size={16}
+              size={20}
               color={theme.colors.onSurface}
             />
           </Pressable>
@@ -1112,24 +1427,39 @@ export default function ChatScreen() {
           >
             <MaterialCommunityIcons
               name="folder-outline"
-              size={18}
+              size={20}
               color={theme.colors.onSurface}
             />
-            <Text
-              variant="labelMedium"
-              style={[
-                styles.buttonGroupText,
-                { color: theme.colors.onSurface },
-              ]}
-              numberOfLines={1}
-            >
-              {activeProject?.name ?? "Select Project"}
-            </Text>
-            <MaterialCommunityIcons
-              name="chevron-down"
-              size={16}
-              color={theme.colors.onSurface}
-            />
+          </Pressable>
+          <View
+            style={[
+              styles.buttonGroupDivider,
+              { backgroundColor: borderColor },
+            ]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Refresh session"
+            onPress={handleRefreshPress}
+            disabled={isRefreshing}
+            style={[
+              styles.gitButton,
+              {
+                backgroundColor: theme.dark
+                  ? "rgba(17, 24, 39, 0.92)"
+                  : "rgba(255, 255, 255, 0.96)",
+              },
+            ]}
+          >
+            {isRefreshing ? (
+              <ActivityIndicator size="small" color={theme.colors.onSurface} />
+            ) : (
+              <MaterialCommunityIcons
+                name="refresh"
+                size={20}
+                color={theme.colors.onSurface}
+              />
+            )}
           </Pressable>
           <View
             style={[
@@ -1152,17 +1482,22 @@ export default function ChatScreen() {
           >
             <MaterialCommunityIcons
               name="source-branch"
-              size={18}
+              size={20}
               color={theme.colors.onSurface}
             />
           </Pressable>
         </View>
       </View>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
-        style={styles.keyboardContainer}
+      <View
+        style={[
+          styles.keyboardContainer,
+          {
+            paddingBottom:
+              keyboardHeight +
+              (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0),
+          },
+        ]}
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
@@ -1185,13 +1520,19 @@ export default function ChatScreen() {
               >
                 {String(error)}
               </Text>
+              <Pressable
+                onPress={() => refetch()}
+                style={[styles.retryButton, { borderColor }]}
+              >
+                <Text style={{ color: theme.colors.primary }}>Retry</Text>
+              </Pressable>
             </View>
           ) : (
             <FlatList
               ref={flatListRef}
               data={displayedMessages}
               renderItem={renderMessage}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => `${item.id}-${item.createdAt}`}
               contentContainerStyle={[
                 styles.listContent,
                 {
@@ -1207,6 +1548,10 @@ export default function ChatScreen() {
               maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               onScroll={handleScroll}
               scrollEventThrottle={16}
+              removeClippedSubviews={Platform.OS === "android"}
+              maxToRenderPerBatch={10}
+              windowSize={10}
+              initialNumToRender={15}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <Text
@@ -1242,7 +1587,7 @@ export default function ChatScreen() {
           showMentionSuggestions={showMentionSuggestions}
           trimmedInput={trimmedInput}
         />
-      </KeyboardAvoidingView>
+      </View>
 
       {!isNearBottom && (
         <Pressable
@@ -1286,7 +1631,7 @@ export default function ChatScreen() {
               </View>
             ) : (
               <FlatList
-                data={projects ?? []}
+                data={sortedProjects}
                 keyExtractor={(item) => item.id}
                 style={styles.sheetList}
                 renderItem={({ item }) => {
@@ -1383,7 +1728,7 @@ export default function ChatScreen() {
               </View>
             ) : (
               <FlatList
-                data={flattenProvidersToModels(providers ?? [])}
+                data={sortedModels}
                 keyExtractor={(item) => item.id}
                 style={styles.sheetList}
                 renderItem={({ item }) => {
@@ -1644,6 +1989,12 @@ const styles = StyleSheet.create({
   errorMessage: {
     textAlign: "center",
     marginBottom: 12,
+  },
+  retryButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
   },
   typingIndicator: {
     flexDirection: "row",

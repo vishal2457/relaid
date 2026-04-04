@@ -184,6 +184,7 @@ export async function runOpenCodeStream(
   sessionId?: string,
   interactionHandler?: OpenCodeInteractionHandler,
   abortSignal?: AbortSignal,
+  model?: { providerId: string; modelId: string },
 ): Promise<OpenCodeResult> {
   const options: CodingSdkOptions = {
     permissionMode: PERMISSION_MODE,
@@ -203,6 +204,7 @@ export async function runOpenCodeStream(
         sessionId,
         interactionHandler,
         abortSignal,
+        model,
       });
 
       return {

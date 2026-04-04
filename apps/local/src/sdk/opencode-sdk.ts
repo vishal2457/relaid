@@ -453,6 +453,7 @@ class OpencodeSdk extends BaseCodingSdk {
           timeoutMs,
           options?.abortSignal,
           options?.systemPrompt,
+          options?.model,
           onChunk,
         ),
       retryCount,
@@ -471,6 +472,7 @@ class OpencodeSdk extends BaseCodingSdk {
     timeoutMs: number,
     abortSignal: AbortSignal | undefined,
     systemPrompt: string | undefined,
+    model: { providerId: string; modelId: string } | undefined,
     onChunk: StreamCallback,
   ): Promise<CodingSdkResult> {
     logger.debug("runWithSdkStream called", { workingDir });
@@ -525,6 +527,10 @@ class OpencodeSdk extends BaseCodingSdk {
         directory: string;
         parts: Array<{ type: "text"; text: string }>;
         system?: string;
+        model?: {
+          providerID: string;
+          modelID: string;
+        };
       } = {
         sessionID: sessionId,
         directory: workingDir,
@@ -533,6 +539,13 @@ class OpencodeSdk extends BaseCodingSdk {
 
       if (systemPrompt) {
         promptBody.system = systemPrompt;
+      }
+
+      if (model) {
+        promptBody.model = {
+          providerID: model.providerId,
+          modelID: model.modelId,
+        };
       }
 
       const promptResult = (await opencode.client.session.promptAsync(
@@ -2174,23 +2187,45 @@ class OpencodeSdk extends BaseCodingSdk {
         throw new Error(this.formatUnknownError(result.error));
       }
 
-      const data = result.data as { all?: unknown } | undefined;
-      const providersArray = data?.all;
+      // SDK returns: { all: Provider[], connected: string[] }
+      const data = result.data as {
+        all?: unknown[];
+        connected?: string[];
+      };
 
-      if (!Array.isArray(providersArray)) {
+      if (!data || !Array.isArray(data.all)) {
+        logger.warn("OpenCode provider.list() returned unexpected format", {
+          data: result.data,
+        });
         return [];
       }
 
-      return (providersArray as OpencodeProviderRecord[]).map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        models: Array.isArray(provider.models)
-          ? provider.models.map((model) => ({
+      // Only include providers that are actually connected/authenticated
+      const connectedProviderIds = new Set(data.connected ?? []);
+
+      if (connectedProviderIds.size === 0) {
+        logger.warn("OpenCode has no connected providers");
+        return [];
+      }
+
+      return data.all
+        .filter((provider: any) => connectedProviderIds.has(provider?.id))
+        .map((provider: any) => {
+          // SDK returns models as an object { [modelId]: Model }, convert to array
+          let modelsArray: OpencodeProviderModelRecord[] = [];
+          if (provider.models && typeof provider.models === "object") {
+            modelsArray = Object.values(provider.models).map((model: any) => ({
               id: model.id,
               name: model.name,
-            }))
-          : [],
-      }));
+            }));
+          }
+
+          return {
+            id: provider.id,
+            name: provider.name,
+            models: modelsArray,
+          };
+        });
     } catch (error) {
       const errMsg = this.formatUnknownError(error);
       logger.error("Failed to list OpenCode providers", { error: errMsg });
