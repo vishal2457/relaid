@@ -48,6 +48,19 @@ export function useSessions(projectId: string) {
   });
 }
 
+export function useSession(sessionId: string) {
+  return useQuery<Session>({
+    queryKey: sessionsKeys.detail(sessionId),
+    enabled: Boolean(sessionId),
+    queryFn: async () => {
+      const response = await baseApi.get<{ session: Session }>(
+        `/sessions/${sessionId}`,
+      );
+      return response.data.session;
+    },
+  });
+}
+
 export async function createSession(projectId: string) {
   const response = await baseApi.post<{ session: Session }>("/sessions", {
     projectId,

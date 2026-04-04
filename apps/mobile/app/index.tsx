@@ -36,13 +36,22 @@ import {
   type SessionMessage,
 } from "@/lib/api/messages";
 import {
+  clearActiveSessionStream,
+  FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
+  getActiveSessionStream,
+  hasRecoveredAssistantResponse,
+  isStreamingSessionStatus,
+  saveActiveSessionStream,
+  shouldScheduleSessionRefresh,
+} from "@/lib/active-session-stream";
+import {
   useProjectFileSearch,
   useProjects,
   type Project,
   type ProjectFileMatch,
 } from "@/lib/api/projects";
 import { useProviders, type Provider } from "@/lib/api/providers";
-import { sessionsKeys, useCreateSession } from "@/lib/api/sessions";
+import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
 import { queryClient } from "@/lib/query-client";
 import { getChatSocket } from "@/lib/socket/chat";
 import {
@@ -248,7 +257,14 @@ export default function ChatScreen() {
   );
   const pendingRequestIdRef = React.useRef<string | null>(null);
   const activeSessionIdRef = React.useRef<string | null>(null);
+  const allowSessionChangeRecoveryRef = React.useRef(false);
   const [streamingContent, setStreamingContent] = React.useState("");
+  const followUpRefreshTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const requestRecoveryTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const [optimisticMessage, setOptimisticMessage] =
     React.useState<SessionMessage | null>(null);
   const [showProjectSheet, setShowProjectSheet] = React.useState(false);
@@ -284,9 +300,37 @@ export default function ChatScreen() {
     );
 
   React.useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    void (async () => {
       try {
+        const activeStream = await getActiveSessionStream();
+        if (cancelled) {
+          return;
+        }
+
+        if (activeStream && projects) {
+          const streamingProject = projects.find(
+            (project) => project.id === activeStream.projectId,
+          );
+          if (streamingProject) {
+            allowSessionChangeRecoveryRef.current = true;
+            activeSessionIdRef.current = activeStream.sessionId;
+            pendingRequestIdRef.current = activeStream.requestId;
+            setActiveProject(streamingProject);
+            setActiveSessionId(activeStream.sessionId);
+            setPendingRequestId(activeStream.requestId);
+            setOptimisticMessage(null);
+            setStreamingContent("");
+            return;
+          }
+        }
+
         const savedId = await AsyncStorage.getItem(LAST_SELECTED_PROJECT_ID);
+        if (cancelled) {
+          return;
+        }
+
         if (savedId) {
           if (projects) {
             const savedProject = projects.find((p) => p.id === savedId);
@@ -300,9 +344,15 @@ export default function ChatScreen() {
       } catch {
         // noop
       } finally {
-        setHydrated(true);
+        if (!cancelled) {
+          setHydrated(true);
+        }
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [projects]);
 
   React.useEffect(() => {
@@ -320,6 +370,7 @@ export default function ChatScreen() {
     error,
     refetch,
   } = useSessionMessages(activeSessionId ?? "");
+  const { refetch: refetchActiveSession } = useSession(activeSessionId ?? "");
 
   const displayedMessages = React.useMemo(() => {
     if (!optimisticMessage) {
@@ -371,6 +422,116 @@ export default function ChatScreen() {
     pendingRequestIdRef.current = pendingRequestId;
   }, [pendingRequestId]);
 
+  const clearFollowUpRefreshTimeout = React.useCallback(() => {
+    if (followUpRefreshTimeoutRef.current) {
+      clearTimeout(followUpRefreshTimeoutRef.current);
+      followUpRefreshTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearRequestRecoveryTimeout = React.useCallback(() => {
+    if (requestRecoveryTimeoutRef.current) {
+      clearTimeout(requestRecoveryTimeoutRef.current);
+      requestRecoveryTimeoutRef.current = null;
+    }
+  }, []);
+
+  const refreshActiveSessionSnapshot = React.useCallback(
+    (followUp = false) => {
+      if (!activeSessionIdRef.current) {
+        return;
+      }
+
+      void refetch();
+      void refetchActiveSession();
+
+      if (!followUp) {
+        clearFollowUpRefreshTimeout();
+        return;
+      }
+
+      clearFollowUpRefreshTimeout();
+      followUpRefreshTimeoutRef.current = setTimeout(() => {
+        followUpRefreshTimeoutRef.current = null;
+        void refetch();
+        void refetchActiveSession();
+      }, FOLLOW_UP_SESSION_REFRESH_DELAY_MS);
+    },
+    [clearFollowUpRefreshTimeout, refetch, refetchActiveSession],
+  );
+
+  const clearPendingStreamState = React.useCallback(
+    (requestId?: string) => {
+      pendingRequestIdRef.current = null;
+      setPendingRequestId(null);
+      setOptimisticMessage(null);
+      setStreamingContent("");
+      clearFollowUpRefreshTimeout();
+      clearRequestRecoveryTimeout();
+      void clearActiveSessionStream(requestId);
+    },
+    [clearFollowUpRefreshTimeout, clearRequestRecoveryTimeout],
+  );
+
+  const recoverPendingStream = React.useCallback(async () => {
+    const sessionId = activeSessionIdRef.current;
+    if (!sessionId) {
+      return;
+    }
+
+    const activeStream = await getActiveSessionStream();
+    if (!activeStream || activeStream.sessionId !== sessionId) {
+      return;
+    }
+
+    pendingRequestIdRef.current = activeStream.requestId;
+    setPendingRequestId(activeStream.requestId);
+    setOptimisticMessage(null);
+    setStreamingContent("");
+
+    const [sessionResult, messagesResult] = await Promise.allSettled([
+      refetchActiveSession(),
+      refetch(),
+    ]);
+
+    if (sessionResult.status !== "fulfilled") {
+      return;
+    }
+
+    const recoveredMessages =
+      messagesResult.status === "fulfilled"
+        ? messagesResult.value.data
+        : undefined;
+
+    if (
+      !isStreamingSessionStatus(sessionResult.value.data?.status) &&
+      hasRecoveredAssistantResponse(
+        recoveredMessages,
+        activeStream.baselineMessageId,
+      )
+    ) {
+      clearPendingStreamState(activeStream.requestId);
+    }
+  }, [clearPendingStreamState, refetch, refetchActiveSession]);
+
+  React.useEffect(() => {
+    return () => {
+      clearFollowUpRefreshTimeout();
+      clearRequestRecoveryTimeout();
+    };
+  }, [clearFollowUpRefreshTimeout, clearRequestRecoveryTimeout]);
+
+  React.useEffect(() => {
+    if (
+      allowSessionChangeRecoveryRef.current &&
+      activeSessionId &&
+      pendingRequestIdRef.current
+    ) {
+      allowSessionChangeRecoveryRef.current = false;
+      void recoverPendingStream();
+    }
+  }, [activeSessionId, recoverPendingStream]);
+
   React.useEffect(() => {
     const socket = getChatSocket();
     if (!socket.connected) {
@@ -407,19 +568,18 @@ export default function ChatScreen() {
         return;
       }
 
-      pendingRequestIdRef.current = null;
-      setPendingRequestId(null);
-      setOptimisticMessage(null);
-      setStreamingContent("");
+      clearPendingStreamState(payload.requestId);
 
       if (payload.messages) {
         queryClient.setQueryData(
           messageKeys.list(payload.sessionId),
           payload.messages,
         );
-      } else {
-        void refetch();
       }
+
+      refreshActiveSessionSnapshot(
+        shouldScheduleSessionRefresh(payload.messages, payload.output),
+      );
 
       void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
 
@@ -449,10 +609,7 @@ export default function ChatScreen() {
         return;
       }
 
-      pendingRequestIdRef.current = null;
-      setPendingRequestId(null);
-      setOptimisticMessage(null);
-      setStreamingContent("");
+      clearPendingStreamState(payload.requestId);
       Alert.alert("Socket error", payload.message || "Failed to send message");
     };
 
@@ -463,7 +620,7 @@ export default function ChatScreen() {
 
     const handleReconnect = () => {
       if (activeSessionIdRef.current && pendingRequestIdRef.current) {
-        void refetch();
+        void recoverPendingStream();
       }
     };
     socket.on("connect", handleReconnect);
@@ -475,25 +632,23 @@ export default function ChatScreen() {
       socket.off("error_response", handleErrorResponse);
       socket.off("connect", handleReconnect);
     };
-  }, [refetch]);
+  }, [
+    clearPendingStreamState,
+    recoverPendingStream,
+    refreshActiveSessionSnapshot,
+  ]);
 
   React.useEffect(() => {
     if (!activeSessionId) return;
 
     const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active") {
-        if (pendingRequestIdRef.current) {
-          pendingRequestIdRef.current = null;
-          setPendingRequestId(null);
-          setOptimisticMessage(null);
-          setStreamingContent("");
-        }
-        void refetch();
+      if (nextState === "active" && pendingRequestIdRef.current) {
+        void recoverPendingStream();
       }
     });
 
     return () => subscription.remove();
-  }, [activeSessionId, refetch]);
+  }, [activeSessionId, recoverPendingStream]);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
   const metaColor = theme.dark ? "#B8C2D1" : "#526277";
@@ -531,6 +686,7 @@ export default function ChatScreen() {
           activeProject.id,
         );
         sessionId = session.id;
+        allowSessionChangeRecoveryRef.current = false;
         setActiveSessionId(sessionId);
       } catch (createError) {
         console.error(createError);
@@ -561,18 +717,19 @@ export default function ChatScreen() {
     setInputText("");
     setInputSelection({ start: 0, end: 0 });
     setInputHeight(MIN_INPUT_HEIGHT);
+    void saveActiveSessionStream({
+      requestId,
+      projectId: activeProject.id,
+      sessionId,
+      baselineMessageId: messages?.[messages.length - 1]?.id ?? null,
+    });
 
-    setTimeout(() => {
-      setPendingRequestId((current) => {
-        if (current === requestId) {
-          pendingRequestIdRef.current = null;
-          setOptimisticMessage(null);
-          setStreamingContent("");
-          return null;
-        }
-        return current;
-      });
-      void refetch();
+    clearRequestRecoveryTimeout();
+    requestRecoveryTimeoutRef.current = setTimeout(() => {
+      requestRecoveryTimeoutRef.current = null;
+      if (pendingRequestIdRef.current === requestId) {
+        void recoverPendingStream();
+      }
     }, 60_000);
 
     const socket = getChatSocket();
@@ -591,8 +748,10 @@ export default function ChatScreen() {
     activeSessionId,
     trimmedInput,
     isSending,
+    messages,
     createSessionMutation,
-    refetch,
+    clearRequestRecoveryTimeout,
+    recoverPendingStream,
   ]);
 
   const toggleThinking = (messageId: string) => {
@@ -981,7 +1140,7 @@ export default function ChatScreen() {
         style={styles.keyboardContainer}
       >
         <View style={styles.messagesContainer}>
-          {messagesLoading && activeSessionId ? (
+          {messagesLoading && activeSessionId && displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>

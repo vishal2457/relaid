@@ -50,12 +50,7 @@ type CollapsibleSectionProps = {
   onSelectAll: (paths: string[]) => void;
   isActive: boolean;
   disabled: boolean;
-  actionLabel: string;
-  actionIcon: string;
-  actionColor: string;
-  actionOnPress: string;
-  onAction: () => void;
-  isActionLoading: boolean;
+  onCollapse: (paths: string[]) => void;
 };
 
 function CollapsibleSection({
@@ -70,11 +65,7 @@ function CollapsibleSection({
   onSelectAll,
   isActive,
   disabled,
-  actionLabel,
-  actionIcon,
-  actionColor,
-  onAction,
-  isActionLoading,
+  onCollapse,
 }: CollapsibleSectionProps) {
   const [expanded, setExpanded] = useState(true);
 
@@ -98,7 +89,10 @@ function CollapsibleSection({
     <View style={styles.section}>
       <Pressable
         style={[styles.sectionHeader, { borderBottomColor: borderColor }]}
-        onPress={() => setExpanded((prev) => !prev)}
+        onPress={() => {
+          if (expanded) onCollapse(files.map((f) => f.path));
+          setExpanded((prev) => !prev);
+        }}
       >
         <View style={styles.sectionHeaderLeft}>
           <MaterialCommunityIcons
@@ -196,37 +190,6 @@ function CollapsibleSection({
               );
             }}
           />
-
-          {selectedCount > 0 && isActive && (
-            <View style={styles.sectionActionBar}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.sectionActionBtn,
-                  {
-                    backgroundColor: actionColor,
-                    opacity: pressed || isActionLoading ? 0.7 : 1,
-                  },
-                ]}
-                onPress={onAction}
-                disabled={isActionLoading}
-              >
-                {isActionLoading ? (
-                  <ActivityIndicator size={14} color="#fff" />
-                ) : (
-                  <MaterialCommunityIcons
-                    name={actionIcon as any}
-                    size={14}
-                    color="#fff"
-                  />
-                )}
-                <Text variant="labelSmall" style={styles.sectionActionText}>
-                  {isActionLoading
-                    ? `${actionLabel.slice(0, -1)}ing...`
-                    : `${actionLabel} ${selectedCount}`}
-                </Text>
-              </Pressable>
-            </View>
-          )}
         </>
       )}
     </View>
@@ -254,7 +217,7 @@ export function GitDrawer({
   const [activeSection, setActiveSection] = useState<Section>("none");
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 
-  const { data, isLoading, error } = useGitFileStatus(
+  const { data, isLoading, error, refetch, isRefetching } = useGitFileStatus(
     activeProject?.id ?? "",
     Boolean(activeProject),
   );
@@ -304,6 +267,22 @@ export function GitDrawer({
     });
   }, []);
 
+  const clearSectionFiles = useCallback((paths: string[]) => {
+    setSelectedFiles((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const p of paths) {
+        if (next.has(p)) {
+          next.delete(p);
+          changed = true;
+        }
+      }
+      if (!changed) return prev;
+      if (next.size === 0) setActiveSection("none");
+      return next;
+    });
+  }, []);
+
   const handleStage = () => {
     const files = Array.from(selectedFiles);
     stageFiles.mutate(files, { onSuccess: clearSelection });
@@ -350,6 +329,21 @@ export function GitDrawer({
               Git
             </Text>
           )}
+          <Pressable
+            onPress={() => refetch()}
+            style={[styles.closeButton, { borderColor, marginRight: 8 }]}
+            disabled={!activeProject || isRefetching}
+          >
+            {isRefetching ? (
+              <ActivityIndicator size={18} />
+            ) : (
+              <MaterialCommunityIcons
+                name="refresh"
+                size={20}
+                color={theme.colors.onSurface}
+              />
+            )}
+          </Pressable>
           <Pressable
             onPress={onClose}
             style={[styles.closeButton, { borderColor }]}
@@ -420,12 +414,7 @@ export function GitDrawer({
                   onSelectAll={(paths) => handleSelectAll(paths, "changes")}
                   isActive={activeSection === "changes"}
                   disabled={activeSection === "staged"}
-                  actionLabel="Stage"
-                  actionIcon="plus"
-                  actionColor="#2563EB"
-                  actionOnPress="stage"
-                  onAction={handleStage}
-                  isActionLoading={stageFiles.isPending}
+                  onCollapse={clearSectionFiles}
                 />
                 <CollapsibleSection
                   title="Staged"
@@ -439,17 +428,60 @@ export function GitDrawer({
                   onSelectAll={(paths) => handleSelectAll(paths, "staged")}
                   isActive={activeSection === "staged"}
                   disabled={activeSection === "changes"}
-                  actionLabel="Unstage"
-                  actionIcon="minus"
-                  actionColor="#D97706"
-                  actionOnPress="unstage"
-                  onAction={handleUnstage}
-                  isActionLoading={unstageFiles.isPending}
+                  onCollapse={clearSectionFiles}
                 />
               </>
             }
           />
         )}
+
+        {activeProject &&
+          !isLoading &&
+          !error &&
+          activeSection !== "none" &&
+          selectedFiles.size > 0 && (
+            <View
+              style={[styles.bottomActionBar, { borderTopColor: borderColor }]}
+            >
+              <Pressable
+                style={({ pressed }) => [
+                  styles.bottomActionBtn,
+                  {
+                    backgroundColor:
+                      activeSection === "changes" ? "#2563EB" : "#D97706",
+                    opacity:
+                      pressed || stageFiles.isPending || unstageFiles.isPending
+                        ? 0.7
+                        : 1,
+                  },
+                ]}
+                onPress={
+                  activeSection === "changes" ? handleStage : handleUnstage
+                }
+                disabled={stageFiles.isPending || unstageFiles.isPending}
+              >
+                {(activeSection === "changes" && stageFiles.isPending) ||
+                (activeSection === "staged" && unstageFiles.isPending) ? (
+                  <ActivityIndicator size={14} color="#fff" />
+                ) : (
+                  <MaterialCommunityIcons
+                    name={activeSection === "changes" ? "plus" : "minus"}
+                    size={14}
+                    color="#fff"
+                  />
+                )}
+                <Text variant="labelSmall" style={styles.bottomActionText}>
+                  {activeSection === "changes" && stageFiles.isPending
+                    ? "Staging..."
+                    : activeSection === "staged" && unstageFiles.isPending
+                      ? "Unstaging..."
+                      : activeSection === "changes"
+                        ? `Stage ${selectedFiles.size}`
+                        : `Unstage ${selectedFiles.size}`}
+                </Text>
+              </Pressable>
+            </View>
+          )}
       </View>
     </>
   );
@@ -564,12 +596,13 @@ const styles = StyleSheet.create({
   fileInfo: {
     flex: 1,
   },
-  sectionActionBar: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  bottomActionBar: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
     alignItems: "flex-start",
   },
-  sectionActionBtn: {
+  bottomActionBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -577,7 +610,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 16,
   },
-  sectionActionText: {
+  bottomActionText: {
     color: "#fff",
     fontWeight: "600",
   },

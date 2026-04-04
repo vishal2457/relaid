@@ -17,6 +17,7 @@ const PORT = parseInt(process.env.PORT || "0", 10);
 const HOST = process.env.HOST || "0.0.0.0";
 
 const RUNNING_JOBS_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const SESSION_MESSAGES_FETCH_RETRY_DELAYS_MS = [0, 150, 350, 750];
 
 async function startRunningJobsScheduler(): Promise<void> {
   const checkRunningJobs = (): void => {
@@ -33,6 +34,53 @@ async function startRunningJobsScheduler(): Promise<void> {
   logger.info("Running jobs scheduler started", {
     intervalMs: RUNNING_JOBS_CHECK_INTERVAL_MS,
   });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hasCompletedAssistantVisibleContent(
+  messages: Awaited<
+    ReturnType<typeof opencodeCatalogService.getSessionMessages>
+  >,
+  expectedOutput: string,
+): boolean {
+  if (!expectedOutput.trim()) {
+    return true;
+  }
+
+  const lastMessage = messages[messages.length - 1];
+  return Boolean(
+    lastMessage &&
+    lastMessage.role === "assistant" &&
+    lastMessage.visibleContent.trim(),
+  );
+}
+
+async function getSettledSessionMessages(
+  sessionId: string,
+  expectedOutput: string,
+): Promise<
+  Awaited<ReturnType<typeof opencodeCatalogService.getSessionMessages>>
+> {
+  let latestMessages =
+    await opencodeCatalogService.getSessionMessages(sessionId);
+
+  if (hasCompletedAssistantVisibleContent(latestMessages, expectedOutput)) {
+    return latestMessages;
+  }
+
+  for (const delayMs of SESSION_MESSAGES_FETCH_RETRY_DELAYS_MS.slice(1)) {
+    await sleep(delayMs);
+    latestMessages = await opencodeCatalogService.getSessionMessages(sessionId);
+
+    if (hasCompletedAssistantVisibleContent(latestMessages, expectedOutput)) {
+      return latestMessages;
+    }
+  }
+
+  return latestMessages;
 }
 
 async function main(): Promise<void> {
@@ -171,7 +219,10 @@ async function main(): Promise<void> {
 
       const resolvedSessionId = result.sessionId || payload.sessionId;
       const messages = resolvedSessionId
-        ? await opencodeCatalogService.getSessionMessages(resolvedSessionId)
+        ? await getSettledSessionMessages(
+            resolvedSessionId,
+            result.success ? result.output : "",
+          )
         : [];
 
       return {

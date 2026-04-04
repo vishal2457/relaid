@@ -2,6 +2,7 @@ import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   Alert,
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -25,7 +26,16 @@ import {
   useSessionMessages,
   type SessionMessage,
 } from "@/lib/api/messages";
-import { sessionsKeys, useCreateSession } from "@/lib/api/sessions";
+import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
+import {
+  clearActiveSessionStream,
+  FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
+  getActiveSessionStream,
+  hasRecoveredAssistantResponse,
+  isStreamingSessionStatus,
+  saveActiveSessionStream,
+  shouldScheduleSessionRefresh,
+} from "@/lib/active-session-stream";
 import { queryClient } from "@/lib/query-client";
 import { getChatSocket } from "@/lib/socket/chat";
 
@@ -173,9 +183,13 @@ export default function SessionMessagesScreen() {
   const [pendingRequestId, setPendingRequestId] = React.useState<string | null>(
     null,
   );
+  const pendingRequestIdRef = React.useRef<string | null>(null);
   const [streamingContent, setStreamingContent] = React.useState<string>("");
   const [optimisticMessage, setOptimisticMessage] =
     React.useState<SessionMessage | null>(null);
+  const followUpRefreshTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const createSessionMutation = useCreateSession();
 
   const { projectId, sessionId } = useLocalSearchParams<{
@@ -190,6 +204,7 @@ export default function SessionMessagesScreen() {
     refetch,
     isRefetching,
   } = useSessionMessages(sessionId ?? "");
+  const { refetch: refetchSession } = useSession(sessionId ?? "");
 
   const displayedMessages = React.useMemo(() => {
     if (!optimisticMessage) {
@@ -239,6 +254,113 @@ export default function SessionMessagesScreen() {
   }, [streamingContent]);
 
   React.useEffect(() => {
+    pendingRequestIdRef.current = pendingRequestId;
+  }, [pendingRequestId]);
+
+  const clearFollowUpRefreshTimeout = React.useCallback(() => {
+    if (followUpRefreshTimeoutRef.current) {
+      clearTimeout(followUpRefreshTimeoutRef.current);
+      followUpRefreshTimeoutRef.current = null;
+    }
+  }, []);
+
+  const refreshSessionSnapshot = React.useCallback(
+    (followUp = false) => {
+      void refetch();
+      void refetchSession();
+
+      if (!followUp) {
+        clearFollowUpRefreshTimeout();
+        return;
+      }
+
+      clearFollowUpRefreshTimeout();
+      followUpRefreshTimeoutRef.current = setTimeout(() => {
+        followUpRefreshTimeoutRef.current = null;
+        void refetch();
+        void refetchSession();
+      }, FOLLOW_UP_SESSION_REFRESH_DELAY_MS);
+    },
+    [clearFollowUpRefreshTimeout, refetch, refetchSession],
+  );
+
+  const clearPendingStreamState = React.useCallback(
+    (requestId?: string) => {
+      pendingRequestIdRef.current = null;
+      setPendingRequestId(null);
+      setOptimisticMessage(null);
+      setStreamingContent("");
+      clearFollowUpRefreshTimeout();
+      void clearActiveSessionStream(requestId);
+    },
+    [clearFollowUpRefreshTimeout],
+  );
+
+  const recoverPendingStream = React.useCallback(async () => {
+    if (!projectId || !sessionId) {
+      return;
+    }
+
+    const activeStream = await getActiveSessionStream();
+    if (
+      !activeStream ||
+      activeStream.projectId !== projectId ||
+      activeStream.sessionId !== sessionId
+    ) {
+      return;
+    }
+
+    pendingRequestIdRef.current = activeStream.requestId;
+    setPendingRequestId(activeStream.requestId);
+    setOptimisticMessage(null);
+    setStreamingContent("");
+
+    const [sessionResult, messagesResult] = await Promise.allSettled([
+      refetchSession(),
+      refetch(),
+    ]);
+
+    if (sessionResult.status !== "fulfilled") {
+      return;
+    }
+
+    const recoveredMessages =
+      messagesResult.status === "fulfilled"
+        ? messagesResult.value.data
+        : undefined;
+
+    if (
+      !isStreamingSessionStatus(sessionResult.value.data?.status) &&
+      hasRecoveredAssistantResponse(
+        recoveredMessages,
+        activeStream.baselineMessageId,
+      )
+    ) {
+      clearPendingStreamState(activeStream.requestId);
+    }
+  }, [clearPendingStreamState, projectId, refetch, refetchSession, sessionId]);
+
+  React.useEffect(() => {
+    return () => {
+      clearFollowUpRefreshTimeout();
+    };
+  }, [clearFollowUpRefreshTimeout]);
+
+  React.useEffect(() => {
+    void recoverPendingStream();
+  }, [recoverPendingStream]);
+
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && pendingRequestIdRef.current) {
+        void recoverPendingStream();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [recoverPendingStream]);
+
+  React.useEffect(() => {
     if (!sessionId || !projectId) {
       return;
     }
@@ -250,7 +372,7 @@ export default function SessionMessagesScreen() {
 
     const handlePromptStarted = (payload: SessionPromptStartedEvent) => {
       if (
-        payload.requestId === pendingRequestId &&
+        payload.requestId === pendingRequestIdRef.current &&
         payload.sessionId === sessionId
       ) {
         setPendingRequestId(payload.requestId);
@@ -259,7 +381,7 @@ export default function SessionMessagesScreen() {
 
     const handleStreamChunk = (payload: SessionStreamChunkEvent) => {
       if (
-        payload.requestId !== pendingRequestId ||
+        payload.requestId !== pendingRequestIdRef.current ||
         payload.sessionId !== sessionId
       ) {
         return;
@@ -272,21 +394,21 @@ export default function SessionMessagesScreen() {
 
     const handlePromptResponse = (payload: SessionPromptResponseEvent) => {
       if (
-        payload.requestId !== pendingRequestId ||
+        payload.requestId !== pendingRequestIdRef.current ||
         payload.sessionId !== sessionId
       ) {
         return;
       }
 
-      setPendingRequestId(null);
-      setOptimisticMessage(null);
-      setStreamingContent("");
+      clearPendingStreamState(payload.requestId);
 
       if (payload.messages) {
         queryClient.setQueryData(messageKeys.list(sessionId), payload.messages);
-      } else {
-        void refetch();
       }
+
+      refreshSessionSnapshot(
+        shouldScheduleSessionRefresh(payload.messages, payload.output),
+      );
 
       void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
 
@@ -302,27 +424,40 @@ export default function SessionMessagesScreen() {
       requestId?: string;
       message?: string;
     }) => {
-      if (payload.requestId !== pendingRequestId) {
+      if (payload.requestId !== pendingRequestIdRef.current) {
         return;
       }
 
-      setPendingRequestId(null);
-      setOptimisticMessage(null);
+      clearPendingStreamState(payload.requestId);
       Alert.alert("Socket error", payload.message || "Failed to send message");
+    };
+
+    const handleReconnect = () => {
+      if (pendingRequestIdRef.current) {
+        void recoverPendingStream();
+      }
     };
 
     socket.on("session_prompt_started", handlePromptStarted);
     socket.on("session_stream_chunk", handleStreamChunk);
     socket.on("session_prompt_response", handlePromptResponse);
     socket.on("error_response", handleErrorResponse);
+    socket.on("connect", handleReconnect);
 
     return () => {
       socket.off("session_prompt_started", handlePromptStarted);
       socket.off("session_stream_chunk", handleStreamChunk);
       socket.off("session_prompt_response", handlePromptResponse);
       socket.off("error_response", handleErrorResponse);
+      socket.off("connect", handleReconnect);
     };
-  }, [pendingRequestId, projectId, refetch, sessionId]);
+  }, [
+    clearPendingStreamState,
+    projectId,
+    recoverPendingStream,
+    refreshSessionSnapshot,
+    sessionId,
+  ]);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
   const metaColor = theme.dark ? "#B8C2D1" : "#526277";
@@ -383,6 +518,7 @@ export default function SessionMessagesScreen() {
       .slice(2, 9)}`;
 
     setPendingRequestId(requestId);
+    pendingRequestIdRef.current = requestId;
     setOptimisticMessage({
       id: `optimistic_${requestId}`,
       sessionId,
@@ -396,6 +532,12 @@ export default function SessionMessagesScreen() {
     });
     setInputText("");
     setInputHeight(MIN_INPUT_HEIGHT);
+    void saveActiveSessionStream({
+      requestId,
+      projectId,
+      sessionId,
+      baselineMessageId: messages?.[messages.length - 1]?.id ?? null,
+    });
 
     const socket = getChatSocket();
     if (!socket.connected) {
@@ -408,7 +550,7 @@ export default function SessionMessagesScreen() {
       sessionId,
       prompt: trimmedInput,
     });
-  }, [isSending, projectId, sessionId, trimmedInput]);
+  }, [isSending, messages, projectId, sessionId, trimmedInput]);
 
   const handleCreateSession = React.useCallback(async () => {
     if (!projectId || createSessionMutation.isPending) {
@@ -733,7 +875,7 @@ export default function SessionMessagesScreen() {
               style={StyleSheet.absoluteFill}
             />
           </View>
-          {isLoading ? (
+          {isLoading && displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
