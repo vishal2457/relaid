@@ -23,6 +23,27 @@ type GitStageFilesResponse = {
   error?: string;
 };
 
+type DiffLine = {
+  type: "add" | "remove" | "context";
+  content: string;
+};
+
+type DiffHunk = {
+  header: string;
+  lines: DiffLine[];
+};
+
+type FileDiff = {
+  fileName: string;
+  hunks: DiffHunk[];
+};
+
+type GitFileDiffResponse = {
+  files: FileDiff[];
+  success: boolean;
+  error?: string;
+};
+
 function handleRouteError(
   res: Response,
   defaultMessage: string,
@@ -147,6 +168,85 @@ router.post("/:projectId/unstage", async (req: Request, res: Response) => {
     });
   } catch (error) {
     handleRouteError(res, "Failed to unstage files", error);
+  }
+});
+
+router.get("/:projectId/diff", async (req: Request, res: Response) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    const { projectId } = req.params;
+    const filePath = req.query.filePath as string;
+    const serverId = req.headers["x-server-id"] as string | undefined;
+
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    if (!filePath) {
+      res.status(400).json({ error: "filePath query param is required" });
+      return;
+    }
+
+    const result = await requestConnectedServer<GitFileDiffResponse>(
+      userId,
+      "git_file_diff_request",
+      "git_file_diff_response",
+      { projectId, filePath },
+      serverId,
+    );
+
+    res.json({
+      files: result.response.files || [],
+      success: result.response.success,
+      error: result.response.error,
+    });
+  } catch (error) {
+    handleRouteError(res, "Failed to get file diff", error);
+  }
+});
+
+router.post("/:projectId/discard", async (req: Request, res: Response) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    const { projectId } = req.params;
+    const { filePath } = req.body as { filePath: string };
+    const serverId = req.headers["x-server-id"] as string | undefined;
+
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    if (!filePath) {
+      res.status(400).json({ error: "filePath is required" });
+      return;
+    }
+
+    const result = await requestConnectedServer<GitStageFilesResponse>(
+      userId,
+      "git_discard_file_request",
+      "git_discard_file_response",
+      { projectId, filePath },
+      serverId,
+    );
+
+    res.json({
+      success: result.response.success,
+      error: result.response.error,
+    });
+  } catch (error) {
+    handleRouteError(res, "Failed to discard changes", error);
   }
 });
 

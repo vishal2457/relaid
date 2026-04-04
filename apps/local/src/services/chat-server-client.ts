@@ -357,6 +357,20 @@ export class ChatServerClient {
         void this.handleGitUnstageFilesRequest(payload);
       },
     );
+
+    this.socket.on(
+      "git_file_diff_request",
+      (payload: { requestId: string; projectId: string; filePath: string }) => {
+        void this.handleGitFileDiffRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "git_discard_file_request",
+      (payload: { requestId: string; projectId: string; filePath: string }) => {
+        void this.handleGitDiscardFileRequest(payload);
+      },
+    );
   }
 
   private scheduleReconnect(): void {
@@ -951,6 +965,94 @@ export class ChatServerClient {
         requestId: payload.requestId,
       });
       this.emit("git_unstage_files_response", {
+        requestId: payload.requestId,
+        success: false,
+        error: errMsg,
+      });
+    }
+  }
+
+  private async handleGitFileDiffRequest(payload: {
+    requestId: string;
+    projectId: string;
+    filePath: string;
+  }): Promise<void> {
+    try {
+      const project = await opencodeCatalogService.getProject(
+        payload.projectId,
+      );
+
+      if (!project) {
+        this.emit("git_file_diff_response", {
+          requestId: payload.requestId,
+          files: [],
+          error: "Project not found",
+        });
+        return;
+      }
+
+      const gitService = new GitService(project.folder);
+      const result = await gitService.diffFile(payload.filePath);
+
+      this.emit("git_file_diff_response", {
+        requestId: payload.requestId,
+        files: result.data ?? [],
+        success: result.success,
+        error: result.error,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to get file diff", {
+        error: errMsg,
+        projectId: payload.projectId,
+        filePath: payload.filePath,
+        requestId: payload.requestId,
+      });
+      this.emit("git_file_diff_response", {
+        requestId: payload.requestId,
+        files: [],
+        success: false,
+        error: errMsg,
+      });
+    }
+  }
+
+  private async handleGitDiscardFileRequest(payload: {
+    requestId: string;
+    projectId: string;
+    filePath: string;
+  }): Promise<void> {
+    try {
+      const project = await opencodeCatalogService.getProject(
+        payload.projectId,
+      );
+
+      if (!project) {
+        this.emit("git_discard_file_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Project not found",
+        });
+        return;
+      }
+
+      const gitService = new GitService(project.folder);
+      const result = await gitService.discardChanges([payload.filePath]);
+
+      this.emit("git_discard_file_response", {
+        requestId: payload.requestId,
+        success: result.success,
+        error: result.error,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to discard file changes", {
+        error: errMsg,
+        projectId: payload.projectId,
+        filePath: payload.filePath,
+        requestId: payload.requestId,
+      });
+      this.emit("git_discard_file_response", {
         requestId: payload.requestId,
         success: false,
         error: errMsg,

@@ -96,6 +96,10 @@ function RootLayoutInner() {
         <Stack>
           <Stack.Screen name="pair" options={{ headerShown: false }} />
           <Stack.Screen
+            name="diff"
+            options={{ headerShown: true, presentation: "modal" }}
+          />
+          <Stack.Screen
             name="settings"
             options={{ headerShown: false, presentation: "modal" }}
           />

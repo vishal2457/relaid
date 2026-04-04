@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import simpleGit, {
   type SimpleGit,
   type CommitResult,
@@ -39,6 +41,56 @@ export interface GitResult<T = string> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+export interface DiffLine {
+  type: "add" | "remove" | "context";
+  content: string;
+}
+
+export interface DiffHunk {
+  header: string;
+  lines: DiffLine[];
+}
+
+export interface FileDiff {
+  fileName: string;
+  hunks: DiffHunk[];
+}
+
+export function parseDiff(rawDiff: string): FileDiff[] {
+  const files: FileDiff[] = [];
+  const fileBlocks = rawDiff.split(/^diff --git/m).filter(Boolean);
+
+  for (const block of fileBlocks) {
+    const lines = block.split("\n");
+    const fileHeader = lines[0];
+    const match = fileHeader.match(/a\/(.+?) b\/(.+)/);
+    const fileName = match ? match[2] : "unknown";
+
+    const hunks: DiffHunk[] = [];
+    let currentHunk: DiffHunk | null = null;
+
+    for (const line of lines) {
+      if (line.startsWith("@@")) {
+        if (currentHunk) hunks.push(currentHunk);
+        currentHunk = { header: line, lines: [] };
+      } else if (currentHunk) {
+        if (line.startsWith("+")) {
+          currentHunk.lines.push({ type: "add", content: line.slice(1) });
+        } else if (line.startsWith("-")) {
+          currentHunk.lines.push({ type: "remove", content: line.slice(1) });
+        } else {
+          currentHunk.lines.push({ type: "context", content: line.slice(1) });
+        }
+      }
+    }
+    if (currentHunk) hunks.push(currentHunk);
+
+    files.push({ fileName, hunks });
+  }
+
+  return files;
 }
 
 export class GitService {
@@ -344,7 +396,32 @@ export class GitService {
       return { success: false, error: "No files specified" };
     }
     try {
-      await this.git.checkout(["--", ...files]);
+      const status = await this.git.status();
+      const trackedFiles = files.filter(
+        (f) =>
+          status.modified.includes(f) ||
+          status.deleted.includes(f) ||
+          status.staged.includes(f) ||
+          status.conflicted.includes(f),
+      );
+      const untrackedFiles = files.filter(
+        (f) => status.not_added.includes(f) || status.created.includes(f),
+      );
+
+      if (trackedFiles.length > 0) {
+        if (status.staged.length > 0) {
+          await this.git.reset(["HEAD", ...trackedFiles]);
+        }
+        await this.git.checkout(["--", ...trackedFiles]);
+      }
+
+      for (const f of untrackedFiles) {
+        const fullPath = path.join(this.cwd, f);
+        if (fs.existsSync(fullPath)) {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        }
+      }
+
       logger.info("Discarded changes", { files, cwd: this.cwd });
       return {
         success: true,
@@ -513,6 +590,44 @@ export class GitService {
       return { success: true, data: diff };
     } catch (error) {
       return this.handleError("diffUnstaged", error);
+    }
+  }
+
+  async diffFile(filePath: string): Promise<GitResult<FileDiff[]>> {
+    try {
+      const diff = await this.git.diff(["HEAD", "--", filePath]);
+      if (!diff.trim()) {
+        const status = await this.git.status();
+        const isNewFile =
+          status.not_added.includes(filePath) ||
+          status.created.includes(filePath) ||
+          (status.staged.includes(filePath) &&
+            !status.modified.includes(filePath));
+
+        if (isNewFile) {
+          const fullPath = path.join(this.cwd, filePath);
+          if (fs.existsSync(fullPath)) {
+            const content = fs.readFileSync(fullPath, "utf-8");
+            const lines = content.split("\n");
+            const hunks: DiffHunk[] = [
+              {
+                header: `@@ -0,0 +1,${lines.length} @@`,
+                lines: lines.map((line) => ({
+                  type: "add" as const,
+                  content: line,
+                })),
+              },
+            ];
+            return { success: true, data: [{ fileName: filePath, hunks }] };
+          }
+        }
+
+        return { success: true, data: [] };
+      }
+      const parsed = parseDiff(diff);
+      return { success: true, data: parsed };
+    } catch (error) {
+      return this.handleError("diffFile", error);
     }
   }
 

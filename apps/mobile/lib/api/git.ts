@@ -12,10 +12,33 @@ export type GitFileStatusResponse = {
   branch: string;
 };
 
+export type DiffLine = {
+  type: "add" | "remove" | "context";
+  content: string;
+};
+
+export type DiffHunk = {
+  header: string;
+  lines: DiffLine[];
+};
+
+export type FileDiff = {
+  fileName: string;
+  hunks: DiffHunk[];
+};
+
+export type GitFileDiffResponse = {
+  files: FileDiff[];
+  success: boolean;
+  error?: string;
+};
+
 export const gitKeys = {
   all: ["git"] as const,
   files: () => [...gitKeys.all, "files"] as const,
   fileStatus: (projectId: string) => [...gitKeys.files(), projectId] as const,
+  fileDiff: (projectId: string, filePath: string) =>
+    [...gitKeys.files(), projectId, "diff", filePath] as const,
 };
 
 export function useGitFileStatus(projectId: string, enabled = true) {
@@ -74,6 +97,50 @@ export function useGitUnstageFiles(projectId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: gitKeys.fileStatus(projectId),
+      });
+    },
+  });
+}
+
+export function useFileDiff(
+  projectId: string,
+  filePath: string,
+  enabled = true,
+) {
+  return useQuery<GitFileDiffResponse>({
+    queryKey: gitKeys.fileDiff(projectId, filePath),
+    enabled: Boolean(projectId) && Boolean(filePath) && enabled,
+    queryFn: async () => {
+      const response = await baseApi.get<GitFileDiffResponse>(
+        `/git/${projectId}/diff`,
+        { params: { filePath } },
+      );
+      return {
+        files: response.data.files ?? [],
+        success: response.data.success,
+        error: response.data.error,
+      };
+    },
+  });
+}
+
+export function useGitDiscardFile(projectId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (filePath: string) => {
+      const response = await baseApi.post<{ success: boolean; error?: string }>(
+        `/git/${projectId}/discard`,
+        { filePath },
+      );
+      if (!response.data.success) {
+        throw new Error(response.data.error ?? "Failed to discard changes");
+      }
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: gitKeys.all,
       });
     },
   });

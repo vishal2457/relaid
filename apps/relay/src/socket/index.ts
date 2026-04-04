@@ -299,6 +299,8 @@ async function handleLocalServerConnection(
   pipeResponse("git_staged_files_response");
   pipeResponse("git_stage_files_response");
   pipeResponse("git_unstage_files_response");
+  pipeResponse("git_file_diff_response");
+  pipeResponse("git_discard_file_response");
 
   socket.on(
     "error_response",

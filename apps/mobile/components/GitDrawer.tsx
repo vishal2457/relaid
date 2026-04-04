@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from "react";
 import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import {
   ActivityIndicator,
   Checkbox,
@@ -51,6 +52,7 @@ type CollapsibleSectionProps = {
   isActive: boolean;
   disabled: boolean;
   onCollapse: (paths: string[]) => void;
+  onFilePress: (path: string) => void;
 };
 
 function CollapsibleSection({
@@ -66,6 +68,7 @@ function CollapsibleSection({
   isActive,
   disabled,
   onCollapse,
+  onFilePress,
 }: CollapsibleSectionProps) {
   const [expanded, setExpanded] = useState(true);
 
@@ -153,8 +156,9 @@ function CollapsibleSection({
             renderItem={({ item }) => {
               const isSelected = selectedFiles.has(item.path);
               return (
-                <View
+                <Pressable
                   style={[styles.fileItem, { borderBottomColor: borderColor }]}
+                  onPress={() => onFilePress(item.path)}
                 >
                   <Checkbox.Android
                     status={isSelected ? "checked" : "unchecked"}
@@ -186,7 +190,7 @@ function CollapsibleSection({
                   >
                     {statusLabelMap[item.status] ?? "?"}
                   </Text>
-                </View>
+                </Pressable>
               );
             }}
           />
@@ -419,6 +423,17 @@ export function GitDrawer({
                   isActive={activeSection === "changes"}
                   disabled={activeSection === "staged"}
                   onCollapse={clearSectionFiles}
+                  onFilePress={(path) => {
+                    if (!activeProject) return;
+                    router.push({
+                      pathname: "/diff",
+                      params: {
+                        projectId: activeProject.id,
+                        filePath: path,
+                        fileName: path.split("/").pop(),
+                      },
+                    });
+                  }}
                 />
                 <CollapsibleSection
                   title="Staged"
@@ -433,6 +448,17 @@ export function GitDrawer({
                   isActive={activeSection === "staged"}
                   disabled={activeSection === "changes"}
                   onCollapse={clearSectionFiles}
+                  onFilePress={(path) => {
+                    if (!activeProject) return;
+                    router.push({
+                      pathname: "/diff",
+                      params: {
+                        projectId: activeProject.id,
+                        filePath: path,
+                        fileName: path.split("/").pop(),
+                      },
+                    });
+                  }}
                 />
               </>
             }
