@@ -2,7 +2,7 @@ import { Server as HttpServer } from "http";
 import { and, eq } from "drizzle-orm";
 import { Server, Socket } from "socket.io";
 import { getDb } from "../db";
-import { expoPushTokens, localServers, users } from "../db/schema";
+import { localServers } from "../db/schema";
 import {
   getConnectedServerForUser,
   getConnectedServersForUser,
@@ -11,6 +11,10 @@ import {
   requestUntilMatch,
   RouteError,
 } from "../services/local-server-proxy";
+import {
+  authenticateLocalServer,
+  authenticateMobileAccessToken,
+} from "../services/auth";
 import {
   sendPushNotification,
   savePushToken,
@@ -38,8 +42,9 @@ import {
 
 export interface SocketData {
   userId: string;
-  serverId?: string;
+  serverId: string;
   serverName?: string;
+  deviceId?: string;
   type: "mobile" | "local_server";
 }
 
@@ -112,8 +117,11 @@ export function createSocketServer(httpServer: HttpServer): Server {
     path: "/socket",
   });
 
-  io.use((socket, next) => {
-    const userId = socket.handshake.auth.userId as string | undefined;
+  io.use(async (socket, next) => {
+    const accessToken = socket.handshake.auth.accessToken as string | undefined;
+    const serverSecret = socket.handshake.auth.serverSecret as
+      | string
+      | undefined;
     const serverId = socket.handshake.auth.serverId as string | undefined;
     const serverName = socket.handshake.auth.serverName as string | undefined;
     const type = socket.handshake.auth.type as
@@ -121,19 +129,50 @@ export function createSocketServer(httpServer: HttpServer): Server {
       | "local_server"
       | undefined;
 
-    if (!userId) {
-      next(new Error("userId is required"));
-      return;
+    try {
+      if (type === "local_server") {
+        if (!serverId) {
+          throw new RouteError(401, "serverId is required");
+        }
+
+        if (!serverSecret) {
+          throw new RouteError(401, "serverSecret is required");
+        }
+
+        const server = await authenticateLocalServer(
+          serverId,
+          serverSecret,
+          serverName,
+        );
+
+        socket.data = {
+          userId: server.id,
+          serverId: server.id,
+          serverName: server.name,
+          type: "local_server",
+        } as SocketData;
+        next();
+        return;
+      }
+
+      if (!accessToken) {
+        throw new RouteError(401, "accessToken is required");
+      }
+
+      const auth = await authenticateMobileAccessToken(accessToken);
+      socket.data = {
+        userId: auth.server.id,
+        serverId: auth.server.id,
+        serverName: auth.server.name,
+        deviceId: auth.device.id,
+        type: "mobile",
+      } as SocketData;
+
+      next();
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      next(new Error(errMsg));
     }
-
-    socket.data = {
-      userId,
-      serverId,
-      serverName,
-      type: type || "mobile",
-    } as SocketData;
-
-    next();
   });
 
   io.on("connection", (socket) => {
@@ -155,7 +194,7 @@ async function handleConnection(io: Server, socket: Socket): Promise<void> {
 
   socket.join(`user:${userId}`);
 
-  if (type === "local_server" && serverId) {
+  if (type === "local_server") {
     await handleLocalServerConnection(io, socket, userId, serverId, serverName);
   } else {
     handleMobileConnection(socket, userId);
@@ -164,7 +203,7 @@ async function handleConnection(io: Server, socket: Socket): Promise<void> {
   socket.on("disconnect", async (reason) => {
     logger.info("Client disconnected", { userId, serverId, type, reason });
 
-    if (type === "local_server" && serverId) {
+    if (type === "local_server") {
       unregisterLocalServerSocket(serverId, socket.id);
       await updateServerConnectionStatus(serverId, false);
       io.to(`user:${userId}`).emit("local_server_disconnected", {
@@ -182,7 +221,6 @@ async function handleLocalServerConnection(
   serverId: string,
   serverName?: string,
 ): Promise<void> {
-  await ensureLocalServerRecord(userId, serverId, serverName);
   registerLocalServerSocket(serverId, socket);
   await updateServerConnectionStatus(serverId, true);
 
@@ -947,62 +985,6 @@ async function updateServerConnectionStatus(
       isConnected,
       error: errMsg,
     });
-  }
-}
-
-async function ensureLocalServerRecord(
-  userId: string,
-  serverId: string,
-  serverName?: string,
-): Promise<void> {
-  const db = getDb();
-  const now = new Date();
-  const resolvedServerName = serverName?.trim() || "Local OpenCode Server";
-
-  const [existingUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  if (!existingUser) {
-    await db.insert(users).values({
-      id: userId,
-      email: `${userId}@local.maximus`,
-      name: "Local User",
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  const [existingServer] = await db
-    .select()
-    .from(localServers)
-    .where(eq(localServers.id, serverId))
-    .limit(1);
-
-  if (!existingServer) {
-    await db.insert(localServers).values({
-      id: serverId,
-      userId,
-      name: resolvedServerName,
-      isConnected: false,
-      createdAt: now,
-    });
-    return;
-  }
-
-  if (
-    existingServer.userId !== userId ||
-    existingServer.name !== resolvedServerName
-  ) {
-    await db
-      .update(localServers)
-      .set({
-        userId,
-        name: resolvedServerName,
-      })
-      .where(eq(localServers.id, serverId));
   }
 }
 

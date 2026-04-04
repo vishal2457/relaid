@@ -12,6 +12,24 @@ export type Provider = {
   models: ProviderModel[];
 };
 
+export type ActiveModel = {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
+};
+
+export function flattenProvidersToModels(providers: Provider[]): ActiveModel[] {
+  return providers.flatMap((provider) =>
+    provider.models.map((model) => ({
+      id: model.id,
+      name: model.name,
+      providerId: provider.id,
+      providerName: provider.name,
+    })),
+  );
+}
+
 export const providersKeys = {
   all: ["providers"] as const,
   lists: () => [...providersKeys.all, "list"] as const,

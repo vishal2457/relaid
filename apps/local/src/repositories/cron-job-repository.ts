@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, lte } from "drizzle-orm";
 import { getDb } from "../db";
 import { cronJobs, type CronJob, type NewCronJob } from "../db/cron-job.schema";
 
@@ -28,9 +28,8 @@ export class CronJobRepository {
     return db
       .select()
       .from(cronJobs)
-      .where(and(eq(cronJobs.isActive, 1)))
-      .all()
-      .filter((job) => job.nextRunAt && job.nextRunAt <= now);
+      .where(and(eq(cronJobs.isActive, 1), lte(cronJobs.nextRunAt, now)))
+      .all();
   }
 
   create(cronJob: NewCronJob): CronJob {

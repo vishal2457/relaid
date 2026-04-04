@@ -53,6 +53,7 @@
   "dependencies": {
     "@chat-adapter/discord": "^4.20.1",
     "@chat-adapter/state-memory": "^4.20.1",
+    "@clack/prompts": "^1.2.0",
     "@libsql/client": "^0.17.2",
     "@openai/codex-sdk": "^0.114.0",
     "@opencode-ai/sdk": "^1.2.24",
@@ -71,6 +72,7 @@
     "keytar": "^7.9.0",
     "morgan": "^1.10.1",
     "p-queue": "^9.1.0",
+    "qrcode-terminal": "^0.12.0",
     "simple-git": "^3.27.0",
     "socket.io-client": "^4.8.1",
     "winston": "^3.19.0",

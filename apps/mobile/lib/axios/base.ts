@@ -1,11 +1,10 @@
 import axios, { type AxiosRequestConfig } from "axios";
 import { ToastAndroid, Platform } from "react-native";
+import { getCurrentAccessToken } from "@/lib/pairing/session";
 
 const DEFAULT_BASE_URL = "http://100.95.62.14:3001";
 
 export let chatServerApiUrl = DEFAULT_BASE_URL;
-export const chatServerUserId =
-  process.env.EXPO_PUBLIC_CHAT_USER_ID || "local-dev-user";
 
 const instance = axios.create({
   baseURL: `${chatServerApiUrl}/api`,
@@ -20,7 +19,12 @@ export function updateBaseUrl(url: string) {
 
 instance.interceptors.request.use(
   (config) => {
-    config.headers["x-user-id"] = chatServerUserId;
+    const accessToken = getCurrentAccessToken();
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
+    } else if (config.headers?.Authorization) {
+      delete config.headers.Authorization;
+    }
     return config;
   },
   (error) => {

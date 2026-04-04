@@ -226,6 +226,7 @@ export function GitDrawer({
 
   const staged = data?.staged ?? [];
   const unstaged = data?.unstaged ?? [];
+  const branch = data?.branch ?? "HEAD";
 
   const clearSelection = useCallback(() => {
     setSelectedFiles(new Set());
@@ -325,8 +326,11 @@ export function GitDrawer({
               </Text>
             </View>
           ) : (
-            <Text variant="titleLarge" style={styles.headerTitle}>
-              Git
+            <Text
+              variant="bodySmall"
+              style={[styles.headerTitle, { fontSize: 14 }]}
+            >
+              {branch}
             </Text>
           )}
           <Pressable

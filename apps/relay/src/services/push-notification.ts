@@ -29,20 +29,21 @@ export async function savePushToken(
   const [existing] = await db
     .select()
     .from(expoPushTokens)
-    .where(eq(expoPushTokens.userId, userId))
+    .where(eq(expoPushTokens.token, token))
     .limit(1);
 
   if (existing) {
     await db
       .update(expoPushTokens)
       .set({
+        userId,
         token,
         platform,
         updatedAt: now,
       })
       .where(eq(expoPushTokens.id, existing.id));
 
-    logger.info("Updated push token for user", { userId, platform });
+    logger.info("Updated push token for scope", { userId, platform });
   } else {
     await db.insert(expoPushTokens).values({
       id: `token_${Date.now()}`,
@@ -53,7 +54,7 @@ export async function savePushToken(
       updatedAt: now,
     });
 
-    logger.info("Saved new push token for user", { userId, platform });
+    logger.info("Saved new push token for scope", { userId, platform });
   }
 }
 
@@ -71,7 +72,7 @@ export async function sendPushNotification(
     .where(eq(expoPushTokens.userId, userId));
 
   if (tokens.length === 0) {
-    logger.debug("No push tokens found for user", { userId });
+    logger.debug("No push tokens found for scope", { userId });
     return;
   }
 
@@ -115,7 +116,7 @@ export async function sendPushNotification(
           await db
             .delete(expoPushTokens)
             .where(eq(expoPushTokens.userId, userId));
-          logger.info("Removed invalid push token for user", { userId });
+          logger.info("Removed invalid push token for scope", { userId });
         }
       } else {
         logger.info("Push notification sent", {

@@ -4,8 +4,10 @@ import cors from "cors";
 import dotenv from "dotenv";
 import morgan from "morgan";
 import { eq } from "drizzle-orm";
+import type { NextFunction, Request, Response } from "express";
 import { createSocketServer } from "./socket";
 import { localServersRouter } from "./routes/local-servers";
+import { pairingRouter } from "./routes/pairing";
 import { usersRouter } from "./routes/users";
 import { providersRouter } from "./routes/providers";
 import { gitRouter } from "./routes/git";
@@ -14,7 +16,10 @@ import { sessionsRouter } from "./routes/sessions";
 import { messagesRouter } from "./routes/messages";
 import { logger, stream } from "./shared/logger";
 import { getDb } from "./db";
+import { ensureRuntimeSchema } from "./db/runtime-schema";
 import { expoPushTokens, localServers } from "./db/schema";
+import { authenticateMobileAccessToken, getBearerToken } from "./services/auth";
+import { RouteError } from "./services/local-server-proxy";
 
 dotenv.config();
 
@@ -29,6 +34,30 @@ const httpServer = createServer(app);
 app.use(cors());
 app.use(morgan("combined", { stream }));
 app.use(express.json());
+app.use(async (req: Request, res: Response, next: NextFunction) => {
+  const accessToken = getBearerToken(req.headers.authorization);
+  if (!accessToken) {
+    next();
+    return;
+  }
+
+  try {
+    const auth = await authenticateMobileAccessToken(accessToken);
+    req.headers["x-user-id"] = auth.server.id;
+    req.headers["x-server-id"] = auth.server.id;
+    req.headers["x-device-id"] = auth.device.id;
+    next();
+  } catch (error) {
+    if (error instanceof RouteError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to authenticate request", { error: errMsg });
+    res.status(401).json({ error: "Unauthorized" });
+  }
+});
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -66,6 +95,7 @@ app.get("/api/debug/servers", async (req, res) => {
 });
 
 app.use("/api/users", usersRouter);
+app.use("/api/pairing", pairingRouter);
 app.use("/api/local-servers", localServersRouter);
 app.use("/api/providers", providersRouter);
 app.use("/api/git", gitRouter);
@@ -98,7 +128,7 @@ async function ensurePushTokensTable() {
     try {
       const db = getDb();
       const sqlite = db.$client;
-      sqlite.exec(`
+      await sqlite.execute(`
         CREATE TABLE IF NOT EXISTS expo_push_tokens (
           id TEXT PRIMARY KEY,
           user_id TEXT NOT NULL REFERENCES users(id),
@@ -117,6 +147,10 @@ async function ensurePushTokensTable() {
 }
 
 cleanupStaleConnections();
+void ensureRuntimeSchema().catch((error) => {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  logger.error("Failed to ensure runtime auth schema", { error: errMsg });
+});
 ensurePushTokensTable();
 
 httpServer.listen(PORT, HOST, () => {

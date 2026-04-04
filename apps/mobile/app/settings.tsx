@@ -22,6 +22,7 @@ import {
   useServerUrl,
   DEFAULT_SERVER_URL,
 } from "@/components/ServerUrlContext";
+import { usePairingSession } from "@/components/PairingSessionContext";
 import { disconnectChatSocket } from "@/lib/socket/chat";
 import { updateBaseUrl } from "@/lib/axios/base";
 import ThemeSelector from "@/components/ThemeSelector";
@@ -30,6 +31,7 @@ import { useAppTheme } from "@/components/ThemeContext";
 export default function SettingsScreen() {
   const theme = useTheme();
   const { serverUrl, setServerUrl } = useServerUrl();
+  const { session, isPaired, clearSession } = usePairingSession();
   const { selectedTheme, setSelectedTheme } = useAppTheme();
   const [urlInput, setUrlInput] = useState(serverUrl);
   const [saved, setSaved] = useState(false);
@@ -48,6 +50,11 @@ export default function SettingsScreen() {
   const handleReset = useCallback(() => {
     setUrlInput(DEFAULT_SERVER_URL);
   }, []);
+
+  const handleForgetDevice = useCallback(async () => {
+    await clearSession();
+    router.replace("/pair" as any);
+  }, [clearSession]);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
 
@@ -79,10 +86,57 @@ export default function SettingsScreen() {
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
                     <Text variant="bodyLarge" style={styles.settingTitle}>
-                      Server URL
+                      Pairing
                     </Text>
                     <Text variant="bodySmall" style={styles.settingDescription}>
-                      Base URL of the OpenCode server
+                      {isPaired
+                        ? `${session?.serverName || "Paired server"} is connected to this phone`
+                        : "This phone is not paired yet"}
+                    </Text>
+                  </View>
+                </View>
+
+                {isPaired ? (
+                  <>
+                    <Text variant="bodySmall" style={styles.metaText}>
+                      Server ID: {session?.serverId}
+                    </Text>
+                    <Text variant="bodySmall" style={styles.metaText}>
+                      Device ID: {session?.deviceId}
+                    </Text>
+                    <View style={styles.buttonRow}>
+                      <Button
+                        mode="outlined"
+                        onPress={handleForgetDevice}
+                        icon="link-off"
+                      >
+                        Forget This Device
+                      </Button>
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.buttonRow}>
+                    <Button
+                      mode="contained-tonal"
+                      onPress={() => router.push("/pair" as any)}
+                      icon="qrcode-scan"
+                    >
+                      Open Pairing Screen
+                    </Button>
+                  </View>
+                )}
+              </Card.Content>
+            </Card>
+
+            <Card mode="outlined" style={{ borderColor, marginTop: 20 }}>
+              <Card.Content>
+                <View style={styles.settingRow}>
+                  <View style={styles.settingInfo}>
+                    <Text variant="bodyLarge" style={styles.settingTitle}>
+                      Relay URL
+                    </Text>
+                    <Text variant="bodySmall" style={styles.settingDescription}>
+                      Base URL of the relay server
                     </Text>
                   </View>
                 </View>
@@ -171,6 +225,10 @@ const styles = StyleSheet.create({
   },
   input: {
     marginTop: 16,
+  },
+  metaText: {
+    marginTop: 10,
+    opacity: 0.7,
   },
   inputOutline: {
     borderRadius: 12,

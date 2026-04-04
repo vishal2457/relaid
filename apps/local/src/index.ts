@@ -12,6 +12,8 @@ import {
 import { opencodeCatalogService } from "./services/opencode-catalog-service";
 import { logger } from "./shared/logger";
 import type { MessagePayload, SessionStreamChunkPayload } from "./types";
+import { promptAndVerifyRelayUrl } from "./services/relay-url-config";
+import { setRelayServerUrl } from "./services/relay-device";
 
 const PORT = parseInt(process.env.PORT || "0", 10);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -87,6 +89,11 @@ async function main(): Promise<void> {
   logger.info("Starting Maximus Bot");
 
   const enableChatServer = process.env.CHAT_SERVER_ENABLED !== "false";
+
+  if (enableChatServer) {
+    const relayUrl = await promptAndVerifyRelayUrl();
+    setRelayServerUrl(relayUrl);
+  }
 
   if (enableChatServer) {
     const mapMessagePayload = (

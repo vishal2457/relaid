@@ -15,6 +15,7 @@ type GitFileStatus = {
 type GitStagedFilesResponse = {
   staged: GitFileStatus[];
   unstaged: GitFileStatus[];
+  branch: string;
 };
 
 type GitStageFilesResponse = {
@@ -64,6 +65,7 @@ router.get("/:projectId/staged", async (req: Request, res: Response) => {
     res.json({
       staged: result.response.staged || [],
       unstaged: result.response.unstaged || [],
+      branch: result.response.branch || "HEAD",
     });
   } catch (error) {
     handleRouteError(res, "Failed to get file status", error);

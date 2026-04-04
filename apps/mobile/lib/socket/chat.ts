@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
-import { chatServerApiUrl, chatServerUserId } from "../axios/base";
+import { chatServerApiUrl } from "../axios/base";
+import { getCurrentAccessToken } from "../pairing/session";
 
 let chatSocket: Socket | null = null;
 
@@ -8,11 +9,16 @@ export function getChatSocket(): Socket {
     return chatSocket;
   }
 
+  const accessToken = getCurrentAccessToken();
+  if (!accessToken) {
+    throw new Error("Mobile access token is not configured");
+  }
+
   chatSocket = io(chatServerApiUrl, {
     path: "/socket",
     transports: ["websocket"],
     auth: {
-      userId: chatServerUserId,
+      accessToken,
       type: "mobile",
     },
     reconnection: true,

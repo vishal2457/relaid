@@ -46,7 +46,7 @@ export class CronScheduler {
       for (const job of dueJobs) {
         await this.executeJob(job);
       }
-    } catch (error) {
+    } catch (error) {      
       logger.error("CronScheduler error checking jobs", { error });
     }
   }

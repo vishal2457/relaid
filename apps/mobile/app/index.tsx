@@ -50,7 +50,12 @@ import {
   type Project,
   type ProjectFileMatch,
 } from "@/lib/api/projects";
-import { useProviders, type Provider } from "@/lib/api/providers";
+import {
+  useProviders,
+  type Provider,
+  type ActiveModel,
+  flattenProvidersToModels,
+} from "@/lib/api/providers";
 import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
 import { queryClient } from "@/lib/query-client";
 import { getChatSocket } from "@/lib/socket/chat";
@@ -273,6 +278,9 @@ export default function ChatScreen() {
     null,
   );
   const [activeProvider, setActiveProvider] = React.useState<Provider | null>(
+    null,
+  );
+  const [activeModel, setActiveModel] = React.useState<ActiveModel | null>(
     null,
   );
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(
@@ -1058,7 +1066,7 @@ export default function ChatScreen() {
               ]}
               numberOfLines={1}
             >
-              {activeProvider?.name ?? "Provider"}
+              {activeModel?.name ?? "Model"}
             </Text>
             <MaterialCommunityIcons
               name="chevron-down"
@@ -1140,7 +1148,9 @@ export default function ChatScreen() {
         style={styles.keyboardContainer}
       >
         <View style={styles.messagesContainer}>
-          {messagesLoading && activeSessionId && displayedMessages.length === 0 ? (
+          {messagesLoading &&
+          activeSessionId &&
+          displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
@@ -1325,7 +1335,7 @@ export default function ChatScreen() {
           <View style={[styles.sheetContainer, { backgroundColor: sheetBg }]}>
             <View style={styles.sheetHandle} />
             <Text variant="titleMedium" style={styles.sheetTitle}>
-              Select Provider
+              Select Model
             </Text>
             {providersLoading ? (
               <View style={styles.sheetLoading}>
@@ -1333,23 +1343,21 @@ export default function ChatScreen() {
               </View>
             ) : (
               <FlatList
-                data={providers ?? []}
+                data={flattenProvidersToModels(providers ?? [])}
                 keyExtractor={(item) => item.id}
                 style={styles.sheetList}
                 renderItem={({ item }) => {
-                  const isActiveProvider = activeProvider?.id === item.id;
+                  const isActiveModel = activeModel?.id === item.id;
                   return (
                     <Pressable
                       onPress={() => {
-                        if (item.id !== activeProvider?.id) {
-                          setActiveProvider(item);
-                        }
+                        setActiveModel(item);
                         setShowProviderSheet(false);
                       }}
                       style={[
                         styles.sheetItem,
                         {
-                          backgroundColor: isActiveProvider
+                          backgroundColor: isActiveModel
                             ? "rgba(150,150,150,0.12)"
                             : "transparent",
                           borderColor,
@@ -1361,7 +1369,7 @@ export default function ChatScreen() {
                           style={[
                             styles.statusDot,
                             {
-                              backgroundColor: isActiveProvider
+                              backgroundColor: isActiveModel
                                 ? "#00FF41"
                                 : "#6366F1",
                             },
@@ -1371,7 +1379,7 @@ export default function ChatScreen() {
                           <Text
                             variant="bodyLarge"
                             style={{
-                              fontWeight: isActiveProvider ? "600" : "500",
+                              fontWeight: isActiveModel ? "600" : "500",
                               color: theme.colors.onSurface,
                             }}
                             numberOfLines={1}
@@ -1383,7 +1391,7 @@ export default function ChatScreen() {
                             style={{ color: metaColor, marginTop: 2 }}
                             numberOfLines={1}
                           >
-                            {item.models.length} models
+                            {item.providerName}
                           </Text>
                         </View>
                       </View>
@@ -1396,7 +1404,7 @@ export default function ChatScreen() {
                       variant="bodyMedium"
                       style={{ color: theme.colors.onSurfaceVariant }}
                     >
-                      No providers found
+                      No models found
                     </Text>
                   </View>
                 }

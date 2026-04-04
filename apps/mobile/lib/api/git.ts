@@ -9,6 +9,7 @@ export type GitFileStatus = {
 export type GitFileStatusResponse = {
   staged: GitFileStatus[];
   unstaged: GitFileStatus[];
+  branch: string;
 };
 
 export const gitKeys = {
@@ -28,6 +29,7 @@ export function useGitFileStatus(projectId: string, enabled = true) {
       return {
         staged: response.data.staged ?? [],
         unstaged: response.data.unstaged ?? [],
+        branch: response.data.branch ?? "HEAD",
       };
     },
   });

@@ -1,4 +1,3 @@
-import os from "os";
 import { io, Socket } from "socket.io-client";
 import { logger } from "../shared/logger";
 import type {
@@ -28,18 +27,28 @@ import type {
 } from "../types";
 import { opencodeCatalogService } from "./opencode-catalog-service";
 import { GitService } from "./git-service";
+import {
+  createPairingSession,
+  getRelayServerName,
+  getRelayServerUrl,
+  loadOrCreateRelayDeviceCredentials,
+  type PairingSessionResponse,
+} from "./relay-device";
 
-const CHAT_SERVER_URL = process.env.CHAT_SERVER_URL || "http://localhost:3001";
-const CHAT_SERVER_USER_ID = process.env.CHAT_SERVER_USER_ID || "local-dev-user";
-const LOCAL_SERVER_ID =
-  process.env.LOCAL_SERVER_ID || `local-${sanitizeId(os.hostname())}`;
-const LOCAL_SERVER_NAME =
-  process.env.LOCAL_SERVER_NAME || `${os.hostname()} OpenCode Server`;
+const QRCodeTerminal: {
+  generate: (
+    text: string,
+    options: { small?: boolean },
+    callback?: (qr: string) => void,
+  ) => void;
+} = require("qrcode-terminal");
+
+const CHAT_SERVER_URL = getRelayServerUrl();
+const RELAY_DEVICE = loadOrCreateRelayDeviceCredentials();
+const LOCAL_SERVER_ID = RELAY_DEVICE.serverId;
+const LOCAL_SERVER_SECRET = RELAY_DEVICE.serverSecret;
+const LOCAL_SERVER_NAME = getRelayServerName();
 const RECONNECT_INTERVAL_MS = 5000;
-
-function sanitizeId(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-}
 
 function ensureProjectIsoDate(value?: Date | string | number | null): string {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -82,6 +91,7 @@ export class ChatServerClient {
   private socket: Socket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
+  private pairingQrPrinted = false;
   private onRunRequest: RunRequestHandler | null = null;
   private onRunRequestStream: RunRequestStreamHandler | null = null;
   private onSessionAbort: SessionAbortHandler | null = null;
@@ -114,13 +124,6 @@ export class ChatServerClient {
       return;
     }
 
-    if (!CHAT_SERVER_USER_ID) {
-      logger.warn(
-        "CHAT_SERVER_USER_ID is not configured, skipping chat-server connection",
-      );
-      return;
-    }
-
     if (this.isRunning) {
       logger.warn("ChatServerClient already running");
       return;
@@ -130,7 +133,6 @@ export class ChatServerClient {
     this.connect();
     logger.info("ChatServerClient started", {
       url: CHAT_SERVER_URL,
-      userId: CHAT_SERVER_USER_ID,
       serverId: LOCAL_SERVER_ID,
     });
   }
@@ -151,6 +153,47 @@ export class ChatServerClient {
     logger.info("ChatServerClient stopped");
   }
 
+  private async printPairingQr(): Promise<void> {
+    if (this.pairingQrPrinted) {
+      return;
+    }
+
+    try {
+      const pairingSession = await createPairingSession(RELAY_DEVICE);
+      this.renderPairingQr(pairingSession);
+      this.pairingQrPrinted = true;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to create pairing QR", {
+        serverId: LOCAL_SERVER_ID,
+        error: errMsg,
+      });
+    }
+  }
+
+  private renderPairingQr(pairingSession: PairingSessionResponse): void {
+    console.log("\n" + "=".repeat(56));
+    console.log("Scan this QR code from the mobile app to pair this device.");
+    console.log(
+      `Server: ${pairingSession.serverName} (${pairingSession.serverId})`,
+    );
+    console.log(
+      `Pairing expires: ${new Date(pairingSession.expiresAt).toLocaleString()}`,
+    );
+    console.log("=".repeat(56));
+
+    QRCodeTerminal.generate(
+      pairingSession.pairingUrl,
+      { small: true },
+      (qr) => {
+        console.log(qr);
+      },
+    );
+
+    console.log(`Pairing link: ${pairingSession.pairingUrl}`);
+    console.log("=".repeat(56) + "\n");
+  }
+
   private connect(): void {
     if (!this.isRunning) {
       return;
@@ -161,8 +204,8 @@ export class ChatServerClient {
       transports: ["websocket"],
       reconnection: false,
       auth: {
-        userId: CHAT_SERVER_USER_ID,
         serverId: LOCAL_SERVER_ID,
+        serverSecret: LOCAL_SERVER_SECRET,
         serverName: LOCAL_SERVER_NAME,
         type: "local_server",
       },
@@ -171,9 +214,9 @@ export class ChatServerClient {
     this.socket.on("connect", () => {
       logger.info("Connected to chat server", {
         socketId: this.socket?.id,
-        userId: CHAT_SERVER_USER_ID,
         serverId: LOCAL_SERVER_ID,
       });
+      void this.printPairingQr();
     });
 
     this.socket.on("disconnect", (reason) => {
@@ -806,6 +849,7 @@ export class ChatServerClient {
         requestId: payload.requestId,
         staged: result.data?.staged ?? [],
         unstaged: result.data?.unstaged ?? [],
+        branch: result.data?.branch ?? "HEAD",
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -818,6 +862,7 @@ export class ChatServerClient {
         requestId: payload.requestId,
         staged: [],
         unstaged: [],
+        branch: "HEAD",
       });
     }
   }

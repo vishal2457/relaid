@@ -238,10 +238,12 @@ export class GitService {
     GitResult<{
       staged: Array<{ path: string; status: string }>;
       unstaged: Array<{ path: string; status: string }>;
+      branch: string;
     }>
   > {
     try {
       const status = await this.git.status();
+      const branch = status.current ?? "HEAD";
       const staged: Array<{ path: string; status: string }> = [];
       const unstaged: Array<{ path: string; status: string }> = [];
 
@@ -276,7 +278,7 @@ export class GitService {
         unstaged.push({ path: f, status: "created" });
       });
 
-      return { success: true, data: { staged, unstaged } };
+      return { success: true, data: { staged, unstaged, branch } };
     } catch (error) {
       return this.handleError("getFileStatusLists", error);
     }
