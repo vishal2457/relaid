@@ -58,7 +58,10 @@ export function useGitFileStatus(projectId: string, enabled = true) {
   });
 }
 
-export function useGitStageFiles(projectId: string) {
+export function useGitStageFiles(
+  projectId: string,
+  onSuccessCallback?: () => void,
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -76,11 +79,15 @@ export function useGitStageFiles(projectId: string) {
       queryClient.invalidateQueries({
         queryKey: gitKeys.fileStatus(projectId),
       });
+      onSuccessCallback?.();
     },
   });
 }
 
-export function useGitUnstageFiles(projectId: string) {
+export function useGitUnstageFiles(
+  projectId: string,
+  onSuccessCallback?: () => void,
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -98,6 +105,7 @@ export function useGitUnstageFiles(projectId: string) {
       queryClient.invalidateQueries({
         queryKey: gitKeys.fileStatus(projectId),
       });
+      onSuccessCallback?.();
     },
   });
 }
@@ -138,9 +146,9 @@ export function useGitDiscardFile(projectId: string) {
       }
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, _variables, _context) => {
       queryClient.invalidateQueries({
-        queryKey: gitKeys.all,
+        queryKey: gitKeys.fileStatus(projectId),
       });
     },
   });

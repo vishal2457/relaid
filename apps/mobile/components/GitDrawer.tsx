@@ -225,8 +225,6 @@ export function GitDrawer({
     activeProject?.id ?? "",
     Boolean(activeProject),
   );
-  const stageFiles = useGitStageFiles(activeProject?.id ?? "");
-  const unstageFiles = useGitUnstageFiles(activeProject?.id ?? "");
 
   const staged = data?.staged ?? [];
   const unstaged = data?.unstaged ?? [];
@@ -236,6 +234,12 @@ export function GitDrawer({
     setSelectedFiles(new Set());
     setActiveSection("none");
   }, []);
+
+  const stageFiles = useGitStageFiles(activeProject?.id ?? "", clearSelection);
+  const unstageFiles = useGitUnstageFiles(
+    activeProject?.id ?? "",
+    clearSelection,
+  );
 
   const toggleFile = useCallback(
     (path: string, section: Section) => {
@@ -290,12 +294,12 @@ export function GitDrawer({
 
   const handleStage = () => {
     const files = Array.from(selectedFiles);
-    stageFiles.mutate(files, { onSuccess: clearSelection });
+    stageFiles.mutate(files);
   };
 
   const handleUnstage = () => {
     const files = Array.from(selectedFiles);
-    unstageFiles.mutate(files, { onSuccess: clearSelection });
+    unstageFiles.mutate(files);
   };
 
   if (!visible) {
