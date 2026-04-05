@@ -20,10 +20,12 @@ import {
   registerPushTokenWithServer,
 } from "@/lib/notifications";
 
-requestNotificationPermissions();
-
 function PushTokenRegistration() {
   const { session } = usePairingSession();
+
+  useEffect(() => {
+    void requestNotificationPermissions();
+  }, []);
 
   useEffect(() => {
     if (!session) {

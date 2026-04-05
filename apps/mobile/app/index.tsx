@@ -690,6 +690,12 @@ export default function ChatScreen() {
     if (!isMountedRef.current) return;
 
     const socket = getChatSocket();
+    if (!socket) {
+      socketRef.current = null;
+      setConnectionState("disconnected");
+      return;
+    }
+
     socketRef.current = socket;
 
     if (!socket.connected) {
@@ -874,6 +880,12 @@ export default function ChatScreen() {
   // Main socket effect
   React.useEffect(() => {
     const socket = getChatSocket();
+    if (!socket) {
+      socketRef.current = null;
+      setConnectionState("disconnected");
+      return;
+    }
+
     socketRef.current = socket;
 
     // Set up event listeners
@@ -984,6 +996,11 @@ export default function ChatScreen() {
 
     // Ensure socket is connected before sending
     const socket = getChatSocket();
+    if (!socket) {
+      Alert.alert("Connection Error", "This device is not paired yet.");
+      return;
+    }
+
     if (!socket.connected) {
       console.log("[Chat] Socket not connected, connecting...");
       socket.connect();

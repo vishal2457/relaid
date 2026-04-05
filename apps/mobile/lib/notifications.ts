@@ -12,7 +12,15 @@ const EXPO_PUSH_TOKEN_REGISTERED_KEY = "expo_push_token_registered";
 const isNotificationsEnabled =
   process.env.EXPO_PUBLIC_NOTIFICATIONS_ENABLED !== "false" && __DEV__ !== true;
 
-if (isNotificationsEnabled) {
+let isAppForeground = true;
+let initialized = false;
+
+function initializeNotifications(): void {
+  if (initialized || !isNotificationsEnabled) {
+    return;
+  }
+  initialized = true;
+
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert: true,
@@ -22,19 +30,26 @@ if (isNotificationsEnabled) {
       shouldShowList: true,
     }),
   });
+
+  AppState.addEventListener("change", (state: AppStateStatus) => {
+    isAppForeground = state === "active";
+  });
+
+  Notifications.addNotificationResponseReceivedListener((response) => {
+    const data = response.notification.request.content.data;
+    if (data?.type === "request_completed") {
+      // Navigate or refresh handled by the app
+    }
+  });
 }
-
-let isAppForeground = true;
-
-AppState.addEventListener("change", (state: AppStateStatus) => {
-  isAppForeground = state === "active";
-});
 
 export function isAppInForeground(): boolean {
   return isAppForeground;
 }
 
 export async function requestNotificationPermissions(): Promise<boolean> {
+  initializeNotifications();
+
   if (!isNotificationsEnabled) {
     return false;
   }
@@ -98,6 +113,10 @@ export async function registerPushTokenWithServer(): Promise<boolean> {
     }
 
     const socket = getChatSocket();
+    if (!socket) {
+      return false;
+    }
+
     if (!socket.connected) {
       socket.connect();
     }
@@ -140,10 +159,3 @@ export async function showNewMessageNotification(
     // silent fail
   }
 }
-
-Notifications.addNotificationResponseReceivedListener((response) => {
-  const data = response.notification.request.content.data;
-  if (data?.type === "request_completed") {
-    // Navigate or refresh handled by the app
-  }
-});

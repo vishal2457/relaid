@@ -4,14 +4,14 @@ import { getCurrentAccessToken } from "../pairing/session";
 
 let chatSocket: Socket | null = null;
 
-export function getChatSocket(): Socket {
+export function getChatSocket(): Socket | null {
   if (chatSocket) {
     return chatSocket;
   }
 
   const accessToken = getCurrentAccessToken();
   if (!accessToken) {
-    throw new Error("Mobile access token is not configured");
+    return null;
   }
 
   chatSocket = io(chatServerApiUrl, {

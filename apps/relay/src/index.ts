@@ -16,7 +16,6 @@ import { sessionsRouter } from "./routes/sessions";
 import { messagesRouter } from "./routes/messages";
 import { logger, stream } from "./shared/logger";
 import { getDb } from "./db";
-import { ensureRuntimeSchema } from "./db/runtime-schema";
 import { expoPushTokens, localServers } from "./db/schema";
 import { authenticateMobileAccessToken, getBearerToken } from "./services/auth";
 import { RouteError } from "./services/local-server-proxy";
@@ -25,8 +24,6 @@ dotenv.config();
 
 const PORT = Number(process.env.PORT) || 3001;
 const HOST = process.env.HOST || "0.0.0.0";
-export const SRC_SERVER_URL =
-  process.env.SRC_SERVER_URL || "http://localhost:3006";
 
 const app = express();
 const httpServer = createServer(app);
@@ -119,45 +116,12 @@ async function cleanupStaleConnections() {
   }
 }
 
-async function ensurePushTokensTable() {
-  try {
-    const db = getDb();
-    await db.select({ id: expoPushTokens.id }).from(expoPushTokens).limit(1);
-    logger.info("Push tokens table exists");
-  } catch {
-    try {
-      const db = getDb();
-      const sqlite = db.$client;
-      await sqlite.execute(`
-        CREATE TABLE IF NOT EXISTS expo_push_tokens (
-          id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL REFERENCES users(id),
-          token TEXT NOT NULL,
-          platform TEXT NOT NULL,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        );
-      `);
-      logger.info("Created expo_push_tokens table");
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      logger.error("Failed to create push tokens table", { error: errMsg });
-    }
-  }
-}
-
 cleanupStaleConnections();
-void ensureRuntimeSchema().catch((error) => {
-  const errMsg = error instanceof Error ? error.message : String(error);
-  logger.error("Failed to ensure runtime auth schema", { error: errMsg });
-});
-ensurePushTokensTable();
 
 httpServer.listen(PORT, HOST, () => {
   logger.info(`Chat server started`, {
     port: PORT,
     host: HOST,
-    srcServerUrl: SRC_SERVER_URL,
   });
 });
 

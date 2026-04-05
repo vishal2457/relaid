@@ -386,6 +386,10 @@ export default function SessionMessagesScreen() {
     }
 
     const socket = getChatSocket();
+    if (!socket) {
+      return;
+    }
+
     if (!socket.connected) {
       socket.connect();
     }
@@ -562,6 +566,11 @@ export default function SessionMessagesScreen() {
     });
 
     const socket = getChatSocket();
+    if (!socket) {
+      Alert.alert("Connection Error", "This device is not paired yet.");
+      return;
+    }
+
     if (!socket.connected) {
       socket.connect();
     }
