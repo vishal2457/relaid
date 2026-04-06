@@ -1,3 +1,9 @@
+import type { Project, Session, Message } from "@opencode-ai/sdk/v2" with {
+  "resolution-mode": "import",
+};
+
+export type { Project, Session, Message };
+
 export interface OpenCodeResult {
   success: boolean;
   output: string;
@@ -299,3 +305,52 @@ export interface ProviderPayload {
 
 export type ProvidersListRequestPayload = Record<string, never>;
 export type ProvidersListResponsePayload = { providers: ProviderPayload[] };
+
+export type PermissionReply = "once" | "always" | "reject";
+
+export interface PermissionRequestPayload {
+  requestId: string;
+  projectId: string;
+  sessionId: string;
+  jobId: string;
+  threadId: string;
+  permission: string;
+  patterns: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface PermissionResponsePayload {
+  requestId: string;
+  sessionId: string;
+  jobId: string;
+  reply: PermissionReply;
+}
+
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface QuestionPayload {
+  header: string;
+  question: string;
+  options: QuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface QuestionRequestPayload {
+  requestId: string;
+  projectId: string;
+  sessionId: string;
+  jobId: string;
+  threadId: string;
+  questions: QuestionPayload[];
+}
+
+export interface QuestionResponsePayload {
+  requestId: string;
+  sessionId: string;
+  jobId: string;
+  answers: string[][];
+}

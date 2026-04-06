@@ -1,92 +1,24 @@
 import "dotenv/config";
-import { jobQueueRepository } from "./repositories/job-queue-repository";
-import type { StreamChunk } from "./sdk/opencode-sdk";
+import { StreamChunk } from "./sdk/opencode-sdk";
 import { createServer } from "./server";
-import { chatServerClient } from "./services/chat-server-client";
-import { jobProcessor } from "./services/job-processor";
 import {
   abortSession,
   runOpenCodeStream,
   shutdownOpenCodeRunner,
 } from "./services/open-code-runner";
 import { opencodeCatalogService } from "./services/opencode-catalog-service";
-import { logger } from "./shared/logger";
-import type { MessagePayload, SessionStreamChunkPayload } from "./types";
-import { promptAndVerifyRelayUrl } from "./services/relay-url-config";
+import { chatServerClient } from "./services/relay-bridge";
 import { setRelayServerUrl } from "./services/relay-device";
+import { promptAndVerifyRelayUrl } from "./services/relay-url-config";
+import { remotePermissionHandler } from "./services/remote-permission-handler";
+import { logger } from "./shared/logger";
+import type { SessionStreamChunkPayload } from "./types";
 
 const PORT = parseInt(process.env.PORT || "0", 10);
 const HOST = process.env.HOST || "0.0.0.0";
 
-const RUNNING_JOBS_CHECK_INTERVAL_MS = 5 * 60 * 1000;
-const SESSION_MESSAGES_FETCH_RETRY_DELAYS_MS = [0, 150, 350, 750];
-
-async function startRunningJobsScheduler(): Promise<void> {
-  const checkRunningJobs = (): void => {
-    const runningJobs = jobQueueRepository.getRunningJobs();
-    if (runningJobs.length > 0) {
-      logger.debug("Running jobs check", {
-        count: runningJobs.length,
-      });
-    }
-  };
-
-  checkRunningJobs();
-  setInterval(checkRunningJobs, RUNNING_JOBS_CHECK_INTERVAL_MS);
-  logger.info("Running jobs scheduler started", {
-    intervalMs: RUNNING_JOBS_CHECK_INTERVAL_MS,
-  });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function hasCompletedAssistantVisibleContent(
-  messages: Awaited<
-    ReturnType<typeof opencodeCatalogService.getSessionMessages>
-  >,
-  expectedOutput: string,
-): boolean {
-  if (!expectedOutput.trim()) {
-    return true;
-  }
-
-  const lastMessage = messages[messages.length - 1];
-  return Boolean(
-    lastMessage &&
-    lastMessage.role === "assistant" &&
-    lastMessage.visibleContent.trim(),
-  );
-}
-
-async function getSettledSessionMessages(
-  sessionId: string,
-  expectedOutput: string,
-): Promise<
-  Awaited<ReturnType<typeof opencodeCatalogService.getSessionMessages>>
-> {
-  let latestMessages =
-    await opencodeCatalogService.getSessionMessages(sessionId);
-
-  if (hasCompletedAssistantVisibleContent(latestMessages, expectedOutput)) {
-    return latestMessages;
-  }
-
-  for (const delayMs of SESSION_MESSAGES_FETCH_RETRY_DELAYS_MS.slice(1)) {
-    await sleep(delayMs);
-    latestMessages = await opencodeCatalogService.getSessionMessages(sessionId);
-
-    if (hasCompletedAssistantVisibleContent(latestMessages, expectedOutput)) {
-      return latestMessages;
-    }
-  }
-
-  return latestMessages;
-}
-
 async function main(): Promise<void> {
-  logger.info("Starting Maximus Bot");
+  logger.info("Starting Local server");
 
   const enableChatServer = process.env.CHAT_SERVER_ENABLED !== "false";
 
@@ -96,73 +28,42 @@ async function main(): Promise<void> {
   }
 
   if (enableChatServer) {
-    const mapMessagePayload = (
-      messages: Awaited<
-        ReturnType<typeof opencodeCatalogService.getSessionMessages>
-      >,
-    ): MessagePayload[] =>
-      messages.map((message) => ({
-        id: message.id,
-        sessionId: message.sessionId,
-        role: message.role,
-        content: message.content,
-        visibleContent: message.visibleContent,
-        thinkingContent: message.thinkingContent,
-        thinkingDurationSeconds: message.thinkingDurationSeconds,
-        parts: message.parts.map((part) => ({
-          type: part.type,
-          content: part.content,
-          durationSeconds: part.durationSeconds,
-        })),
-        createdAt: message.createdAt,
-      }));
-
-    chatServerClient.setRunRequestStreamHandler(async (payload, onChunk) => {
-      const project = await opencodeCatalogService.getProject(
-        payload.projectId,
-      );
-
-      if (!project) {
-        return {
-          requestId: payload.requestId,
-          projectId: payload.projectId,
-          success: false,
-          output: "",
-          error: `Project "${payload.projectId}" not found`,
-          exitCode: -1,
-          duration: 0,
-        };
-      }
-
-      const streamCallback: (chunk: StreamChunk) => void = (sdkChunk) => {
-        onChunk({
-          requestId: payload.requestId,
-          projectId: payload.projectId,
-          sessionId: payload.sessionId,
-          messageId: sdkChunk.messageId,
-          chunk: sdkChunk.content,
-          type: sdkChunk.type,
-          isComplete: sdkChunk.isComplete,
+    const createInteractionHandler = (projectId: string) => ({
+      onPermissionRequest: async (request: {
+        id: string;
+        sessionId: string;
+        permission: string;
+        patterns: string[];
+        metadata: Record<string, unknown>;
+        always: string[];
+      }) => {
+        return remotePermissionHandler.onPermissionRequest({
+          jobId: `mobile_${Date.now()}`,
+          threadId: "",
+          sessionId: request.sessionId,
+          permission: request.permission,
+          patterns: request.patterns,
+          metadata: { ...request.metadata, projectId },
         });
-      };
-
-      const result = await runOpenCodeStream(
-        payload.prompt,
-        project.folder,
-        streamCallback,
-        payload.sessionId,
-      );
-
-      return {
-        requestId: payload.requestId,
-        projectId: payload.projectId,
-        success: result.success,
-        output: result.output,
-        error: result.error,
-        exitCode: result.exitCode,
-        duration: result.duration,
-        sessionId: result.sessionId,
-      };
+      },
+      onQuestionRequest: async (request: {
+        id: string;
+        sessionId: string;
+        questions: Array<{
+          question: string;
+          header: string;
+          options: Array<{ label: string; description: string }>;
+          multiple?: boolean;
+          custom?: boolean;
+        }>;
+      }) => {
+        return remotePermissionHandler.onQuestionRequest({
+          jobId: `mobile_${Date.now()}`,
+          threadId: "",
+          sessionId: request.sessionId,
+          questions: request.questions,
+        });
+      },
     });
 
     chatServerClient.setSessionAbortHandler(async (payload) => {
@@ -178,7 +79,7 @@ async function main(): Promise<void> {
         };
       }
 
-      const result = await abortSession(payload.sessionId, project.folder);
+      const result = await abortSession(payload.sessionId, project.worktree);
       return {
         sessionId: payload.sessionId,
         success: result.success,
@@ -219,21 +120,15 @@ async function main(): Promise<void> {
 
       const result = await runOpenCodeStream(
         payload.prompt,
-        project.folder,
+        project.worktree,
         streamCallback,
         payload.sessionId,
-        undefined,
+        createInteractionHandler(payload.projectId),
         undefined,
         payload.model,
       );
 
       const resolvedSessionId = result.sessionId || payload.sessionId;
-      const messages = resolvedSessionId
-        ? await getSettledSessionMessages(
-            resolvedSessionId,
-            result.success ? result.output : "",
-          )
-        : [];
 
       return {
         requestId: payload.requestId,
@@ -244,17 +139,12 @@ async function main(): Promise<void> {
         error: result.error,
         exitCode: result.exitCode,
         duration: result.duration,
-        messages: mapMessagePayload(messages),
       };
     });
 
     await chatServerClient.start();
     logger.info("Chat server client started");
   }
-
-  await jobProcessor.start();
-
-  await startRunningJobsScheduler();
 
   const app = createServer();
   const server = app.listen(PORT, HOST, () => {
@@ -269,8 +159,6 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info("Received shutdown signal", { signal });
-
-    await jobProcessor.stop();
 
     if (enableChatServer) {
       await chatServerClient.stop();

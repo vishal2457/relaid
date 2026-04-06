@@ -30,6 +30,10 @@ import type {
   SessionPromptRequestEvent,
   SessionPromptResponseEvent,
   SessionPayload,
+  PermissionRequestEvent,
+  PermissionResponseEvent,
+  QuestionRequestEvent,
+  QuestionResponseEvent,
 } from "../shared/types";
 import {
   emitRequestToServer,
@@ -107,6 +111,52 @@ type ProvidersListResponse = {
   providers: ProviderPayload[];
   error?: string;
 };
+
+const PENDING_PERMISSION_EXPIRY_MS = 120_000;
+
+type BufferedInteraction = {
+  event: string;
+  payload: Record<string, unknown>;
+  expiresAt: number;
+};
+
+const pendingInteractions = new Map<string, BufferedInteraction>();
+
+function bufferInteraction(
+  event: string,
+  payload: { requestId: string } & Record<string, unknown>,
+): void {
+  pendingInteractions.set(payload.requestId, {
+    event,
+    payload,
+    expiresAt: Date.now() + PENDING_PERMISSION_EXPIRY_MS,
+  });
+}
+
+function clearBufferedInteraction(requestId: string): void {
+  pendingInteractions.delete(requestId);
+}
+
+function deliverBufferedInteractions(userId: string, socket: Socket): void {
+  const now = Date.now();
+  let delivered = 0;
+
+  for (const [requestId, entry] of pendingInteractions) {
+    if (entry.expiresAt <= now) {
+      pendingInteractions.delete(requestId);
+      continue;
+    }
+    socket.emit(entry.event, entry.payload);
+    delivered++;
+  }
+
+  if (delivered > 0) {
+    logger.info("Delivered buffered interactions to mobile", {
+      userId,
+      count: delivered,
+    });
+  }
+}
 
 export function createSocketServer(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
@@ -302,6 +352,51 @@ async function handleLocalServerConnection(
   pipeResponse("git_file_diff_response");
   pipeResponse("git_discard_file_response");
 
+  socket.on("permission_request", (payload: PermissionRequestEvent) => {
+    logger.info("Forwarding permission_request to mobile", {
+      userId,
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      permission: payload.permission,
+      projectId: payload.projectId,
+    });
+    resolvePendingRequest("permission_request", payload);
+    bufferInteraction("permission_request", payload);
+    io.to(`user:${userId}`).emit("permission_request", payload);
+
+    const permissionType = payload.permission;
+    const patternsPreview = payload.patterns.slice(0, 2).join(", ");
+    const body = `Permission: ${permissionType}${patternsPreview ? ` (${patternsPreview})` : ""}`;
+    void sendPushNotification(userId, "Permission Required", body, {
+      type: "permission_request",
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      jobId: payload.jobId,
+      permission: payload.permission,
+    });
+  });
+
+  socket.on("question_request", (payload: QuestionRequestEvent) => {
+    logger.info("Forwarding question_request to mobile", {
+      userId,
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      questionCount: payload.questions.length,
+    });
+    resolvePendingRequest("question_request", payload);
+    bufferInteraction("question_request", payload);
+    io.to(`user:${userId}`).emit("question_request", payload);
+
+    const firstQuestion = payload.questions[0];
+    const body = firstQuestion?.question.slice(0, 100) || "Question required";
+    void sendPushNotification(userId, "Question Required", body, {
+      type: "question_request",
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      jobId: payload.jobId,
+    });
+  });
+
   socket.on(
     "error_response",
     (payload: { requestId: string; code: string; message: string }) => {
@@ -313,6 +408,7 @@ async function handleLocalServerConnection(
 
 function handleMobileConnection(socket: Socket, userId: string): void {
   logger.info("Mobile client registered", { userId });
+  deliverBufferedInteractions(userId, socket);
 
   socket.on(
     "register_push_token",
@@ -945,6 +1041,87 @@ function handleMobileConnection(socket: Socket, userId: string): void {
         { providers: [] },
         error,
       );
+    }
+  });
+
+  socket.on("permission_response", async (data: PermissionResponseEvent) => {
+    clearBufferedInteraction(data.requestId);
+    try {
+      const sessionResult = await requestUntilMatch<SessionResponse>(
+        userId,
+        "session_get_request",
+        "session_get_response",
+        { sessionId: data.sessionId },
+        (response) => Boolean(response.session),
+      );
+
+      if (!sessionResult?.response.session) {
+        logger.warn("Session not found for permission_response", {
+          sessionId: data.sessionId,
+          requestId: data.requestId,
+        });
+        return;
+      }
+
+      await emitRequestToServer<void>(
+        sessionResult.serverId,
+        "permission_response",
+        "permission_response",
+        data,
+      );
+
+      logger.info("Permission response forwarded to local server", {
+        sessionId: data.sessionId,
+        jobId: data.jobId,
+        reply: data.reply,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to forward permission_response", {
+        sessionId: data.sessionId,
+        requestId: data.requestId,
+        error: errMsg,
+      });
+    }
+  });
+
+  socket.on("question_response", async (data: QuestionResponseEvent) => {
+    clearBufferedInteraction(data.requestId);
+    try {
+      const sessionResult = await requestUntilMatch<SessionResponse>(
+        userId,
+        "session_get_request",
+        "session_get_response",
+        { sessionId: data.sessionId },
+        (response) => Boolean(response.session),
+      );
+
+      if (!sessionResult?.response.session) {
+        logger.warn("Session not found for question_response", {
+          sessionId: data.sessionId,
+          requestId: data.requestId,
+        });
+        return;
+      }
+
+      await emitRequestToServer<void>(
+        sessionResult.serverId,
+        "question_response",
+        "question_response",
+        data,
+      );
+
+      logger.info("Question response forwarded to local server", {
+        sessionId: data.sessionId,
+        jobId: data.jobId,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to forward question_response", {
+        sessionId: data.sessionId,
+        requestId: data.requestId,
+        error: errMsg,
+      });
     }
   });
 }

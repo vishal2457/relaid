@@ -10,9 +10,6 @@ import type {
   ProjectUpdateRequestPayload,
   ProjectsListRequestPayload,
   ProvidersListRequestPayload,
-  RunRequestPayload,
-  RunResponsePayload,
-  RunStreamChunkPayload,
   SessionAbortPayload,
   SessionAbortedPayload,
   SessionCreateRequestPayload,
@@ -24,6 +21,10 @@ import type {
   SessionStreamChunkPayload,
   SessionUpdateRequestPayload,
   SessionsListRequestPayload,
+  PermissionRequestPayload,
+  PermissionResponsePayload,
+  QuestionRequestPayload,
+  QuestionResponsePayload,
 } from "../types";
 import { opencodeCatalogService } from "./opencode-catalog-service";
 import { GitService } from "./git-service";
@@ -50,30 +51,6 @@ const LOCAL_SERVER_SECRET = RELAY_DEVICE.serverSecret;
 const LOCAL_SERVER_NAME = getRelayServerName();
 const RECONNECT_INTERVAL_MS = 5000;
 
-function ensureProjectIsoDate(value?: Date | string | number | null): string {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString();
-  }
-
-  if (typeof value === "string" || typeof value === "number") {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
-  }
-
-  return new Date().toISOString();
-}
-
-export type RunRequestHandler = (
-  payload: RunRequestPayload,
-) => Promise<RunResponsePayload>;
-
-export type RunRequestStreamHandler = (
-  payload: RunRequestPayload,
-  onChunk: (chunk: RunStreamChunkPayload) => void,
-) => Promise<RunResponsePayload>;
-
 export type SessionAbortHandler = (
   payload: SessionAbortPayload,
 ) => Promise<SessionAbortedPayload>;
@@ -92,19 +69,23 @@ export class ChatServerClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
   private pairingQrPrinted = false;
-  private onRunRequest: RunRequestHandler | null = null;
-  private onRunRequestStream: RunRequestStreamHandler | null = null;
   private onSessionAbort: SessionAbortHandler | null = null;
   private onSessionPrompt: SessionPromptHandler | null = null;
   private onSessionPromptStream: SessionPromptStreamHandler | null = null;
-
-  setRunRequestHandler(handler: RunRequestHandler): void {
-    this.onRunRequest = handler;
-  }
-
-  setRunRequestStreamHandler(handler: RunRequestStreamHandler): void {
-    this.onRunRequestStream = handler;
-  }
+  private pendingPermissionRequests: Map<
+    string,
+    {
+      resolve: (reply: PermissionResponsePayload["reply"]) => void;
+      reject: (error: Error) => void;
+    }
+  > = new Map();
+  private pendingQuestionRequests: Map<
+    string,
+    {
+      resolve: (answers: string[][]) => void;
+      reject: (error: Error) => void;
+    }
+  > = new Map();
 
   setSessionAbortHandler(handler: SessionAbortHandler): void {
     this.onSessionAbort = handler;
@@ -116,6 +97,90 @@ export class ChatServerClient {
 
   setSessionPromptStreamHandler(handler: SessionPromptStreamHandler): void {
     this.onSessionPromptStream = handler;
+  }
+
+  requestPermission(
+    payload: PermissionRequestPayload,
+  ): Promise<PermissionResponsePayload["reply"]> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        logger.error("Cannot request permission: socket not connected", {
+          requestId: payload.requestId,
+        });
+        reject(new Error("Socket not connected"));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        this.pendingPermissionRequests.delete(payload.requestId);
+        logger.warn("Permission request timed out", {
+          requestId: payload.requestId,
+          permission: payload.permission,
+        });
+        reject(new Error("Permission request timed out"));
+      }, 120000);
+
+      this.pendingPermissionRequests.set(payload.requestId, {
+        resolve: (reply) => {
+          clearTimeout(timeout);
+          resolve(reply);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+
+      logger.info("Emitting permission_request to relay", {
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        permission: payload.permission,
+        projectId: payload.projectId,
+        socketConnected: this.socket?.connected,
+      });
+
+      this.emit("permission_request", payload);
+    });
+  }
+
+  requestQuestion(payload: QuestionRequestPayload): Promise<string[][]> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        logger.error("Cannot request question: socket not connected", {
+          requestId: payload.requestId,
+        });
+        reject(new Error("Socket not connected"));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        this.pendingQuestionRequests.delete(payload.requestId);
+        logger.warn("Question request timed out", {
+          requestId: payload.requestId,
+        });
+        reject(new Error("Question request timed out"));
+      }, 120000);
+
+      this.pendingQuestionRequests.set(payload.requestId, {
+        resolve: (answers) => {
+          clearTimeout(timeout);
+          resolve(answers);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+
+      logger.info("Emitting question_request to relay", {
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        questionCount: payload.questions.length,
+        socketConnected: this.socket?.connected,
+      });
+
+      this.emit("question_request", payload);
+    });
   }
 
   async start(): Promise<void> {
@@ -229,10 +294,6 @@ export class ChatServerClient {
         error: error.message,
       });
       this.scheduleReconnect();
-    });
-
-    this.socket.on("run_request", (payload: RunRequestPayload) => {
-      void this.handleRunRequest(payload);
     });
 
     this.socket.on("session_abort", (payload: SessionAbortPayload) => {
@@ -371,6 +432,41 @@ export class ChatServerClient {
         void this.handleGitDiscardFileRequest(payload);
       },
     );
+
+    this.socket.on(
+      "permission_response",
+      (payload: PermissionResponsePayload) => {
+        const pending = this.pendingPermissionRequests.get(payload.requestId);
+        if (pending) {
+          this.pendingPermissionRequests.delete(payload.requestId);
+          pending.resolve(payload.reply);
+          logger.info("Permission response received", {
+            requestId: payload.requestId,
+            reply: payload.reply,
+          });
+        } else {
+          logger.warn("Received permission response for unknown request", {
+            requestId: payload.requestId,
+          });
+        }
+      },
+    );
+
+    this.socket.on("question_response", (payload: QuestionResponsePayload) => {
+      const pending = this.pendingQuestionRequests.get(payload.requestId);
+      if (pending) {
+        this.pendingQuestionRequests.delete(payload.requestId);
+        pending.resolve(payload.answers);
+        logger.info("Question response received", {
+          requestId: payload.requestId,
+          answerCount: payload.answers.length,
+        });
+      } else {
+        logger.warn("Received question response for unknown request", {
+          requestId: payload.requestId,
+        });
+      }
+    });
   }
 
   private scheduleReconnect(): void {
@@ -400,64 +496,6 @@ export class ChatServerClient {
 
   private sendError(requestId: string, code: string, message: string): void {
     this.emit("error_response", { requestId, code, message });
-  }
-
-  private async handleRunRequest(
-    payload: RunRequestPayload & { requestId: string },
-  ): Promise<void> {
-    logger.info("handleRunRequest called", {
-      requestId: payload.requestId,
-      projectId: payload.projectId,
-    });
-
-    const handler = this.onRunRequestStream || this.onRunRequest;
-    if (!handler) {
-      this.sendError(
-        payload.requestId,
-        "NO_HANDLER",
-        "No run request handler configured",
-      );
-      return;
-    }
-
-    try {
-      if (this.onRunRequestStream) {
-        logger.info("Using stream handler for run request", {
-          requestId: payload.requestId,
-        });
-        let chunkCount = 0;
-        const onChunk = (chunk: RunStreamChunkPayload) => {
-          chunkCount++;
-          logger.info(
-            `Streaming chunk #${chunkCount} for request ${payload.requestId}`,
-            {
-              type: chunk.type,
-              contentLength: chunk.chunk.length,
-            },
-          );
-          this.emit("run_stream_chunk", {
-            ...chunk,
-            requestId: payload.requestId,
-            projectId: payload.projectId,
-          });
-        };
-
-        const response = await this.onRunRequestStream(payload, onChunk);
-        logger.info(
-          `Run request ${payload.requestId} completed with ${chunkCount} chunks`,
-          {
-            success: response.success,
-          },
-        );
-        this.emit("run_response", response);
-      } else if (this.onRunRequest) {
-        const response = await this.onRunRequest(payload);
-        this.emit("run_response", response);
-      }
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      this.sendError(payload.requestId, "RUN_ERROR", errMsg);
-    }
   }
 
   private async handleSessionAbort(
@@ -527,18 +565,9 @@ export class ChatServerClient {
     payload: { requestId: string } & ProjectsListRequestPayload,
   ): Promise<void> {
     try {
-      const projects = (await opencodeCatalogService.listProjects()).map(
-        (project) => ({
-          id: project.id,
-          name: project.name,
-          description: project.description,
-          folder: project.folder,
-          localServerId: LOCAL_SERVER_ID,
-          createdAt: project.createdAt,
-          updatedAt: project.updatedAt,
-        }),
-      );
-
+      const projects = await opencodeCatalogService.listProjects();
+      console.log(projects, "projects");
+      
       this.emit("projects_list_response", {
         requestId: payload.requestId,
         projects,
@@ -558,17 +587,7 @@ export class ChatServerClient {
       );
       this.emit("project_get_response", {
         requestId: payload.requestId,
-        project: project
-          ? {
-              id: project.id,
-              name: project.name,
-              description: project.description,
-              folder: project.folder,
-              localServerId: LOCAL_SERVER_ID,
-              createdAt: project.createdAt,
-              updatedAt: project.updatedAt,
-            }
-          : null,
+        project: project,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -654,22 +673,7 @@ export class ChatServerClient {
 
       this.emit("sessions_list_response", {
         requestId: payload.requestId,
-        sessions: sessions.map((session) => ({
-          id: session.id,
-          projectId: session.projectId,
-          userId: null,
-          status: session.status,
-          prompt: session.prompt,
-          output: session.output,
-          error: session.error,
-          exitCode: session.exitCode,
-          duration: session.duration,
-          sessionId: session.sessionId,
-          createdAt: session.createdAt,
-          updatedAt: session.updatedAt,
-          startedAt: session.startedAt,
-          completedAt: session.completedAt,
-        })),
+        sessions: sessions,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -686,24 +690,7 @@ export class ChatServerClient {
       );
       this.emit("session_get_response", {
         requestId: payload.requestId,
-        session: session
-          ? {
-              id: session.id,
-              projectId: session.projectId,
-              userId: null,
-              status: session.status,
-              prompt: session.prompt,
-              output: session.output,
-              error: session.error,
-              exitCode: session.exitCode,
-              duration: session.duration,
-              sessionId: session.sessionId,
-              createdAt: session.createdAt,
-              updatedAt: session.updatedAt,
-              startedAt: session.startedAt,
-              completedAt: session.completedAt,
-            }
-          : null,
+        session: session,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -729,22 +716,7 @@ export class ChatServerClient {
 
       this.emit("session_create_response", {
         requestId: payload.requestId,
-        session: {
-          id: session.id,
-          projectId: session.projectId,
-          status: session.status,
-          prompt: session.prompt,
-          output: session.output,
-          error: session.error,
-          exitCode: session.exitCode,
-          duration: session.duration,
-          sessionId: session.sessionId,
-          userId: payload.userId || null,
-          createdAt: session.createdAt,
-          updatedAt: session.updatedAt,
-          startedAt: session.startedAt,
-          completedAt: session.completedAt,
-        },
+        session,
         requestId_data: payload.requestId,
       });
     } catch (error) {
@@ -764,23 +736,7 @@ export class ChatServerClient {
 
       this.emit("session_messages_response", {
         requestId: payload.requestId,
-        messages: messages.map(
-          (message): MessagePayload => ({
-            id: message.id,
-            sessionId: message.sessionId,
-            role: message.role,
-            content: message.content,
-            visibleContent: message.visibleContent,
-            thinkingContent: message.thinkingContent,
-            thinkingDurationSeconds: message.thinkingDurationSeconds,
-            parts: message.parts.map((part) => ({
-              type: part.type,
-              content: part.content,
-              durationSeconds: part.durationSeconds,
-            })),
-            createdAt: message.createdAt,
-          }),
-        ),
+        messages,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -798,24 +754,7 @@ export class ChatServerClient {
 
       this.emit("session_update_response", {
         requestId: payload.requestId,
-        session: session
-          ? {
-              id: session.id,
-              projectId: session.projectId,
-              userId: null,
-              status: session.status,
-              prompt: session.prompt,
-              output: session.output,
-              error: session.error,
-              exitCode: session.exitCode,
-              duration: session.duration,
-              sessionId: session.sessionId,
-              createdAt: session.createdAt,
-              updatedAt: session.updatedAt,
-              startedAt: session.startedAt,
-              completedAt: session.completedAt,
-            }
-          : null,
+        session,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -827,7 +766,9 @@ export class ChatServerClient {
     payload: { requestId: string } & ProvidersListRequestPayload,
   ): Promise<void> {
     try {
+      
       const providers = await opencodeCatalogService.listProviders();
+      console.log("handleProvidersListRequest", providers?.length);
       this.emit("providers_list_response", {
         requestId: payload.requestId,
         providers,
@@ -856,7 +797,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.getFileStatusLists();
 
       this.emit("git_staged_files_response", {
@@ -906,7 +847,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.addFiles(payload.files);
 
       this.emit("git_stage_files_response", {
@@ -949,7 +890,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.unstageFiles(payload.files);
 
       this.emit("git_unstage_files_response", {
@@ -991,7 +932,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.diffFile(payload.filePath);
 
       this.emit("git_file_diff_response", {
@@ -1036,7 +977,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.discardChanges([payload.filePath]);
 
       this.emit("git_discard_file_response", {

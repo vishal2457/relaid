@@ -140,29 +140,8 @@ export function createSessionsRouter(): Router {
         return;
       }
 
-      const session = {
-        id: createdSession.id,
-        projectId: createdSession.projectId,
-        userId: userId || null,
-        status: createdSession.status as any,
-        prompt: createdSession.prompt,
-        output: createdSession.output,
-        error: createdSession.error,
-        exitCode: createdSession.exitCode,
-        duration: createdSession.duration,
-        sessionId: createdSession.sessionId,
-        createdAt: new Date(createdSession.createdAt),
-        updatedAt: new Date(createdSession.updatedAt),
-        startedAt: createdSession.startedAt
-          ? new Date(createdSession.startedAt)
-          : null,
-        completedAt: createdSession.completedAt
-          ? new Date(createdSession.completedAt)
-          : null,
-      };
-
       logger.info("Created session", {
-        sessionId: session.id,
+        sessionId: createdSession.id,
         projectId,
         resumeSessionId,
       });
@@ -170,7 +149,7 @@ export function createSessionsRouter(): Router {
       success(
         res,
         {
-          session,
+          session: createdSession,
           requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
         },
         "Session created successfully",

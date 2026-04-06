@@ -44,9 +44,14 @@ router.get("/", async (req: Request, res: Response) => {
       {},
     );
 
+    console.log(results, "chekc me");
+    
+
     const providers = results.flatMap(
       (result) => result.response.providers || [],
     );
+    console.log(providers.length, "providers");
+    
 
     const uniqueProviders = Array.from(
       new Map(providers.map((provider) => [provider.id, provider])).values(),

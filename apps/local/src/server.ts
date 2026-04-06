@@ -9,9 +9,7 @@ import morgan from "morgan";
 import * as path from "path";
 import {
   createAgentRouter,
-  createCronJobsRouter,
-  createHealthRouter,
-  createJobsRouter,
+  healthRouter,
   createLogsRouter,
   createProjectsRouter,
   createRunRouter,
@@ -48,17 +46,15 @@ export function createServer(): express.Application {
       return;
     }
     next();
-  }  
+  }
 
-  app.use("/health", createHealthRouter());
+  app.use("/health", healthRouter);
   app.use("/api/logs", createLogsRouter());
   app.use("/api/project", createProjectsRouter());
   app.use("/api/sessions", createSessionsRouter());
   app.use("/run", requireSecret, createRunRouter());
   app.use("/api/secrets", createSecretsRouter());
   app.use("/api/agent", createAgentRouter());
-  app.use("/api/cron-jobs", createCronJobsRouter());
-  app.use("/api/jobs", createJobsRouter());
   app.use("/api/telemetry", createTelemetryRouter());
 
   if (fs.existsSync(webBuildPath)) {

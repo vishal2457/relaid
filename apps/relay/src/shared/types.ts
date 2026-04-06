@@ -1,4 +1,14 @@
 import { z } from "zod";
+import type {
+  Project,
+  Session,
+  Message,
+  Provider,
+} from "@opencode-ai/sdk/v2" with {
+  "resolution-mode": "import",
+};
+
+export type { Project, Session, Message, Provider };
 
 export const SessionStatusSchema = z.enum([
   "pending",
@@ -402,3 +412,70 @@ export const ProvidersListResponseSchema = z.object({
 
 export type ProvidersListRequest = z.infer<typeof ProvidersListRequestSchema>;
 export type ProvidersListResponse = z.infer<typeof ProvidersListResponseSchema>;
+
+export const PermissionReplySchema = z.enum(["once", "always", "reject"]);
+
+export type PermissionReply = z.infer<typeof PermissionReplySchema>;
+
+export const PermissionRequestEventSchema = z.object({
+  requestId: z.string(),
+  projectId: z.string(),
+  sessionId: z.string(),
+  jobId: z.string(),
+  threadId: z.string(),
+  permission: z.string(),
+  patterns: z.array(z.string()),
+  metadata: z.record(z.unknown()),
+});
+
+export type PermissionRequestEvent = z.infer<
+  typeof PermissionRequestEventSchema
+>;
+
+export const PermissionResponseEventSchema = z.object({
+  requestId: z.string(),
+  sessionId: z.string(),
+  jobId: z.string(),
+  reply: PermissionReplySchema,
+});
+
+export type PermissionResponseEvent = z.infer<
+  typeof PermissionResponseEventSchema
+>;
+
+export const QuestionOptionSchema = z.object({
+  label: z.string(),
+  description: z.string(),
+});
+
+export type QuestionOption = z.infer<typeof QuestionOptionSchema>;
+
+export const QuestionSchema = z.object({
+  header: z.string(),
+  question: z.string(),
+  options: z.array(QuestionOptionSchema),
+  multiple: z.boolean().optional(),
+  custom: z.boolean().optional(),
+});
+
+export type Question = z.infer<typeof QuestionSchema>;
+
+export const QuestionRequestEventSchema = z.object({
+  requestId: z.string(),
+  projectId: z.string(),
+  sessionId: z.string(),
+  jobId: z.string(),
+  threadId: z.string(),
+  questions: z.array(QuestionSchema),
+});
+
+export type QuestionRequestEvent = z.infer<typeof QuestionRequestEventSchema>;
+
+export const QuestionResponseEventSchema = z.object({
+  requestId: z.string(),
+  sessionId: z.string(),
+  jobId: z.string(),
+  answers: z.array(z.array(z.string())),
+});
+
+export type QuestionResponseEvent = z.infer<typeof QuestionResponseEventSchema>;

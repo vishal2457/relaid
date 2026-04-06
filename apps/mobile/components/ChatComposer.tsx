@@ -27,6 +27,7 @@ type ComposerSelection = {
 
 type ChatComposerProps = {
   activeProject: boolean;
+  activeProjectName: string;
   borderColor: string;
   fileSuggestions?: ProjectFileMatch[];
   fileSuggestionsLoading: boolean;
@@ -43,12 +44,16 @@ type ChatComposerProps = {
   ) => void;
   onSelectFileSuggestion: (match: ProjectFileMatch) => void;
   onSend: () => void;
+  onPressModel: () => void;
+  onPressProject: () => void;
+  selectedModelName: string;
   showMentionSuggestions: boolean;
   trimmedInput: string;
 };
 
 export function ChatComposer({
   activeProject,
+  activeProjectName,
   borderColor,
   fileSuggestions,
   fileSuggestionsLoading,
@@ -63,6 +68,9 @@ export function ChatComposer({
   onSelectionChange,
   onSelectFileSuggestion,
   onSend,
+  onPressModel,
+  onPressProject,
+  selectedModelName,
   showMentionSuggestions,
   trimmedInput,
 }: ChatComposerProps) {
@@ -196,54 +204,115 @@ export function ChatComposer({
         </View>
       ) : null}
 
-      <View style={styles.inputRow}>
-        <View style={[styles.textInputWrap, { height: composerInputHeight }]}>
-          <TextInput
-            ref={inputRef}
-            style={[
-              styles.textInput,
-              {
-                backgroundColor: theme.colors.background,
-                borderColor,
-                color: theme.colors.onSurface,
-                height: composerInputHeight,
-              },
-            ]}
-            cursorColor={theme.colors.primary}
-            multiline
-            onChangeText={onChangeText}
-            onContentSizeChange={handleInputContentSizeChange}
-            onSelectionChange={onSelectionChange}
-            placeholder="Send a message..."
-            placeholderTextColor={theme.colors.onSurfaceVariant}
-            scrollEnabled={composerInputHeight >= MAX_INPUT_HEIGHT}
-            selection={inputSelection}
-            selectionColor={theme.colors.primary}
-            value={inputText}
-          />
-        </View>
-
-        <Pressable
-          disabled={!trimmedInput || isSending || !activeProject}
-          onPress={onSend}
+      <View
+        style={[
+          styles.inputWrapper,
+          {
+            backgroundColor: theme.colors.background,
+            borderColor,
+          },
+        ]}
+      >
+        <TextInput
+          ref={inputRef}
           style={[
-            styles.sendButton,
+            styles.textInput,
             {
-              backgroundColor: theme.colors.primary,
-              opacity: !trimmedInput || isSending || !activeProject ? 0.7 : 1,
+              backgroundColor: "transparent",
+              color: theme.colors.onSurface,
+              height: composerInputHeight,
             },
           ]}
-        >
-          {isSending ? (
-            <ActivityIndicator size={18} color={theme.colors.onPrimary} />
-          ) : (
-            <MaterialCommunityIcons
-              name="send"
-              size={20}
-              color={theme.colors.onPrimary}
+          cursorColor={theme.colors.primary}
+          multiline
+          onChangeText={onChangeText}
+          onContentSizeChange={handleInputContentSizeChange}
+          onSelectionChange={onSelectionChange}
+          placeholder="Send a message..."
+          placeholderTextColor={theme.colors.onSurfaceVariant}
+          scrollEnabled={composerInputHeight >= MAX_INPUT_HEIGHT}
+          selection={inputSelection}
+          selectionColor={theme.colors.primary}
+          value={inputText}
+        />
+        <View style={styles.bottomRow}>
+          <View style={styles.metaRow}>
+            <Pressable
+              onPress={onPressProject}
+              style={({ pressed }) => [
+                styles.metaButton,
+                styles.metaButtonLeft,
+                { borderColor },
+                pressed && styles.metaButtonPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="folder-outline"
+                size={14}
+                color={metaColor}
+              />
+              <Text
+                variant="bodySmall"
+                style={[
+                  styles.metaButtonText,
+                  { color: theme.colors.onSurface },
+                ]}
+                numberOfLines={1}
+              >
+                {activeProjectName}
+              </Text>
+            </Pressable>
+            <View
+              style={[styles.metaDivider, { backgroundColor: borderColor }]}
             />
-          )}
-        </Pressable>
+            <Pressable
+              onPress={onPressModel}
+              style={({ pressed }) => [
+                styles.metaButton,
+                styles.metaButtonRight,
+                { borderColor },
+                pressed && styles.metaButtonPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="cube-outline"
+                size={14}
+                color={metaColor}
+              />
+              <Text
+                variant="bodySmall"
+                style={[
+                  styles.metaButtonText,
+                  { color: theme.colors.onSurface },
+                ]}
+                numberOfLines={1}
+              >
+                {selectedModelName}
+              </Text>
+            </Pressable>
+          </View>
+          <Pressable
+            disabled={!trimmedInput || isSending || !activeProject}
+            onPress={onSend}
+            style={[
+              styles.sendButton,
+              {
+                backgroundColor: theme.colors.primary,
+                opacity: !trimmedInput || isSending || !activeProject ? 0.7 : 1,
+              },
+            ]}
+          >
+            {isSending ? (
+              <ActivityIndicator size={18} color={theme.colors.onPrimary} />
+            ) : (
+              <MaterialCommunityIcons
+                name="send"
+                size={20}
+                color={theme.colors.onPrimary}
+              />
+            )}
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -251,15 +320,49 @@ export function ChatComposer({
 
 const styles = StyleSheet.create({
   container: {
-    gap: 8,
     paddingHorizontal: 16,
     paddingTop: COMPOSER_TOP_PADDING,
-    borderTopWidth: 1,
   },
-  inputRow: {
+  inputWrapper: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+  },
+  metaRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 12,
+    gap: 0,
+  },
+  metaButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    gap: 6,
+  },
+  metaButtonLeft: {
+    borderTopLeftRadius: 8,
+    borderBottomLeftRadius: 8,
+    borderRightWidth: 0,
+  },
+  metaButtonRight: {
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    borderLeftWidth: 0,
+  },
+  metaButtonPressed: {
+    opacity: 0.7,
+  },
+  metaButtonText: {
+    fontSize: 12,
+  },
+  metaDivider: {
+    width: 1,
+    alignSelf: "stretch",
   },
   mentionEmptyState: {
     paddingHorizontal: 12,
@@ -296,16 +399,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  bottomRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   textInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderWidth: 0,
+    borderRadius: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     fontSize: 16,
     lineHeight: 22,
     textAlignVertical: "top",
-  },
-  textInputWrap: {
-    flex: 1,
   },
 });

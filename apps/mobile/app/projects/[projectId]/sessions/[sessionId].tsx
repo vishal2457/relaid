@@ -39,6 +39,12 @@ import {
 } from "@/lib/active-session-stream";
 import { queryClient } from "@/lib/query-client";
 import { getChatSocket } from "@/lib/socket/chat";
+import {
+  PermissionCard,
+  QuestionCard,
+  type PermissionRequest,
+  type QuestionRequest,
+} from "@/components/PermissionCard";
 
 type TextSegment = {
   type: "normal" | "bold" | "code";
@@ -117,7 +123,7 @@ const FormattedText = ({
   );
 };
 
-const formatDateTime = (value: string | null | undefined) => {
+const formatDateTime = (value: string | number | null | undefined) => {
   if (!value) return null;
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -172,6 +178,32 @@ type SessionStreamChunkEvent = {
   isComplete?: boolean;
 };
 
+type PermissionRequestEvent = {
+  requestId: string;
+  projectId: string;
+  sessionId: string;
+  jobId: string;
+  threadId: string;
+  permission: string;
+  patterns: string[];
+  metadata: Record<string, unknown>;
+};
+
+type QuestionRequestEvent = {
+  requestId: string;
+  projectId: string;
+  sessionId: string;
+  jobId: string;
+  threadId: string;
+  questions: Array<{
+    header: string;
+    question: string;
+    options: Array<{ label: string; description: string }>;
+    multiple?: boolean;
+    custom?: boolean;
+  }>;
+};
+
 export default function SessionMessagesScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -190,6 +222,14 @@ export default function SessionMessagesScreen() {
   const [optimisticMessage, setOptimisticMessage] =
     React.useState<SessionMessage | null>(null);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+  const [pendingPermission, setPendingPermission] =
+    React.useState<PermissionRequestEvent | null>(null);
+  const [pendingQuestion, setPendingQuestion] =
+    React.useState<QuestionRequestEvent | null>(null);
+  const [isRespondingToPermission, setIsRespondingToPermission] =
+    React.useState(false);
+  const [isRespondingToQuestion, setIsRespondingToQuestion] =
+    React.useState(false);
 
   React.useEffect(() => {
     const showListener = Keyboard.addListener(
@@ -457,9 +497,58 @@ export default function SessionMessagesScreen() {
     };
 
     const handleReconnect = () => {
+      console.log("[Socket] Reconnected", {
+        projectId,
+        sessionId,
+        hasPendingRequestId: !!pendingRequestIdRef.current,
+      });
       if (pendingRequestIdRef.current) {
         void recoverPendingStream();
       }
+    };
+
+    const handleDisconnect = (reason: string) => {
+      console.log("[Socket] Disconnected", { reason, projectId, sessionId });
+    };
+
+    const handlePermissionRequest = (payload: PermissionRequestEvent) => {
+      console.log("[PermissionRequest] Received:", {
+        requestId: payload.requestId,
+        payloadProjectId: payload.projectId,
+        screenProjectId: projectId,
+        sessionId: payload.sessionId,
+        permission: payload.permission,
+        matches: payload.projectId === projectId,
+      });
+
+      if (payload.projectId !== projectId) {
+        console.warn(
+          "[PermissionRequest] Dropping: projectId mismatch. Payload:",
+          payload.projectId,
+          "Screen:",
+          projectId,
+        );
+        return;
+      }
+
+      setPendingPermission(payload);
+      setPendingQuestion(null);
+    };
+
+    const handleQuestionRequest = (payload: QuestionRequestEvent) => {
+      console.log("[QuestionRequest] Received:", {
+        requestId: payload.requestId,
+        payloadProjectId: payload.projectId,
+        screenProjectId: projectId,
+        matches: payload.projectId === projectId,
+      });
+
+      if (payload.projectId !== projectId) {
+        return;
+      }
+
+      setPendingQuestion(payload);
+      setPendingPermission(null);
     };
 
     socket.on("session_prompt_started", handlePromptStarted);
@@ -467,6 +556,21 @@ export default function SessionMessagesScreen() {
     socket.on("session_prompt_response", handlePromptResponse);
     socket.on("error_response", handleErrorResponse);
     socket.on("connect", handleReconnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("permission_request", handlePermissionRequest);
+    socket.on("question_request", handleQuestionRequest);
+
+    // Debug: log ALL incoming events to diagnose missing permission_request
+    const debugAllEvents = (event: string, ...args: unknown[]) => {
+      if (
+        event === "session_stream_chunk" ||
+        event === "session_prompt_started"
+      ) {
+        return; // too noisy
+      }
+      console.log("[Socket:Event]", event, args[0]);
+    };
+    socket.onAny(debugAllEvents);
 
     return () => {
       socket.off("session_prompt_started", handlePromptStarted);
@@ -474,6 +578,10 @@ export default function SessionMessagesScreen() {
       socket.off("session_prompt_response", handlePromptResponse);
       socket.off("error_response", handleErrorResponse);
       socket.off("connect", handleReconnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("permission_request", handlePermissionRequest);
+      socket.off("question_request", handleQuestionRequest);
+      socket.offAny(debugAllEvents);
     };
   }, [
     clearPendingStreamState,
@@ -534,6 +642,25 @@ export default function SessionMessagesScreen() {
     </View>
   );
 
+  const handleAbortSession = React.useCallback(() => {
+    if (!sessionId || !projectId || !pendingRequestId) {
+      return;
+    }
+
+    const socket = getChatSocket();
+    if (!socket || !socket.connected) {
+      return;
+    }
+
+    socket.emit("session_abort", {
+      requestId: pendingRequestId,
+      sessionId,
+      projectId,
+    });
+
+    clearPendingStreamState(pendingRequestId);
+  }, [sessionId, projectId, pendingRequestId, clearPendingStreamState]);
+
   const handleSend = React.useCallback(() => {
     if (!sessionId || !projectId || !trimmedInput || isSending) {
       return;
@@ -547,14 +674,14 @@ export default function SessionMessagesScreen() {
     pendingRequestIdRef.current = requestId;
     setOptimisticMessage({
       id: `optimistic_${requestId}`,
-      sessionId,
+      sessionID: sessionId,
       role: "user",
       content: trimmedInput,
       visibleContent: trimmedInput,
       thinkingContent: null,
       thinkingDurationSeconds: null,
       parts: [{ type: "text", content: trimmedInput, durationSeconds: null }],
-      createdAt: new Date().toISOString(),
+      createdAt: Date.now(),
     });
     setInputText("");
     setInputHeight(MIN_INPUT_HEIGHT);
@@ -603,6 +730,65 @@ export default function SessionMessagesScreen() {
       console.error(createError);
     }
   }, [createSessionMutation, projectId, router]);
+
+  const handlePermissionResponse = React.useCallback(
+    (reply: "once" | "always" | "reject") => {
+      if (!pendingPermission) {
+        console.warn(
+          "[PermissionResponse] No pending permission to respond to",
+        );
+        return;
+      }
+
+      setIsRespondingToPermission(true);
+      const responsePayload = {
+        requestId: pendingPermission.requestId,
+        sessionId: pendingPermission.sessionId,
+        jobId: pendingPermission.jobId,
+        reply,
+      };
+
+      console.log("[PermissionResponse] Sending:", responsePayload);
+
+      const socket = getChatSocket();
+      if (socket && socket.connected) {
+        socket.emit("permission_response", responsePayload);
+      } else {
+        console.error(
+          "[PermissionResponse] Socket not connected, cannot send response",
+        );
+      }
+
+      setPendingPermission(null);
+      setIsRespondingToPermission(false);
+    },
+    [pendingPermission],
+  );
+
+  const handleQuestionResponse = React.useCallback(
+    (answers: string[][]) => {
+      if (!pendingQuestion) {
+        return;
+      }
+
+      setIsRespondingToQuestion(true);
+      const responsePayload = {
+        requestId: pendingQuestion.requestId,
+        sessionId: pendingQuestion.sessionId,
+        jobId: pendingQuestion.jobId,
+        answers,
+      };
+
+      const socket = getChatSocket();
+      if (socket && socket.connected) {
+        socket.emit("question_response", responsePayload);
+      }
+
+      setPendingQuestion(null);
+      setIsRespondingToQuestion(false);
+    },
+    [pendingQuestion],
+  );
 
   const toggleThinking = (messageId: string) => {
     setExpandedThinking((current: Record<string, boolean>) => ({
@@ -822,16 +1008,21 @@ export default function SessionMessagesScreen() {
       <Pressable
         disabled={!trimmedInput || isSending}
         onPress={handleSend}
+        onLongPress={isSending ? handleAbortSession : undefined}
         style={[
           styles.sendButton,
           {
-            backgroundColor: theme.colors.primary,
+            backgroundColor: isSending ? "#EF4444" : theme.colors.primary,
             opacity: !trimmedInput || isSending ? 0.7 : 1,
           },
         ]}
       >
         {isSending ? (
-          <ActivityIndicator size={18} color={theme.colors.onPrimary} />
+          <MaterialCommunityIcons
+            name="stop"
+            size={20}
+            color={theme.colors.onPrimary}
+          />
         ) : (
           <MaterialCommunityIcons
             name="send"
@@ -840,6 +1031,35 @@ export default function SessionMessagesScreen() {
           />
         )}
       </Pressable>
+    </View>
+  );
+
+  const permissionCard = (() => {
+    if (pendingPermission) {
+      return (
+        <PermissionCard
+          request={pendingPermission}
+          onRespond={handlePermissionResponse}
+          isResponding={isRespondingToPermission}
+        />
+      );
+    }
+    if (pendingQuestion) {
+      return (
+        <QuestionCard
+          request={pendingQuestion}
+          onRespond={handleQuestionResponse}
+          isResponding={isRespondingToQuestion}
+        />
+      );
+    }
+    return null;
+  })();
+
+  const bottomContent = (
+    <View style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
+      {permissionCard}
+      {inputBar}
     </View>
   );
 
@@ -974,7 +1194,7 @@ export default function SessionMessagesScreen() {
             />
           )}
         </View>
-        {inputBar}
+        {bottomContent}
       </View>
     </SafeAreaView>
   );

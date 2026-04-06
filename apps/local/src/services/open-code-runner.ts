@@ -292,19 +292,3 @@ export async function shutdownOpenCodeRunner(): Promise<void> {
   // But since we are creating a new instance each time in runOpenCode and abortSession, there is no shared state.
   return;
 }
-
-export function formatResult(
-  result: OpenCodeResult,
-  projectName: string,
-): string {
-  const status = result.success ? "Success" : "Failure";
-  const duration = (result.duration / 1000).toFixed(1);
-  const header = `${status} **OpenCode** · \`${projectName}\` · ${duration}s\n`;
-
-  if (!result.success && result.error) {
-    return `${header}\`\`\`\n${result.error}\n\`\`\``;
-  }
-
-  const codeBlock = `\`\`\`\n${result.output}\n\`\`\``;
-  return `${header}${codeBlock}`;
-}
