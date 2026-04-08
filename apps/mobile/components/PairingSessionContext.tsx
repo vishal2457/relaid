@@ -6,7 +6,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { disconnectChatSocket } from "@/lib/socket/chat";
+import { disconnectSseClient } from "@/lib/sse";
 import { queryClient } from "@/lib/query-client";
 import {
   clearPairingSession as clearStoredPairingSession,
@@ -45,13 +45,13 @@ export function PairingSessionProvider({
 
   const saveSession = useCallback(async (nextSession: PairingSession) => {
     await saveStoredPairingSession(nextSession);
-    disconnectChatSocket();
+    disconnectSseClient();
     await queryClient.invalidateQueries();
     setSession(nextSession);
   }, []);
 
   const clearSession = useCallback(async () => {
-    disconnectChatSocket();
+    disconnectSseClient();
     await clearStoredPairingSession();
     queryClient.clear();
     setSession(null);

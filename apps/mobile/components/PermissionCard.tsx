@@ -1,7 +1,7 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Pressable, StyleSheet, View } from "react-native";
-import { Button, Card, Text, useTheme } from "react-native-paper";
+import { Pressable, StyleSheet, View, Platform } from "react-native";
+import { Button, Text, useTheme } from "react-native-paper";
 
 export type PermissionRequest = {
   requestId: string;
@@ -12,6 +12,7 @@ export type PermissionRequest = {
   permission: string;
   patterns: string[];
   metadata: Record<string, unknown>;
+  timestamp?: string;
 };
 
 export type QuestionRequest = {
@@ -51,12 +52,6 @@ function formatPermissionType(permission: string): string {
   return permissionLabels[permission] || permission;
 }
 
-function formatPatternsPreview(patterns: string[]): string {
-  if (patterns.length === 0) return "";
-  if (patterns.length <= 2) return patterns.join(", ");
-  return `${patterns.slice(0, 2).join(", ")} +${patterns.length - 2} more`;
-}
-
 export function PermissionCard({
   request,
   onRespond,
@@ -64,64 +59,128 @@ export function PermissionCard({
 }: PermissionCardProps) {
   const theme = useTheme();
 
-  const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
+  const isDark = theme.dark;
+  const borderColor = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)";
   const warningColor = "#F59E0B";
+  const surfaceColor = isDark ? "#1E293B" : "#F8FAFC";
 
   return (
-    <View style={[styles.container, { borderColor }]}>
+    <View
+      style={[
+        styles.container,
+        {
+          borderColor,
+          backgroundColor: surfaceColor,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 8,
+          elevation: 2,
+        },
+      ]}
+    >
       <View style={styles.header}>
-        <MaterialCommunityIcons
-          name="shield-alert"
-          size={20}
-          color={warningColor}
-        />
-        <Text variant="titleMedium" style={{ color: warningColor }}>
-          Permission Required
-        </Text>
+        <View
+          style={[
+            styles.iconWrapper,
+            { backgroundColor: isDark ? "rgba(245, 158, 11, 0.15)" : "rgba(245, 158, 11, 0.1)" },
+          ]}
+        >
+          <MaterialCommunityIcons
+            name="shield-lock"
+            size={22}
+            color={warningColor}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            variant="labelSmall"
+            style={{
+              color: warningColor,
+              fontWeight: "700",
+              textTransform: "uppercase",
+              letterSpacing: 1,
+            }}
+          >
+            Permission
+          </Text>
+          <Text
+            variant="titleSmall"
+            style={{ color: theme.colors.onSurface, fontWeight: "600" }}
+          >
+            The agent requests permission
+          </Text>
+        </View>
       </View>
 
-      <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>
-        {formatPermissionType(request.permission)}
-      </Text>
+      <View style={styles.content}>
+        <View style={styles.permissionTypeRow}>
+          <Text
+            variant="bodyLarge"
+            style={{ fontWeight: "700", color: theme.colors.primary }}
+          >
+            {formatPermissionType(request.permission)}
+          </Text>
+        </View>
 
-      {request.patterns.length > 0 && (
-        <Text
-          variant="bodySmall"
-          style={{ color: theme.colors.onSurfaceVariant }}
-        >
-          {formatPatternsPreview(request.patterns)}
-        </Text>
-      )}
+        {request.patterns.length > 0 && (
+          <View style={styles.patternsWrapper}>
+            {request.patterns.map((pattern, idx) => (
+              <View
+                key={idx}
+                style={[
+                  styles.patternItem,
+                  { backgroundColor: isDark ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.03)" },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="file-code-outline"
+                  size={14}
+                  color={theme.colors.onSurfaceVariant}
+                />
+                <Text
+                  variant="bodySmall"
+                  style={{ color: theme.colors.onSurfaceVariant, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}
+                >
+                  {pattern}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
 
-      <View style={styles.buttonRow}>
+      <View style={styles.actionRow}>
         <Button
-          mode="outlined"
-          compact
+          mode="text"
           onPress={() => onRespond("reject")}
           disabled={isResponding}
           textColor="#EF4444"
-          style={styles.button}
+          style={styles.actionButton}
+          labelStyle={{ fontWeight: "600" }}
         >
-          Reject
+          Deny
         </Button>
-        <Button
-          mode="outlined"
-          compact
-          onPress={() => onRespond("once")}
-          disabled={isResponding}
-          style={styles.button}
-        >
-          Allow Once
-        </Button>
-        <Button
-          mode="contained"
-          compact
-          onPress={() => onRespond("always")}
-          disabled={isResponding}
-          style={styles.button}
-        >
-          Always Allow
-        </Button>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Button
+            mode="outlined"
+            onPress={() => onRespond("once")}
+            disabled={isResponding}
+            style={[styles.actionButton, { borderColor: theme.colors.outline }]}
+            labelStyle={{ fontWeight: "600" }}
+          >
+            Once
+          </Button>
+          <Button
+            mode="contained"
+            onPress={() => onRespond("always")}
+            disabled={isResponding}
+            style={styles.actionButton}
+            labelStyle={{ fontWeight: "700" }}
+          >
+            Always
+          </Button>
+        </View>
       </View>
     </View>
   );
@@ -133,6 +192,7 @@ export function QuestionCard({
   isResponding = false,
 }: QuestionCardProps) {
   const theme = useTheme();
+  const isDark = theme.dark;
   const [selectedOptions, setSelectedOptions] = React.useState<
     Record<number, string[]>
   >({});
@@ -140,8 +200,9 @@ export function QuestionCard({
     Record<number, string>
   >({});
 
-  const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
+  const borderColor = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)";
   const accentColor = "#3B82F6";
+  const surfaceColor = isDark ? "#1E293B" : "#F8FAFC";
 
   const handleToggleOption = (questionIndex: number, optionLabel: string) => {
     const question = request.questions[questionIndex];
@@ -165,10 +226,6 @@ export function QuestionCard({
     });
   };
 
-  const handleCustomAnswerChange = (questionIndex: number, value: string) => {
-    setCustomAnswers((prev) => ({ ...prev, [questionIndex]: value }));
-  };
-
   const handleSubmit = () => {
     const answers: string[][] = request.questions.map((_, index) => {
       const selected = selectedOptions[index] || [];
@@ -188,31 +245,72 @@ export function QuestionCard({
   });
 
   return (
-    <View style={[styles.container, { borderColor }]}>
+    <View
+      style={[
+        styles.container,
+        {
+          borderColor,
+          backgroundColor: surfaceColor,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 8,
+          elevation: 2,
+        },
+      ]}
+    >
       <View style={styles.header}>
-        <MaterialCommunityIcons
-          name="help-circle"
-          size={20}
-          color={accentColor}
-        />
-        <Text variant="titleMedium" style={{ color: accentColor }}>
-          Question Required
-        </Text>
+        <View
+          style={[
+            styles.iconWrapper,
+            { backgroundColor: isDark ? "rgba(59, 130, 246, 0.15)" : "rgba(59, 130, 246, 0.1)" },
+          ]}
+        >
+          <MaterialCommunityIcons
+            name="help-circle"
+            size={22}
+            color={accentColor}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            variant="labelSmall"
+            style={{
+              color: accentColor,
+              fontWeight: "700",
+              textTransform: "uppercase",
+              letterSpacing: 1,
+            }}
+          >
+            Action Required
+          </Text>
+          <Text
+            variant="titleSmall"
+            style={{ color: theme.colors.onSurface, fontWeight: "600" }}
+          >
+            Provide more context
+          </Text>
+        </View>
       </View>
 
       {request.questions.map((question, qIndex) => (
         <View key={qIndex} style={styles.questionBlock}>
-          <Text
-            variant="labelSmall"
-            style={{ color: theme.colors.onSurfaceVariant }}
-          >
-            {question.header}
-          </Text>
-          <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>
-            {question.question}
-          </Text>
+          <View style={styles.questionHeader}>
+            <Text
+              variant="labelMedium"
+              style={{ color: theme.colors.primary, fontWeight: "600" }}
+            >
+              {question.header}
+            </Text>
+            <Text
+              variant="bodyMedium"
+              style={{ color: theme.colors.onSurface, fontWeight: "500", marginTop: 2 }}
+            >
+              {question.question}
+            </Text>
+          </View>
 
-          <View style={styles.optionsContainer}>
+          <View style={styles.optionsList}>
             {question.options.map((option, oIndex) => {
               const isSelected = (selectedOptions[qIndex] || []).includes(
                 option.label,
@@ -224,35 +322,48 @@ export function QuestionCard({
                     !isResponding && handleToggleOption(qIndex, option.label)
                   }
                   style={[
-                    styles.optionButton,
+                    styles.optionCard,
                     {
                       borderColor: isSelected
                         ? theme.colors.primary
                         : borderColor,
                       backgroundColor: isSelected
-                        ? theme.colors.primaryContainer
-                        : "transparent",
+                        ? isDark ? "rgba(59, 130, 246, 0.1)" : "rgba(59, 130, 246, 0.05)"
+                        : isDark ? "rgba(0,0,0,0.1)" : "#FFFFFF",
                     },
                   ]}
                 >
-                  <Text
-                    variant="bodySmall"
-                    style={{
-                      color: isSelected
-                        ? theme.colors.primary
-                        : theme.colors.onSurface,
-                    }}
-                  >
-                    {option.label}
-                  </Text>
-                  {option.description && (
-                    <Text
-                      variant="labelSmall"
-                      style={{ color: theme.colors.onSurfaceVariant }}
-                    >
-                      {option.description}
-                    </Text>
-                  )}
+                  <View style={styles.optionContent}>
+                    <MaterialCommunityIcons
+                      name={isSelected
+                        ? (question.multiple ? "checkbox-marked" : "radiobox-marked")
+                        : (question.multiple ? "checkbox-blank-outline" : "radiobox-blank")
+                      }
+                      size={20}
+                      color={isSelected ? theme.colors.primary : theme.colors.onSurfaceVariant}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        variant="bodyMedium"
+                        style={{
+                          fontWeight: isSelected ? "600" : "400",
+                          color: isSelected
+                            ? theme.colors.primary
+                            : theme.colors.onSurface,
+                        }}
+                      >
+                        {option.label}
+                      </Text>
+                      {option.description && (
+                        <Text
+                          variant="labelSmall"
+                          style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}
+                        >
+                          {option.description}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
                 </Pressable>
               );
             })}
@@ -260,22 +371,21 @@ export function QuestionCard({
         </View>
       ))}
 
-      <View style={styles.buttonRow}>
+      <View style={styles.actionRow}>
         <Button
-          mode="outlined"
-          compact
+          mode="text"
           onPress={() => onRespond([])}
           disabled={isResponding}
-          style={styles.button}
+          style={styles.actionButton}
         >
-          Cancel
+          Skip
         </Button>
         <Button
           mode="contained"
-          compact
           onPress={handleSubmit}
           disabled={isResponding || !allAnswered}
-          style={styles.button}
+          style={styles.actionButton}
+          labelStyle={{ fontWeight: "700" }}
         >
           Submit
         </Button>
@@ -287,40 +397,72 @@ export function QuestionCard({
 const styles = StyleSheet.create({
   container: {
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 10,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 16,
     marginHorizontal: 16,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 12,
   },
-  buttonRow: {
+  iconWrapper: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  content: {
+    gap: 12,
+  },
+  permissionTypeRow: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
+    alignItems: "center",
+  },
+  patternsWrapper: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  patternItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginTop: 4,
   },
-  button: {
+  actionButton: {
+    borderRadius: 8,
     minWidth: 80,
   },
   questionBlock: {
-    gap: 6,
+    gap: 12,
   },
-  optionsContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+  questionHeader: {
+    gap: 2,
+  },
+  optionsList: {
     gap: 8,
-    marginTop: 4,
   },
-  optionButton: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  optionCard: {
+    borderWidth: 1.5,
+    borderRadius: 12,
+    padding: 12,
+  },
+  optionContent: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
   },
 });

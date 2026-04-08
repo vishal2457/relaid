@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getDb } from "../db";
 import { localServers } from "../db/schema";
 import { logger } from "../shared/logger";
-import { emitRequestToServer } from "../socket/request-broker";
+import { emitEventToServer, emitRequestToServer } from "../socket/request-broker";
 
 export class RouteError extends Error {
   constructor(
@@ -90,6 +90,39 @@ export async function requestConnectedServer<TResponse>(
     ...result,
     serverId: server.id,
   };
+}
+
+export async function requestConnectedServerWithRequestId<TResponse>(
+  userId: string,
+  requestEvent: string,
+  responseEvent: string,
+  payload: { requestId: string } & Record<string, unknown>,
+  serverId?: string,
+): Promise<{ requestId: string; response: TResponse; serverId: string }> {
+  const server = await getConnectedServerForUser(userId, serverId);
+  const response = await emitRequestToServer<TResponse>(
+    server.id,
+    requestEvent,
+    responseEvent,
+    payload,
+  );
+
+  return {
+    requestId: payload.requestId,
+    response,
+    serverId: server.id,
+  };
+}
+
+export async function sendConnectedServerEvent(
+  userId: string,
+  event: string,
+  payload: Record<string, unknown>,
+  serverId?: string,
+): Promise<{ serverId: string }> {
+  const server = await getConnectedServerForUser(userId, serverId);
+  emitEventToServer(server.id, event, payload);
+  return { serverId: server.id };
 }
 
 export async function requestAllConnectedServers<TResponse>(

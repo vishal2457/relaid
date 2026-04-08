@@ -20,14 +20,15 @@ export type ActiveModel = {
 };
 
 export function flattenProvidersToModels(providers: Provider[]): ActiveModel[] {
-  return providers.flatMap((provider) =>
-    provider.models.map((model) => ({
+  const models = providers.flatMap((provider) =>
+    (provider.models ?? []).map((model) => ({
       id: model.id,
       name: model.name,
       providerId: provider.id,
       providerName: provider.name,
     })),
   );
+  return Array.from(new Map(models.map((model) => [model.id, model])).values());
 }
 
 export const providersKeys = {

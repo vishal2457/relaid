@@ -1,7 +1,6 @@
 import React from "react";
 import { View } from "react-native";
-import { Text, useTheme } from "react-native-paper";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import { FormattedText } from "./FormattedText";
 
 interface TypingIndicatorProps {
@@ -34,7 +33,6 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
             <View
               style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
             >
-              <MaterialCommunityIcons name="brain" size={16} color="#60A5FA" />
               <Text
                 variant="labelMedium"
                 style={{
@@ -42,7 +40,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
                   color: "#60A5FA",
                 }}
               >
-                Thinking...
+                Responding...
               </Text>
             </View>
           ) : (

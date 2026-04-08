@@ -1,15 +1,8 @@
 import React from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { Text } from "react-native-paper";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FormattedText } from "./FormattedText";
-import { ThinkingPanel } from "./ThinkingPanel";
 import { ToolPart } from "./ToolPart";
-import { ContextToolGroup } from "./ContextToolGroup";
-import {
-  processMessageParts,
-  type ProcessedPart,
-} from "@/lib/api/message-parts";
 import type { SessionMessage } from "@/lib/api/messages";
 
 const roleLabelMap: Record<SessionMessage["role"], string> = {
@@ -26,34 +19,59 @@ const formatDateTime = (value: string | number | null | undefined) => {
   }).format(new Date(value));
 };
 
+const formatAssistantMode = (mode: string | null | undefined) => {
+  if (!mode) return null;
+  return mode.charAt(0).toUpperCase() + mode.slice(1);
+};
+
+const formatAssistantModel = (message: SessionMessage) => {
+  if (!message.assistant?.model) {
+    return null;
+  }
+
+  if (message.assistant.provider) {
+    return `${message.assistant.provider}/${message.assistant.model}`;
+  }
+
+  return message.assistant.model;
+};
+
+const formatAssistantDuration = (durationMs: number | null | undefined) => {
+  if (
+    typeof durationMs !== "number" ||
+    !Number.isFinite(durationMs) ||
+    durationMs <= 0
+  ) {
+    return null;
+  }
+
+  if (durationMs >= 60_000) {
+    const minutes = Math.floor(durationMs / 60_000);
+    const seconds = Math.round((durationMs % 60_000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
+
+  return `${(durationMs / 1000).toFixed(1)}s`;
+};
+
 interface MessageBubbleProps {
   message: SessionMessage;
-  isThinkingExpanded: boolean;
-  onToggleThinking: (messageId: string) => void;
-  isStreaming?: boolean;
   borderColor: string;
   metaColor: string;
   userBubble: string;
   assistantBubble: string;
   systemBubble: string;
-  thinkingSurface: string;
-  surfaceColor: string;
   textColor: string;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
   ({
     message,
-    isThinkingExpanded,
-    onToggleThinking,
-    isStreaming = false,
     borderColor,
     metaColor,
     userBubble,
     assistantBubble,
     systemBubble,
-    thinkingSurface,
-    surfaceColor,
     textColor,
   }) => {
     const isUser = message.role === "user";
@@ -68,46 +86,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
 
     const mainContent =
       message.role === "assistant" ? message.visibleContent : message.content;
-
-    const thinkingParts = message.parts.filter((part) => part.type !== "text");
-
-    const processedParts: ProcessedPart[] = React.useMemo(() => {
-      if (isAssistant && message.parts && message.parts.length > 0) {
-        return processMessageParts(message.parts);
-      }
-      return [];
-    }, [isAssistant, message.parts]);
-
-    const hasToolParts = processedParts.some(
-      (p) => p.type === "tool" || p.type === "context-group",
-    );
-
     const hasVisibleText = mainContent.trim().length > 0;
-
-    const showThinkingInline =
-      isAssistant &&
-      Boolean(message.thinkingContent?.trim()) &&
-      !hasVisibleText &&
-      !hasToolParts;
-
-    if (showThinkingInline) {
-      return (
-        <View style={{ marginBottom: 12 }}>
-          <ThinkingPanel
-            isVisible={true}
-            thinkingContent={message.thinkingContent}
-            thinkingDurationSeconds={message.thinkingDurationSeconds}
-            thinkingParts={thinkingParts}
-            isExpanded={isThinkingExpanded}
-            onToggle={() => onToggleThinking(message.id)}
-            metaColor={metaColor}
-            borderColor={borderColor}
-            thinkingSurface={thinkingSurface}
-            textColor={textColor}
-          />
-        </View>
-      );
-    }
+    const assistantActivities = message.assistant?.activities ?? [];
+    const assistantMeta = [
+      formatAssistantMode(message.assistant?.mode),
+      formatAssistantModel(message),
+      formatAssistantDuration(message.assistant?.durationMs),
+    ]
+      .filter(Boolean)
+      .join(" • ");
+    const showBubble = !isAssistant || hasVisibleText;
+    const showAssistantDetails = isAssistant && assistantActivities.length > 0;
+    const showAssistantMeta =
+      isAssistant && hasVisibleText && assistantMeta.length > 0;
 
     return (
       <View
@@ -116,168 +107,72 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
           alignItems: isUser ? "flex-end" : "flex-start",
         }}
       >
-        <View
-          style={{
-            maxWidth: "85%",
-            backgroundColor: bubbleColor,
-            borderWidth: 1,
-            borderColor,
-            borderRadius: 12,
-            padding: 12,
-            alignSelf: isUser ? "flex-end" : "flex-start",
-          }}
-        >
+        {showBubble ? (
           <View
             style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 4,
+              maxWidth: "85%",
+              backgroundColor: bubbleColor,
+              borderWidth: 1,
+              borderColor,
+              borderRadius: 12,
+              padding: 12,
+              alignSelf: isUser ? "flex-end" : "flex-start",
             }}
           >
-            <Text variant="labelMedium" style={{ color: metaColor }}>
-              {roleLabelMap[message.role]}
-            </Text>
-            <Text variant="labelSmall" style={{ color: metaColor }}>
-              {formatDateTime(message.createdAt)}
-            </Text>
-          </View>
-
-          {hasVisibleText && (
-            <FormattedText
-              text={mainContent}
-              baseStyle={{ color: textColor }}
-            />
-          )}
-
-          {isAssistant && message.thinkingContent?.trim() && (
-            <Pressable
-              onPress={() => onToggleThinking(message.id)}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 4,
-                marginTop: hasVisibleText ? 8 : 0,
-              }}
-            >
-              <MaterialCommunityIcons
-                name="brain"
-                size={14}
-                color={metaColor}
-              />
-              <Text variant="labelSmall" style={{ color: metaColor }}>
-                {message.thinkingDurationSeconds
-                  ? `Thought for ${message.thinkingDurationSeconds}s`
-                  : "Thinking..."}
-              </Text>
-            </Pressable>
-          )}
-
-          {isThinkingExpanded &&
-            isAssistant &&
-            message.thinkingContent?.trim() && (
-              <View
-                style={{
-                  marginTop: 8,
-                  borderWidth: 1,
-                  borderColor,
-                  backgroundColor: thinkingSurface,
-                  borderRadius: 8,
-                  padding: 12,
-                }}
-              >
-                <Text
-                  variant="labelSmall"
-                  style={{ color: metaColor, marginBottom: 8 }}
-                >
-                  Reasoning
-                </Text>
-                {thinkingParts.map((part, index) => (
-                  <View
-                    key={`${message.id}-${part.type}-${index}`}
-                    style={{ marginBottom: 4 }}
-                  >
-                    {part.type !== "reasoning" && (
-                      <Text variant="labelSmall" style={{ color: metaColor }}>
-                        {part.type}
-                      </Text>
-                    )}
-                    <FormattedText
-                      text={part.content}
-                      baseStyle={{ color: textColor }}
-                    />
-                  </View>
-                ))}
-              </View>
-            )}
-
-          {isAssistant && message.tokens && (
             <View
               style={{
                 flexDirection: "row",
+                justifyContent: "space-between",
                 alignItems: "center",
-                gap: 8,
-                marginTop: 8,
+                marginBottom: 4,
               }}
             >
-              <Text variant="labelSmall" style={{ color: metaColor }}>
-                💭{" "}
-                {message.tokens.reasoning > 0
-                  ? `${message.tokens.reasoning}r `
-                  : ""}
-                🔢 {message.tokens.input}i / {message.tokens.output}o
+              <Text variant="labelMedium" style={{ color: metaColor }}>
+                {roleLabelMap[message.role]}
               </Text>
-              {message.tokens.cache.read > 0 && (
-                <Text variant="labelSmall" style={{ color: metaColor }}>
-                  📦 {message.tokens.cache.read}
-                </Text>
-              )}
+              <Text variant="labelSmall" style={{ color: metaColor }}>
+                {formatDateTime(message.createdAt)}
+              </Text>
             </View>
-          )}
-        </View>
 
-        {isAssistant && processedParts.length > 0 && (
-          <View style={{ width: "100%", marginTop: 8 }}>
-            {processedParts.map((processedPart, index) => {
-              if (processedPart.type === "tool" && processedPart.part) {
-                const toolPart = processedPart.part;
-                if (toolPart.type === "tool") {
-                  return (
-                    <ToolPart
-                      key={`${message.id}-tool-${index}`}
-                      tool={toolPart.tool}
-                      input={toolPart.state.input}
-                      output={toolPart.state.output}
-                      status={toolPart.state.status}
-                      metadata={toolPart.state.metadata}
-                      metaColor={metaColor}
-                      borderColor={borderColor}
-                      surfaceColor={surfaceColor}
-                    />
-                  );
-                }
-              }
-
-              if (
-                processedPart.type === "context-group" &&
-                processedPart.parts &&
-                processedPart.parts.length > 0
-              ) {
-                return (
-                  <ContextToolGroup
-                    key={`${message.id}-context-${index}`}
-                    tools={processedPart.parts}
-                    metaColor={metaColor}
-                    borderColor={borderColor}
-                    surfaceColor={surfaceColor}
-                  />
-                );
-              }
-
-              return null;
-            })}
+            {hasVisibleText ? (
+              <>
+                <FormattedText
+                  text={mainContent}
+                  baseStyle={{ color: textColor }}
+                />
+                {showAssistantMeta ? (
+                  <Text
+                    variant="labelSmall"
+                    style={{ color: metaColor, marginTop: 10 }}
+                  >
+                    {assistantMeta}
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
           </View>
-        )}
+        ) : null}
+
+        {showAssistantDetails ? (
+          <View
+            style={{
+              width: "85%",
+              marginTop: showBubble ? 10 : 0,
+              gap: 14,
+            }}
+          >
+            {assistantActivities.map((activity) => (
+              <ToolPart
+                key={activity.id}
+                activity={activity}
+                metaColor={metaColor}
+                borderColor={borderColor}
+                textColor={textColor}
+              />
+            ))}
+          </View>
+        ) : null}
       </View>
     );
   },

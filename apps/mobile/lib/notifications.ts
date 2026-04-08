@@ -3,7 +3,7 @@ import * as Device from "expo-device";
 import { AppState, AppStateStatus, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
-import { getChatSocket } from "./socket/chat";
+import { registerPushToken } from "./sse/manager";
 import { getCurrentAccessToken } from "./pairing/session";
 
 const EXPO_PUSH_TOKEN_KEY = "expo_push_token";
@@ -112,16 +112,7 @@ export async function registerPushTokenWithServer(): Promise<boolean> {
       return false;
     }
 
-    const socket = getChatSocket();
-    if (!socket) {
-      return false;
-    }
-
-    if (!socket.connected) {
-      socket.connect();
-    }
-
-    socket.emit("register_push_token", {
+    await registerPushToken({
       token,
       platform: Platform.OS,
     });

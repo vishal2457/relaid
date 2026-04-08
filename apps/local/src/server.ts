@@ -16,6 +16,7 @@ import {
   createSecretsRouter,
   createSessionsRouter,
   createTelemetryRouter,
+  createMessageQueueRouter,
 } from "./routes";
 import { error, StatusCodes } from "./shared/api-response";
 import { stream } from "./shared/logger";
@@ -56,6 +57,7 @@ export function createServer(): express.Application {
   app.use("/api/secrets", createSecretsRouter());
   app.use("/api/agent", createAgentRouter());
   app.use("/api/telemetry", createTelemetryRouter());
+  app.use("/api/message-queue", createMessageQueueRouter());
 
   if (fs.existsSync(webBuildPath)) {
     app.use("/web", express.static(webBuildPath));

@@ -14,6 +14,9 @@ import { gitRouter } from "./routes/git";
 import { projectsRouter } from "./routes/projects";
 import { sessionsRouter } from "./routes/sessions";
 import { messagesRouter } from "./routes/messages";
+import { messageQueueRouter } from "./routes/message-queue";
+import { sseRouter } from "./routes/sse";
+import { mobileActionsRouter } from "./routes/mobile-actions";
 import { logger, stream } from "./shared/logger";
 import { getDb } from "./db";
 import { expoPushTokens, localServers } from "./db/schema";
@@ -99,6 +102,9 @@ app.use("/api/git", gitRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/messages", messagesRouter);
+app.use("/api/message-queue", messageQueueRouter);
+app.use("/api/sse", sseRouter);
+app.use("/api/mobile", mobileActionsRouter);
 
 const io = createSocketServer(httpServer);
 

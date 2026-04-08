@@ -155,6 +155,8 @@ class OpencodeSdk extends BaseCodingSdk {
   }> {
     if (this.runtime) {
       const healthy = await this.checkRuntimeHealth(this.runtime);
+      console.log(healthy, "healthy");
+      
       if (healthy) {
         logger.debug("Reusing existing OpenCode SDK server");
         return this.runtime;
@@ -1834,7 +1836,22 @@ class OpencodeSdk extends BaseCodingSdk {
         return null;
       }
 
-      return sessionResult.data;
+      let status: "pending" | "running" | "completed" = "completed";
+      const statusResult = await opencode.client.session.status()
+
+      if (statusResult.error) {
+        logger.warn("Falling back to completed session status", {
+          sessionId,
+          error: this.formatUnknownError(statusResult.error),
+        });
+      } else {
+        status = this.mapSessionStatus(statusResult.data?.[sessionId]);
+      }
+
+      return {
+        ...sessionResult.data,
+        status,
+      };
     } catch (error) {
       const errMsg = this.formatUnknownError(error);
       logger.error("Failed to get OpenCode session", {
@@ -1880,9 +1897,7 @@ class OpencodeSdk extends BaseCodingSdk {
   async listProviders() {
     try {
       const opencode = await this.getRuntime();
-      const result = await opencode.client.provider.list()
-      console.log(result.data?.all, "result");
-      
+      const result = await opencode.client.provider.list()      
 
       if (result.error) {
         throw new Error(this.formatUnknownError(result.error));

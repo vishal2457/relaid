@@ -1,4 +1,6 @@
 import { io, Socket } from "socket.io-client";
+import { randomUUID } from "crypto";
+import { eq, max } from "drizzle-orm";
 import { logger } from "../shared/logger";
 import type {
   MessagePayload,
@@ -25,9 +27,23 @@ import type {
   PermissionResponsePayload,
   QuestionRequestPayload,
   QuestionResponsePayload,
+  MessageQueueListRequestPayload,
+  MessageQueueListResponsePayload,
+  MessageQueueAddRequestPayload,
+  MessageQueueAddResponsePayload,
+  MessageQueueRemoveRequestPayload,
+  MessageQueueRemoveResponsePayload,
+  MessageQueueUpdateRequestPayload,
+  MessageQueueUpdateResponsePayload,
+  MessageQueueExecuteRequestPayload,
+  MessageQueueExecuteResponsePayload,
+  QueueItemPayload,
 } from "../types";
 import { opencodeCatalogService } from "./opencode-catalog-service";
 import { GitService } from "./git-service";
+import { runOpenCodeStream } from "./open-code-runner";
+import { getDb } from "../db";
+import { messageQueue } from "../db/schema";
 import {
   createPairingSession,
   getRelayServerName,
@@ -433,6 +449,42 @@ export class ChatServerClient {
       },
     );
 
+    // Message Queue handlers
+    this.socket.on(
+      "message_queue_list_request",
+      (payload: { requestId: string } & MessageQueueListRequestPayload) => {
+        void this.handleMessageQueueListRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "message_queue_add_request",
+      (payload: { requestId: string } & MessageQueueAddRequestPayload) => {
+        void this.handleMessageQueueAddRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "message_queue_remove_request",
+      (payload: { requestId: string } & MessageQueueRemoveRequestPayload) => {
+        void this.handleMessageQueueRemoveRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "message_queue_update_request",
+      (payload: { requestId: string } & MessageQueueUpdateRequestPayload) => {
+        void this.handleMessageQueueUpdateRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "message_queue_execute_request",
+      (payload: { requestId: string } & MessageQueueExecuteRequestPayload) => {
+        void this.handleMessageQueueExecuteRequest(payload);
+      },
+    );
+
     this.socket.on(
       "permission_response",
       (payload: PermissionResponsePayload) => {
@@ -491,6 +543,7 @@ export class ChatServerClient {
       );
       return;
     }
+    console.log("Emitting event", event, this.socket.id);
     this.socket.emit(event, payload);
   }
 
@@ -566,8 +619,6 @@ export class ChatServerClient {
   ): Promise<void> {
     try {
       const projects = await opencodeCatalogService.listProjects();
-      console.log(projects, "projects");
-      
       this.emit("projects_list_response", {
         requestId: payload.requestId,
         projects,
@@ -766,12 +817,34 @@ export class ChatServerClient {
     payload: { requestId: string } & ProvidersListRequestPayload,
   ): Promise<void> {
     try {
-      
-      const providers = await opencodeCatalogService.listProviders();
-      console.log("handleProvidersListRequest", providers?.length);
+      const opencodeProviders = await opencodeCatalogService.listProviders();
+
+      // Filter to only configured providers (env, config, custom sources have credentials)
+      const configuredProviders = (opencodeProviders ?? []).filter(
+        (provider) =>
+          provider.source === "env" ||
+          provider.source === "config" ||
+          provider.source === "custom",
+      );
+
+      // Convert OpenCode providers (models as object) to relay format (models as array)
+      const providers = configuredProviders.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        models: Object.values(provider.models).map((model) => ({
+          id: model.id,
+          name: model.name,
+        })),
+      }));
+
+      // Deduplicate providers by ID
+      const uniqueProviders = Array.from(
+        new Map(providers.map((provider) => [provider.id, provider])).values(),
+      );
+
       this.emit("providers_list_response", {
         requestId: payload.requestId,
-        providers,
+        providers: uniqueProviders,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -998,6 +1071,375 @@ export class ChatServerClient {
         success: false,
         error: errMsg,
       });
+    }
+  }
+
+  // Message Queue Handlers
+
+  private rowToQueuePayload(
+    row: typeof messageQueue.$inferSelect,
+  ): QueueItemPayload {
+    return {
+      id: row.id,
+      projectId: row.projectId,
+      prompt: row.prompt,
+      status: row.status as QueueItemPayload["status"],
+      sessionId: row.sessionId,
+      error: row.error,
+      position: row.position,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      startedAt: row.startedAt ? row.startedAt.toISOString() : null,
+      completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+    };
+  }
+
+  private async handleMessageQueueListRequest(
+    payload: { requestId: string } & MessageQueueListRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+      const rows = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.projectId, payload.projectId))
+        .orderBy(messageQueue.position);
+
+      const items = rows.map((row) => this.rowToQueuePayload(row));
+
+      this.emit("message_queue_list_response", {
+        requestId: payload.requestId,
+        items,
+      } satisfies MessageQueueListResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to list message queue", { error: errMsg });
+      this.emit("message_queue_list_response", {
+        requestId: payload.requestId,
+        items: [],
+      });
+    }
+  }
+
+  private async handleMessageQueueAddRequest(
+    payload: { requestId: string } & MessageQueueAddRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+      const id = randomUUID();
+      const now = new Date();
+
+      const maxResult = await db
+        .select({ maxPos: max(messageQueue.position) })
+        .from(messageQueue)
+        .where(eq(messageQueue.projectId, payload.projectId));
+
+      const nextPosition = (maxResult[0]?.maxPos ?? -1) + 1;
+
+      await db.insert(messageQueue).values({
+        id,
+        projectId: payload.projectId,
+        prompt: payload.prompt.trim(),
+        status: "pending",
+        position: nextPosition,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const row = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, id))
+        .get();
+
+      if (!row) {
+        throw new Error("Failed to retrieve created queue item");
+      }
+
+      this.emit("message_queue_add_response", {
+        requestId: payload.requestId,
+        item: this.rowToQueuePayload(row),
+      } satisfies MessageQueueAddResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to add queue item", { error: errMsg });
+      this.emit("message_queue_add_response", {
+        requestId: payload.requestId,
+        item: null as unknown as QueueItemPayload,
+        error: errMsg,
+      });
+    }
+  }
+
+  private async handleMessageQueueRemoveRequest(
+    payload: { requestId: string } & MessageQueueRemoveRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+
+      const existing = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId))
+        .get();
+
+      if (!existing) {
+        this.emit("message_queue_remove_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Queue item not found",
+        } satisfies MessageQueueRemoveResponsePayload);
+        return;
+      }
+
+      if (existing.status === "running") {
+        this.emit("message_queue_remove_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Cannot delete a running queue item",
+        } satisfies MessageQueueRemoveResponsePayload);
+        return;
+      }
+
+      await db
+        .delete(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId));
+
+      this.emit("message_queue_remove_response", {
+        requestId: payload.requestId,
+        success: true,
+      } satisfies MessageQueueRemoveResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to remove queue item", { error: errMsg });
+      this.emit("message_queue_remove_response", {
+        requestId: payload.requestId,
+        success: false,
+        error: errMsg,
+      } satisfies MessageQueueRemoveResponsePayload);
+    }
+  }
+
+  private async handleMessageQueueUpdateRequest(
+    payload: { requestId: string } & MessageQueueUpdateRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+
+      const existing = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId))
+        .get();
+
+      if (!existing) {
+        this.emit("message_queue_update_response", {
+          requestId: payload.requestId,
+          item: null,
+          error: "Queue item not found",
+        } satisfies MessageQueueUpdateResponsePayload);
+        return;
+      }
+
+      if (existing.status === "running") {
+        this.emit("message_queue_update_response", {
+          requestId: payload.requestId,
+          item: null,
+          error: "Cannot update a running queue item",
+        } satisfies MessageQueueUpdateResponsePayload);
+        return;
+      }
+
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (payload.prompt !== undefined) updates.prompt = payload.prompt.trim();
+      if (payload.position !== undefined) updates.position = payload.position;
+
+      await db
+        .update(messageQueue)
+        .set(updates)
+        .where(eq(messageQueue.id, payload.queueItemId));
+
+      const updated = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId))
+        .get();
+
+      this.emit("message_queue_update_response", {
+        requestId: payload.requestId,
+        item: updated ? this.rowToQueuePayload(updated) : null,
+      } satisfies MessageQueueUpdateResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to update queue item", { error: errMsg });
+      this.emit("message_queue_update_response", {
+        requestId: payload.requestId,
+        item: null,
+        error: errMsg,
+      } satisfies MessageQueueUpdateResponsePayload);
+    }
+  }
+
+  private async handleMessageQueueExecuteRequest(
+    payload: { requestId: string } & MessageQueueExecuteRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+
+      const queueItem = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId))
+        .get();
+
+      if (!queueItem) {
+        this.emit("message_queue_execute_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Queue item not found",
+        } satisfies MessageQueueExecuteResponsePayload);
+        return;
+      }
+
+      if (queueItem.status === "running") {
+        this.emit("message_queue_execute_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Queue item is already running",
+        } satisfies MessageQueueExecuteResponsePayload);
+        return;
+      }
+
+      const project = await opencodeCatalogService.getProject(
+        payload.projectId,
+      );
+
+      if (!project) {
+        this.emit("message_queue_execute_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Project not found",
+        } satisfies MessageQueueExecuteResponsePayload);
+        return;
+      }
+
+      // Create new session if needed
+      let sessionId = payload.sessionId;
+      if (payload.createNewSession || !sessionId) {
+        const newSession = await opencodeCatalogService.createSession(
+          payload.projectId,
+        );
+        if (!newSession) {
+          this.emit("message_queue_execute_response", {
+            requestId: payload.requestId,
+            success: false,
+            error: "Failed to create session",
+          } satisfies MessageQueueExecuteResponsePayload);
+          return;
+        }
+        sessionId = newSession.id;
+      }
+
+      // Update queue item to running
+      await db
+        .update(messageQueue)
+        .set({
+          status: "running",
+          sessionId,
+          startedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(messageQueue.id, payload.queueItemId));
+
+      this.emit("message_queue_execute_response", {
+        requestId: payload.requestId,
+        success: true,
+        sessionId,
+      } satisfies MessageQueueExecuteResponsePayload);
+
+      // Execute the prompt via streaming
+      const executionRequestId = randomUUID();
+
+      this.emit("session_prompt_started", {
+        requestId: executionRequestId,
+        projectId: payload.projectId,
+        sessionId,
+      } satisfies SessionPromptStartedPayload);
+
+      const streamCallback: (chunk: {
+        messageId?: string;
+        content: string;
+        type: string;
+        isComplete?: boolean;
+      }) => void = (sdkChunk) => {
+        this.emit("session_stream_chunk", {
+          requestId: executionRequestId,
+          projectId: payload.projectId,
+          sessionId,
+          messageId: sdkChunk.messageId,
+          chunk: sdkChunk.content,
+          type: sdkChunk.type as SessionStreamChunkPayload["type"],
+          isComplete: sdkChunk.isComplete,
+        } satisfies SessionStreamChunkPayload);
+      };
+
+      const result = await runOpenCodeStream(
+        queueItem.prompt,
+        project.worktree,
+        streamCallback,
+        sessionId,
+      );
+
+      // Update queue item based on result
+      const finalStatus = result.success ? "completed" : "failed";
+      await db
+        .update(messageQueue)
+        .set({
+          status: finalStatus,
+          error: result.error || null,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(messageQueue.id, payload.queueItemId));
+
+      this.emit("session_prompt_response", {
+        requestId: executionRequestId,
+        projectId: payload.projectId,
+        sessionId,
+        success: result.success,
+        output: result.output,
+        error: result.error,
+        exitCode: result.exitCode,
+        duration: result.duration,
+      } satisfies SessionPromptResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to execute queue item", {
+        error: errMsg,
+        queueItemId: payload.queueItemId,
+      });
+
+      // Update queue item to failed
+      try {
+        const db = getDb();
+        await db
+          .update(messageQueue)
+          .set({
+            status: "failed",
+            error: errMsg,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(messageQueue.id, payload.queueItemId));
+      } catch {
+        // Ignore DB update error
+      }
+
+      this.emit("message_queue_execute_response", {
+        requestId: payload.requestId,
+        success: false,
+        error: errMsg,
+      } satisfies MessageQueueExecuteResponsePayload);
     }
   }
 }

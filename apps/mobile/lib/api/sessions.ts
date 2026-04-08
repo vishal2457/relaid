@@ -34,28 +34,87 @@ export interface Session {
   completedAt?: number | null;
 }
 
+type SessionLike = OpenCodeSession & Record<string, unknown>;
+
+function parseTimestamp(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function normalizeSessionStatus(value: unknown): SessionStatus {
+  switch (value) {
+    case "pending":
+    case "running":
+    case "completed":
+    case "aborted":
+      return value;
+    case "error":
+    case "failed":
+      return "failed";
+    default:
+      return "completed";
+  }
+}
+
 // Convert OpenCode Session to mobile Session
 export function adaptSession(openCodeSession: OpenCodeSession): Session {
-  // Use title as prompt for display (or fallback to "Untitled")
-  const prompt = openCodeSession.title || "Untitled session";
-
-  // completedAt can be derived from time.updated (or we could get messages to find completion)
-  const completedAt = openCodeSession.time.updated;
+  const raw = openCodeSession as SessionLike;
+  const prompt =
+    (typeof raw.prompt === "string" && raw.prompt.trim()) ||
+    openCodeSession.title ||
+    "Untitled session";
+  const createdAt =
+    parseTimestamp(openCodeSession.time?.created) ??
+    parseTimestamp(raw.createdAt) ??
+    Date.now();
+  const updatedAt =
+    parseTimestamp(openCodeSession.time?.updated) ??
+    parseTimestamp(raw.updatedAt) ??
+    createdAt;
+  const completedAt =
+    parseTimestamp(raw.completedAt) ??
+    (normalizeSessionStatus(raw.status) === "running" ? null : updatedAt);
 
   return {
     id: openCodeSession.id,
-    projectID: openCodeSession.projectID,
+    projectID:
+      (typeof raw.projectID === "string" && raw.projectID) ||
+      (typeof raw.projectId === "string" && raw.projectId) ||
+      openCodeSession.projectID,
     title: openCodeSession.title,
     directory: openCodeSession.directory,
-    createdAt: openCodeSession.time.created,
-    updatedAt: openCodeSession.time.updated,
+    createdAt,
+    updatedAt,
     summary: openCodeSession.summary,
     share: openCodeSession.share,
-    // Map title to prompt for backward compatibility with UI
     prompt,
     completedAt,
-    // Status needs to be fetched separately or inferred
-    status: "completed" as SessionStatus,
+    status: normalizeSessionStatus(raw.status),
+    output:
+      typeof raw.output === "string" || raw.output === null
+        ? (raw.output as string | null)
+        : null,
+    error:
+      typeof raw.error === "string" || raw.error === null
+        ? (raw.error as string | null)
+        : null,
+    exitCode:
+      typeof raw.exitCode === "number" || raw.exitCode === null
+        ? (raw.exitCode as number | null)
+        : null,
+    duration:
+      typeof raw.duration === "number" || raw.duration === null
+        ? (raw.duration as number | null)
+        : null,
+    startedAt: parseTimestamp(raw.startedAt),
   };
 }
 

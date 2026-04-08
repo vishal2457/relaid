@@ -354,3 +354,67 @@ export interface QuestionResponsePayload {
   jobId: string;
   answers: string[][];
 }
+
+// Message Queue types
+
+export interface QueueItemPayload {
+  id: string;
+  projectId: string;
+  prompt: string;
+  status: "pending" | "running" | "completed" | "failed" | "aborted";
+  sessionId: string | null;
+  error: string | null;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export type MessageQueueListRequestPayload = { projectId: string };
+export type MessageQueueListResponsePayload = {
+  requestId: string;
+  items: QueueItemPayload[];
+};
+
+export type MessageQueueAddRequestPayload = {
+  projectId: string;
+  prompt: string;
+};
+export type MessageQueueAddResponsePayload = {
+  requestId: string;
+  item: QueueItemPayload;
+};
+
+export type MessageQueueRemoveRequestPayload = {
+  queueItemId: string;
+};
+export type MessageQueueRemoveResponsePayload = {
+  requestId: string;
+  success: boolean;
+  error?: string;
+};
+
+export type MessageQueueUpdateRequestPayload = {
+  queueItemId: string;
+  prompt?: string;
+  position?: number;
+};
+export type MessageQueueUpdateResponsePayload = {
+  requestId: string;
+  item: QueueItemPayload | null;
+  error?: string;
+};
+
+export type MessageQueueExecuteRequestPayload = {
+  queueItemId: string;
+  sessionId?: string;
+  createNewSession?: boolean;
+  projectId: string;
+};
+export type MessageQueueExecuteResponsePayload = {
+  requestId: string;
+  success: boolean;
+  sessionId?: string;
+  error?: string;
+};

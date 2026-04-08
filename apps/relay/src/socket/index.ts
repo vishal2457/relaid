@@ -43,6 +43,12 @@ import {
   resolvePendingRequest,
   unregisterLocalServerSocket,
 } from "./request-broker";
+import { broadcastToUser } from "../services/sse-bus";
+import {
+  bufferInteraction,
+  clearBufferedInteraction,
+  deliverBufferedInteractions,
+} from "../services/interaction-buffer";
 
 export interface SocketData {
   userId: string;
@@ -112,52 +118,6 @@ type ProvidersListResponse = {
   error?: string;
 };
 
-const PENDING_PERMISSION_EXPIRY_MS = 120_000;
-
-type BufferedInteraction = {
-  event: string;
-  payload: Record<string, unknown>;
-  expiresAt: number;
-};
-
-const pendingInteractions = new Map<string, BufferedInteraction>();
-
-function bufferInteraction(
-  event: string,
-  payload: { requestId: string } & Record<string, unknown>,
-): void {
-  pendingInteractions.set(payload.requestId, {
-    event,
-    payload,
-    expiresAt: Date.now() + PENDING_PERMISSION_EXPIRY_MS,
-  });
-}
-
-function clearBufferedInteraction(requestId: string): void {
-  pendingInteractions.delete(requestId);
-}
-
-function deliverBufferedInteractions(userId: string, socket: Socket): void {
-  const now = Date.now();
-  let delivered = 0;
-
-  for (const [requestId, entry] of pendingInteractions) {
-    if (entry.expiresAt <= now) {
-      pendingInteractions.delete(requestId);
-      continue;
-    }
-    socket.emit(entry.event, entry.payload);
-    delivered++;
-  }
-
-  if (delivered > 0) {
-    logger.info("Delivered buffered interactions to mobile", {
-      userId,
-      count: delivered,
-    });
-  }
-}
-
 export function createSocketServer(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
     cors: {
@@ -165,6 +125,7 @@ export function createSocketServer(httpServer: HttpServer): Server {
       methods: ["GET", "POST"],
     },
     path: "/socket",
+    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB to handle large provider/session lists
   });
 
   io.use(async (socket, next) => {
@@ -256,10 +217,16 @@ async function handleConnection(io: Server, socket: Socket): Promise<void> {
     if (type === "local_server") {
       unregisterLocalServerSocket(serverId, socket.id);
       await updateServerConnectionStatus(serverId, false);
-      io.to(`user:${userId}`).emit("local_server_disconnected", {
-        serverId,
+      const localServerDisconnectedPayload = { serverId, userId };
+      io.to(`user:${userId}`).emit(
+        "local_server_disconnected",
+        localServerDisconnectedPayload,
+      );
+      broadcastToUser(
         userId,
-      });
+        "local_server_disconnected",
+        localServerDisconnectedPayload,
+      );
     }
   });
 }
@@ -274,7 +241,16 @@ async function handleLocalServerConnection(
   registerLocalServerSocket(serverId, socket);
   await updateServerConnectionStatus(serverId, true);
 
-  io.to(`user:${userId}`).emit("local_server_connected", { serverId, userId });
+  const localServerConnectedPayload = { serverId, userId };
+  io.to(`user:${userId}`).emit(
+    "local_server_connected",
+    localServerConnectedPayload,
+  );
+  broadcastToUser(
+    userId,
+    "local_server_connected",
+    localServerConnectedPayload,
+  );
   logger.info("Local server registered", { userId, serverId });
 
   const pipeResponse = (eventName: string) => {
@@ -295,6 +271,7 @@ async function handleLocalServerConnection(
       }
       resolvePendingRequest(eventName, payload);
       io.to(`user:${userId}`).emit(eventName, payload);
+      broadcastToUser(userId, eventName, payload);
 
       if (eventName === "session_prompt_response") {
         const responsePayload = payload as SessionPromptResponseEvent;
@@ -351,6 +328,11 @@ async function handleLocalServerConnection(
   pipeResponse("git_unstage_files_response");
   pipeResponse("git_file_diff_response");
   pipeResponse("git_discard_file_response");
+  pipeResponse("message_queue_list_response");
+  pipeResponse("message_queue_add_response");
+  pipeResponse("message_queue_remove_response");
+  pipeResponse("message_queue_update_response");
+  pipeResponse("message_queue_execute_response");
 
   socket.on("permission_request", (payload: PermissionRequestEvent) => {
     logger.info("Forwarding permission_request to mobile", {
@@ -361,8 +343,13 @@ async function handleLocalServerConnection(
       projectId: payload.projectId,
     });
     resolvePendingRequest("permission_request", payload);
-    bufferInteraction("permission_request", payload);
+    bufferInteraction(userId, "permission_request", payload);
     io.to(`user:${userId}`).emit("permission_request", payload);
+    broadcastToUser(
+      userId,
+      "permission_request",
+      payload as unknown as Record<string, unknown>,
+    );
 
     const permissionType = payload.permission;
     const patternsPreview = payload.patterns.slice(0, 2).join(", ");
@@ -384,8 +371,13 @@ async function handleLocalServerConnection(
       questionCount: payload.questions.length,
     });
     resolvePendingRequest("question_request", payload);
-    bufferInteraction("question_request", payload);
+    bufferInteraction(userId, "question_request", payload);
     io.to(`user:${userId}`).emit("question_request", payload);
+    broadcastToUser(
+      userId,
+      "question_request",
+      payload as unknown as Record<string, unknown>,
+    );
 
     const firstQuestion = payload.questions[0];
     const body = firstQuestion?.question.slice(0, 100) || "Question required";
@@ -402,13 +394,16 @@ async function handleLocalServerConnection(
     (payload: { requestId: string; code: string; message: string }) => {
       rejectPendingRequest(payload);
       io.to(`user:${userId}`).emit("error_response", payload);
+      broadcastToUser(userId, "error_response", payload);
     },
   );
 }
 
 function handleMobileConnection(socket: Socket, userId: string): void {
   logger.info("Mobile client registered", { userId });
-  deliverBufferedInteractions(userId, socket);
+  deliverBufferedInteractions(userId, (event, payload) =>
+    socket.emit(event, payload),
+  );
 
   socket.on(
     "register_push_token",
@@ -496,6 +491,9 @@ function handleMobileConnection(socket: Socket, userId: string): void {
         return;
       }
 
+      const session = sessionResult.response.session as Record<string, unknown>;
+      const projectId = session.projectID ?? session.projectId;
+
       const response = await emitRequestToServer<SessionAbortedEvent>(
         sessionResult.serverId,
         "session_abort",
@@ -503,7 +501,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
         {
           requestId: data.requestId,
           sessionId: data.sessionId,
-          projectId: sessionResult.response.session.projectId,
+          projectId: projectId as string,
         },
       );
 
@@ -762,12 +760,16 @@ function handleMobileConnection(socket: Socket, userId: string): void {
 
         const sessions = results
           .flatMap((result) => result.response.sessions || [])
-          .filter((session) =>
-            data.projectId ? session.projectId === data.projectId : true,
-          )
-          .filter((session) =>
-            data.status ? session.status === data.status : true,
-          );
+          .filter((session) => {
+            const sessionProjectId =
+              (session as Record<string, unknown>).projectID ??
+              (session as Record<string, unknown>).projectId;
+            return data.projectId ? sessionProjectId === data.projectId : true;
+          })
+          .filter((session) => {
+            const sessionStatus = (session as Record<string, unknown>).status;
+            return data.status ? sessionStatus === data.status : true;
+          });
 
         socket.emit("sessions_list_response", {
           requestId: data.requestId,
