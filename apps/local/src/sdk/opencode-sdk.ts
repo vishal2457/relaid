@@ -1,4 +1,5 @@
 import type {
+  FileDiff,
   OpencodeClient,
   ServerOptions,
   Session
@@ -1888,6 +1889,39 @@ class OpencodeSdk extends BaseCodingSdk {
       const errMsg = this.formatUnknownError(error);
       logger.error("Failed to get OpenCode session messages", {
         sessionId,
+        error: errMsg,
+      });
+      throw error;
+    }
+  }
+
+  async getSessionDiff(
+    sessionId: string,
+    messageId?: string,
+  ): Promise<FileDiff[]> {
+    try {
+      const session = await this.getSession(sessionId);
+      if (!session) {
+        return [];
+      }
+
+      const opencode = await this.getRuntime();
+      const diffResult = await opencode.client.session.diff({
+        sessionID: sessionId,
+        directory: session.directory,
+        messageID: messageId,
+      });
+
+      if (diffResult.error) {
+        throw new Error(this.formatUnknownError(diffResult.error));
+      }
+
+      return diffResult.data ?? [];
+    } catch (error) {
+      const errMsg = this.formatUnknownError(error);
+      logger.error("Failed to get OpenCode session diff", {
+        sessionId,
+        messageId,
         error: errMsg,
       });
       throw error;

@@ -54,7 +54,8 @@ import {
   type PermissionRequest,
   type QuestionRequest,
 } from "@/components/PermissionCard";
-import { MessageBubble } from "@/components/Message";
+import { MessageRow } from "@/components/Message";
+import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
 
 type TextSegment = {
   type: "normal" | "bold" | "code";
@@ -791,10 +792,22 @@ export default function SessionMessagesScreen() {
     [pendingQuestion],
   );
 
-  const renderMessage = ({ item }: { item: SessionMessage }) => {
+  const renderMessage = ({
+    item,
+    index,
+  }: {
+    item: SessionMessage;
+    index: number;
+  }) => {
+    const responseSummary = getAssistantResponseSummaryContext(
+      displayedMessages,
+      index,
+    );
+
     return (
-      <MessageBubble
+      <MessageRow
         message={item}
+        responseSummary={responseSummary}
         borderColor={borderColor}
         metaColor={metaColor}
         userBubble={userBubble}

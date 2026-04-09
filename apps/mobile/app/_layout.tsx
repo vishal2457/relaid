@@ -24,15 +24,24 @@ function PushTokenRegistration() {
   const { session } = usePairingSession();
 
   useEffect(() => {
-    void requestNotificationPermissions();
-  }, []);
-
-  useEffect(() => {
     if (!session) {
       return;
     }
 
-    void registerPushTokenWithServer();
+    let cancelled = false;
+
+    void (async () => {
+      const granted = await requestNotificationPermissions();
+      if (!granted || cancelled) {
+        return;
+      }
+
+      await registerPushTokenWithServer();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [session]);
 
   return null;

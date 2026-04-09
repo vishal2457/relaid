@@ -50,7 +50,7 @@ interface FormattedTextProps {
 
 export const FormattedText = React.memo(
   ({ text, baseStyle }: FormattedTextProps) => {
-    const segments = parseFormattedText(text);
+    const segments = parseFormattedText(text.trim());
 
     return (
       <Text style={baseStyle}>

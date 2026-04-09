@@ -5,6 +5,7 @@ import type {
   TextPart,
   ToolPart,
   SessionMessageResponse,
+  UserMessage,
 } from "../opencode-types";
 
 export type SessionMessageRole = "user" | "assistant" | "system";
@@ -52,6 +53,23 @@ export interface SessionAssistantActivity {
   deletions: number | null;
   tool: string | null;
   items?: SessionAssistantActivityItem[];
+  oldContent?: string | null;
+  newContent?: string | null;
+}
+
+export interface FileDiff {
+  file: string;
+  before: string;
+  after: string;
+  additions: number;
+  deletions: number;
+  patch?: string
+}
+
+export interface MessageSummary {
+  title?: string;
+  body?: string;
+  diffs: FileDiff[];
 }
 
 // Mobile app representation of a session message
@@ -75,6 +93,8 @@ export interface SessionMessage {
   cost?: number;
   // Assistant summary (only for assistant messages)
   assistant?: SessionAssistantSummary;
+  // Message summary with diffs (only for user messages)
+  summary?: MessageSummary;
 }
 
 function getToolLabel(part: ToolPart): string {
@@ -237,69 +257,11 @@ function getToolPath(part: ToolPart): string | null {
   );
 }
 
-function splitLines(value: string): string[] {
-  if (!value) {
-    return [];
-  }
-
-  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-}
-
-function getLineDiffCounts(
-  before: string,
-  after: string,
-): {
-  additions: number;
-  deletions: number;
-} {
-  const originalLines = splitLines(before);
-  const nextLines = splitLines(after);
-  const originalLength = originalLines.length;
-  const nextLength = nextLines.length;
-
-  const lcs = Array.from({ length: originalLength + 1 }, () =>
-    Array<number>(nextLength + 1).fill(0),
-  );
-
-  for (let index = originalLength - 1; index >= 0; index -= 1) {
-    for (let nextIndex = nextLength - 1; nextIndex >= 0; nextIndex -= 1) {
-      lcs[index]![nextIndex] =
-        originalLines[index] === nextLines[nextIndex]
-          ? 1 + lcs[index + 1]![nextIndex + 1]!
-          : Math.max(lcs[index + 1]![nextIndex]!, lcs[index]![nextIndex + 1]!);
-    }
-  }
-
-  let index = 0;
-  let nextIndex = 0;
-  let additions = 0;
-  let deletions = 0;
-
-  while (index < originalLength && nextIndex < nextLength) {
-    if (originalLines[index] === nextLines[nextIndex]) {
-      index += 1;
-      nextIndex += 1;
-      continue;
-    }
-
-    if (lcs[index + 1]![nextIndex]! >= lcs[index]![nextIndex + 1]!) {
-      deletions += 1;
-      index += 1;
-    } else {
-      additions += 1;
-      nextIndex += 1;
-    }
-  }
-
-  deletions += originalLength - index;
-  additions += nextLength - nextIndex;
-
-  return { additions, deletions };
-}
-
 function getEditDiffCounts(part: ToolPart): {
   additions: number | null;
   deletions: number | null;
+  oldContent: string | null;
+  newContent: string | null;
 } {
   const metadata = getToolStateMetadata(part);
   const metadataDiff = asRecord(metadata?.diff);
@@ -312,26 +274,35 @@ function getEditDiffCounts(part: ToolPart): {
     getNumberValue(metadata, ["deletions", "removed", "linesRemoved"]) ??
     getNumberValue(metadataDiff, ["deletions", "removed", "linesRemoved"]);
 
-  if (additions !== null || deletions !== null) {
-    return {
-      additions: additions ?? 0,
-      deletions: deletions ?? 0,
-    };
-  }
-
   const before =
     getStringValue(input, ["old_string", "oldString", "oldText", "old"]) ?? "";
   const after =
     getStringValue(input, ["new_string", "newString", "newText", "new"]) ?? "";
 
+  if (additions !== null || deletions !== null) {
+    return {
+      additions: additions ?? 0,
+      deletions: deletions ?? 0,
+      oldContent: before || null,
+      newContent: after || null,
+    };
+  }
+
   if (!before && !after) {
     return {
       additions: null,
       deletions: null,
+      oldContent: null,
+      newContent: null,
     };
   }
 
-  return getLineDiffCounts(before, after);
+  return {
+    additions: null,
+    deletions: null,
+    oldContent: before || null,
+    newContent: after || null,
+  };
 }
 
 function getShellDetail(part: ToolPart): string | null {
@@ -497,10 +468,7 @@ function getAssistantActivities(
 
     if (part.tool === "write" || part.tool === "edit") {
       const pathDetails = getNormalizedPath(getToolPath(part));
-      const diffCounts =
-        part.tool === "edit"
-          ? getEditDiffCounts(part)
-          : { additions: null, deletions: null };
+      const diffCounts = part.tool === "edit" ? getEditDiffCounts(part) : null;
 
       activities.push({
         id: part.id,
@@ -510,9 +478,11 @@ function getAssistantActivities(
         output: null,
         filename: pathDetails.filename,
         directory: pathDetails.directory,
-        additions: diffCounts.additions,
-        deletions: diffCounts.deletions,
+        additions: diffCounts?.additions ?? null,
+        deletions: diffCounts?.deletions ?? null,
         tool: part.tool,
+        oldContent: diffCounts?.oldContent ?? null,
+        newContent: diffCounts?.newContent ?? null,
       });
       continue;
     }
@@ -623,6 +593,17 @@ export function adaptMessage(
         })()
       : undefined;
 
+  // Extract summary from user message
+  const userMessage =
+    message.role === "user" ? (message as UserMessage) : undefined;
+  const summary = userMessage?.summary
+    ? {
+        title: userMessage.summary.title,
+        body: userMessage.summary.body,
+        diffs: userMessage.summary.diffs ?? [],
+      }
+    : undefined;
+
   return {
     id: message.id,
     sessionID: message.sessionID,
@@ -637,6 +618,7 @@ export function adaptMessage(
     tokens,
     cost: assistantMessage?.cost,
     assistant,
+    summary,
   };
 }
 
@@ -644,6 +626,9 @@ export const messageKeys = {
   all: ["messages"] as const,
   lists: () => [...messageKeys.all, "list"] as const,
   list: (sessionId: string) => [...messageKeys.lists(), sessionId] as const,
+  diffs: () => [...messageKeys.all, "diff"] as const,
+  diff: (sessionId: string, messageId: string) =>
+    [...messageKeys.diffs(), sessionId, messageId] as const,
 };
 
 export function useSessionMessages(sessionId: string, limit = 100) {

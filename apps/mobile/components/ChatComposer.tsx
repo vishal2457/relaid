@@ -306,7 +306,7 @@ export function ChatComposer({
               <ActivityIndicator size={18} color={theme.colors.onPrimary} />
             ) : (
               <MaterialCommunityIcons
-                name="send"
+                name="arrow-up"
                 size={20}
                 color={theme.colors.onPrimary}
               />
@@ -393,11 +393,12 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: 2
   },
   bottomRow: {
     flexDirection: "row",

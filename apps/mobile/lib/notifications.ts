@@ -8,9 +8,10 @@ import { getCurrentAccessToken } from "./pairing/session";
 
 const EXPO_PUSH_TOKEN_KEY = "expo_push_token";
 const EXPO_PUSH_TOKEN_REGISTERED_KEY = "expo_push_token_registered";
+const DEFAULT_ANDROID_NOTIFICATION_CHANNEL_ID = "default";
 
 const isNotificationsEnabled =
-  process.env.EXPO_PUBLIC_NOTIFICATIONS_ENABLED !== "false" && __DEV__ !== true;
+  process.env.EXPO_PUBLIC_NOTIFICATIONS_ENABLED !== "false";
 
 let isAppForeground = true;
 let initialized = false;
@@ -43,6 +44,22 @@ function initializeNotifications(): void {
   });
 }
 
+async function ensureAndroidNotificationChannel(): Promise<void> {
+  if (Platform.OS !== "android") {
+    return;
+  }
+
+  await Notifications.setNotificationChannelAsync(
+    DEFAULT_ANDROID_NOTIFICATION_CHANNEL_ID,
+    {
+      name: "Default",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#2563EB",
+    },
+  );
+}
+
 export function isAppInForeground(): boolean {
   return isAppForeground;
 }
@@ -59,6 +76,8 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   }
 
   try {
+    await ensureAndroidNotificationChannel();
+
     const { status: existingStatus } =
       await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -81,7 +100,16 @@ export async function getExpoPushToken(): Promise<string | null> {
       return cached;
     }
 
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    await ensureAndroidNotificationChannel();
+
+    const projectId =
+      Constants.easConfig?.projectId ??
+      Constants.expoConfig?.extra?.eas?.projectId;
+
+    if (!projectId) {
+      console.error("Missing EAS projectId for Expo push token registration");
+      return null;
+    }
 
     const { data: tokenData } = await Notifications.getExpoPushTokenAsync({
       projectId,

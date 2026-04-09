@@ -2,10 +2,13 @@ import React from "react";
 import { Pressable, View } from "react-native";
 import { Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import InlineDiffViewer from "../InlineDiffViewer";
 import type {
   SessionAssistantActivity,
   SessionAssistantActivityItem,
 } from "@/lib/api/messages";
+import { RawDiffViewer } from "./MessageSummaryDiffs";
+import { toUnifiedDiffSmart } from "../../lib/diff/to-unified-diff";
 
 interface ToolPartProps {
   activity: SessionAssistantActivity;
@@ -180,9 +183,12 @@ export const ToolPart: React.FC<ToolPartProps> = React.memo(
       activity.kind === "edit" &&
       activity.additions !== null &&
       activity.deletions !== null;
+    const hasDiffContent =
+      activity.kind === "edit" &&
+      (activity.oldContent !== null || activity.newContent !== null);
 
     return (
-      <View style={{ gap: isExpanded ? 8 : 0 }}>
+      <View style={{ gap: isExpanded ? 5 : 0 }}>
         <Pressable
           disabled={!isExpandable}
           onPress={() => setIsExpanded((current) => !current)}
@@ -277,6 +283,9 @@ export const ToolPart: React.FC<ToolPartProps> = React.memo(
                   {activity.output}
                 </Text>
               </View>
+            ) : null}
+            {hasDiffContent && isExpanded ? (
+              <RawDiffViewer diff={toUnifiedDiffSmart({ fileName: activity.filename ?? "", oldContent: activity.oldContent ?? "", newContent: activity.newContent ?? "" })} />
             ) : null}
           </View>
         ) : null}

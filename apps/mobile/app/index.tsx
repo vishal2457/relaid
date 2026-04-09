@@ -27,7 +27,12 @@ import {
 } from "@/components/ChatComposer";
 import { SessionDrawer } from "@/components/SessionDrawer";
 import { Stack } from "expo-router";
-import { ActivityIndicator, Text, useTheme } from "react-native-paper";
+import {
+  ActivityIndicator,
+  Text,
+  TextInput as PaperTextInput,
+  useTheme,
+} from "react-native-paper";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -79,7 +84,8 @@ import {
 import { AppState, type AppStateStatus } from "react-native";
 import { GitDrawer } from "@/components/GitDrawer";
 import { QueueDrawer } from "@/components/QueueDrawer";
-import { MessageBubble, TypingIndicator } from "@/components/Message";
+import { MessageRow, TypingIndicator } from "@/components/Message";
+import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
 import {
   PermissionCard,
   QuestionCard,
@@ -171,6 +177,60 @@ type SessionStreamChunkEvent = {
 type PermissionRequestEvent = PermissionRequest;
 type QuestionRequestEvent = QuestionRequest;
 
+function normalizeSearchValue(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+function fuzzyScore(target: string, query: string): number {
+  const normalizedTarget = normalizeSearchValue(target);
+  const normalizedQuery = normalizeSearchValue(query);
+
+  if (!normalizedQuery) {
+    return 0;
+  }
+
+  if (normalizedTarget === normalizedQuery) {
+    return 500;
+  }
+
+  if (normalizedTarget.startsWith(normalizedQuery)) {
+    return 300 - (normalizedTarget.length - normalizedQuery.length);
+  }
+
+  const substringIndex = normalizedTarget.indexOf(normalizedQuery);
+  if (substringIndex >= 0) {
+    return 220 - substringIndex;
+  }
+
+  let queryIndex = 0;
+  let score = 0;
+  let streak = 0;
+
+  for (let i = 0; i < normalizedTarget.length; i += 1) {
+    if (normalizedTarget[i] === normalizedQuery[queryIndex]) {
+      queryIndex += 1;
+      streak += 1;
+      score += 12 + streak * 3;
+      if (queryIndex === normalizedQuery.length) {
+        return score;
+      }
+    } else {
+      streak = 0;
+    }
+  }
+
+  return -1;
+}
+
+function getModelSearchScore(model: ActiveModel, query: string): number {
+  return Math.max(
+    fuzzyScore(model.name, query),
+    fuzzyScore(model.id, query),
+    fuzzyScore(model.providerName, query),
+    fuzzyScore(`${model.providerName} ${model.name}`, query),
+  );
+}
+
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -206,6 +266,7 @@ export default function ChatScreen() {
     React.useState<SessionMessage | null>(null);
   const [showProjectSheet, setShowProjectSheet] = React.useState(false);
   const [showProviderSheet, setShowProviderSheet] = React.useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = React.useState("");
   const [activeProject, setActiveProject] = React.useState<Project | null>(
     null,
   );
@@ -364,7 +425,7 @@ export default function ChatScreen() {
     if (!hydrated) return;
     if (activeProject) {
       AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => {},
+        () => { },
       );
     }
   }, [activeProject, hydrated]);
@@ -375,7 +436,7 @@ export default function ChatScreen() {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
-      ).catch(() => {});
+      ).catch(() => { });
     }
   }, [activeModel, hydrated]);
 
@@ -396,7 +457,7 @@ export default function ChatScreen() {
             setActiveModel(savedModel);
           }
         }
-      } catch {}
+      } catch { }
     })();
   }, [hydrated, providers]);
 
@@ -417,13 +478,36 @@ export default function ChatScreen() {
 
   const sortedModels = React.useMemo(() => {
     const models = flattenProvidersToModels(providers ?? []);
-    if (!activeModel) return models;
-    const sorted = [...models];
-    sorted.sort((a, b) =>
-      a.id === activeModel.id ? -1 : b.id === activeModel.id ? 1 : 0,
-    );
+    const normalizedQuery = normalizeSearchValue(modelSearchQuery);
+
+    const filtered = normalizedQuery
+      ? models
+        .map((model) => ({
+          model,
+          score: getModelSearchScore(model, normalizedQuery),
+        }))
+        .filter((entry) => entry.score >= 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) {
+            return b.score - a.score;
+          }
+          return a.model.name.localeCompare(b.model.name);
+        })
+        .map((entry) => entry.model)
+      : models;
+
+    if (!activeModel) {
+      return filtered;
+    }
+
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (a.id === activeModel.id) return -1;
+      if (b.id === activeModel.id) return 1;
+      return 0;
+    });
     return sorted;
-  }, [providers, activeModel]);
+  }, [providers, activeModel, modelSearchQuery]);
 
   const sortedProjects = React.useMemo(() => {
     if (!activeProject) return projects ?? [];
@@ -613,7 +697,7 @@ export default function ChatScreen() {
 
   const connectSse = React.useCallback(() => {
     if (!isMountedRef.current) {
-      return () => {};
+      return () => { };
     }
 
     setConnectionState("connecting");
@@ -685,7 +769,7 @@ export default function ChatScreen() {
       setConnectionState("disconnected");
       sseClientRef.current = null;
       unsubscribe();
-      return () => {};
+      return () => { };
     }
 
     sseClientRef.current = client;
@@ -884,9 +968,9 @@ export default function ChatScreen() {
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
-        220,
-      ) + 8
+      mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
+      220,
+    ) + 8
     : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
@@ -969,9 +1053,9 @@ export default function ChatScreen() {
         prompt: trimmedInput,
         model: activeModel
           ? {
-              providerId: activeModel.providerId,
-              modelId: activeModel.id,
-            }
+            providerId: activeModel.providerId,
+            modelId: activeModel.id,
+          }
           : undefined,
       });
     } catch (error) {
@@ -1052,10 +1136,16 @@ export default function ChatScreen() {
   );
 
   const renderMessage = React.useCallback(
-    ({ item }: { item: SessionMessage }) => {
+    ({ item, index }: { item: SessionMessage; index: number }) => {
+      const responseSummaryContext = getAssistantResponseSummaryContext(
+        displayedMessages,
+        index,
+      );
+
       return (
-        <MessageBubble
+        <MessageRow
           message={item}
+          responseSummary={responseSummaryContext}
           borderColor={borderColor}
           metaColor={metaColor}
           userBubble={userBubble}
@@ -1072,6 +1162,7 @@ export default function ChatScreen() {
       assistantBubble,
       systemBubble,
       theme.colors.onSurface,
+      displayedMessages,
     ],
   );
 
@@ -1267,8 +1358,8 @@ export default function ChatScreen() {
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
-          activeSessionId &&
-          displayedMessages.length === 0 ? (
+            activeSessionId &&
+            displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
@@ -1392,7 +1483,7 @@ export default function ChatScreen() {
               bottom:
                 keyboardHeight > 0
                   ? keyboardHeight + KEYBOARD_ADDITIONAL_PADDING + 12
-                  : composerHeight + 12,
+                  : composerHeight + 80,
             },
           ]}
         >
@@ -1505,17 +1596,43 @@ export default function ChatScreen() {
         visible={showProviderSheet}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowProviderSheet(false)}
+        onRequestClose={() => {
+          setShowProviderSheet(false);
+          setModelSearchQuery("");
+        }}
       >
         <Pressable
           style={styles.sheetOverlay}
-          onPress={() => setShowProviderSheet(false)}
+          onPress={() => {
+            setShowProviderSheet(false);
+            setModelSearchQuery("");
+          }}
         >
           <View style={[styles.sheetContainer, { backgroundColor: sheetBg }]}>
             <View style={styles.sheetHandle} />
             <Text variant="titleMedium" style={styles.sheetTitle}>
               Select Model
             </Text>
+            <View style={styles.sheetSearchContainer}>
+              <PaperTextInput
+                mode="outlined"
+                dense
+                value={modelSearchQuery}
+                onChangeText={setModelSearchQuery}
+                placeholder="Search models or providers"
+                autoCapitalize="none"
+                autoCorrect={false}
+                left={<PaperTextInput.Icon icon="magnify" />}
+                right={
+                  modelSearchQuery ? (
+                    <PaperTextInput.Icon
+                      icon="close"
+                      onPress={() => setModelSearchQuery("")}
+                    />
+                  ) : undefined
+                }
+              />
+            </View>
             {providersLoading ? (
               <View style={styles.sheetLoading}>
                 <ActivityIndicator />
@@ -1532,6 +1649,7 @@ export default function ChatScreen() {
                       onPress={() => {
                         setActiveModel(item);
                         setShowProviderSheet(false);
+                        setModelSearchQuery("");
                       }}
                       style={[
                         styles.sheetItem,
@@ -1702,6 +1820,10 @@ const styles = StyleSheet.create({
   sheetLoading: {
     padding: 32,
     alignItems: "center",
+  },
+  sheetSearchContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
   sheetList: {
     paddingHorizontal: 12,

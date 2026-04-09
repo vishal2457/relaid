@@ -10,6 +10,7 @@ export interface FileDiff {
   after: string;
   additions: number;
   deletions: number;
+  patch?: string;
 }
 
 export type SessionStatus =

@@ -15,6 +15,7 @@ import type {
   SessionAbortPayload,
   SessionAbortedPayload,
   SessionCreateRequestPayload,
+  SessionDiffRequestPayload,
   SessionGetRequestPayload,
   SessionMessagesRequestPayload,
   SessionPromptRequestPayload,
@@ -390,6 +391,13 @@ export class ChatServerClient {
       "session_create_request",
       (payload: { requestId: string } & SessionCreateRequestPayload) => {
         void this.handleSessionCreateRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "session_diff_request",
+      (payload: { requestId: string } & SessionDiffRequestPayload) => {
+        void this.handleSessionDiffRequest(payload);
       },
     );
 
@@ -792,6 +800,25 @@ export class ChatServerClient {
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.sendError(payload.requestId, "SESSION_MESSAGES_ERROR", errMsg);
+    }
+  }
+
+  private async handleSessionDiffRequest(
+    payload: { requestId: string } & SessionDiffRequestPayload,
+  ): Promise<void> {
+    try {
+      const diff = await opencodeCatalogService.getSessionDiff(
+        payload.sessionId,
+        payload.messageId,
+      );
+
+      this.emit("session_diff_response", {
+        requestId: payload.requestId,
+        diff,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.sendError(payload.requestId, "SESSION_DIFF_ERROR", errMsg);
     }
   }
 

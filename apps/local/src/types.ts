@@ -1,6 +1,9 @@
 import type { Project, Session, Message } from "@opencode-ai/sdk/v2" with {
   "resolution-mode": "import",
 };
+import type { FileDiff } from "@opencode-ai/sdk/v2" with {
+  "resolution-mode": "import",
+};
 
 export type { Project, Session, Message };
 
@@ -51,6 +54,8 @@ export type ChatServerEventType =
   | "sessions_list_response"
   | "session_get_request"
   | "session_get_response"
+  | "session_diff_request"
+  | "session_diff_response"
   | "session_messages_request"
   | "session_messages_response"
   | "session_create_request"
@@ -263,6 +268,12 @@ export type SessionsListResponsePayload = { sessions: SessionPayload[] };
 
 export type SessionGetRequestPayload = { sessionId: string };
 export type SessionGetResponsePayload = { session: SessionPayload | null };
+
+export type SessionDiffRequestPayload = {
+  sessionId: string;
+  messageId?: string;
+};
+export type SessionDiffResponsePayload = { diff: FileDiff[] };
 
 export type SessionMessagesRequestPayload = {
   sessionId: string;

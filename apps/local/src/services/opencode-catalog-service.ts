@@ -1,5 +1,6 @@
 import { OpencodeSdk } from "../sdk/opencode-sdk";
 import type {
+  FileDiff,
   Project,
   Session,
   Message,
@@ -313,6 +314,10 @@ class OpencodeCatalogService {
         new Date(right.info.time.created),
       ),
     );
+  }
+
+  async getSessionDiff(sessionId: string, messageId?: string): Promise<FileDiff[]> {
+    return this.sdk.getSessionDiff(sessionId, messageId);
   }
 
   async listProviders() {

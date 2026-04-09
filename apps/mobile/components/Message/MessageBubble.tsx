@@ -1,5 +1,5 @@
 import React from "react";
-import { View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { FormattedText } from "./FormattedText";
 import { ToolPart } from "./ToolPart";
@@ -22,18 +22,6 @@ const formatDateTime = (value: string | number | null | undefined) => {
 const formatAssistantMode = (mode: string | null | undefined) => {
   if (!mode) return null;
   return mode.charAt(0).toUpperCase() + mode.slice(1);
-};
-
-const formatAssistantModel = (message: SessionMessage) => {
-  if (!message.assistant?.model) {
-    return null;
-  }
-
-  if (message.assistant.provider) {
-    return `${message.assistant.provider}/${message.assistant.model}`;
-  }
-
-  return message.assistant.model;
 };
 
 const formatAssistantDuration = (durationMs: number | null | undefined) => {
@@ -90,7 +78,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     const assistantActivities = message.assistant?.activities ?? [];
     const assistantMeta = [
       formatAssistantMode(message.assistant?.mode),
-      formatAssistantModel(message),
+      message.assistant?.model,
       formatAssistantDuration(message.assistant?.durationMs),
     ]
       .filter(Boolean)
@@ -103,7 +91,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     return (
       <View
         style={{
-          marginBottom: 12,
+          marginVertical: showBubble && !showAssistantDetails ? 12 : 0,
           alignItems: isUser ? "flex-end" : "flex-start",
         }}
       >
@@ -112,28 +100,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             style={{
               maxWidth: "85%",
               backgroundColor: bubbleColor,
-              borderWidth: 1,
-              borderColor,
-              borderRadius: 12,
+              borderRadius: 5,
               padding: 12,
               alignSelf: isUser ? "flex-end" : "flex-start",
             }}
           >
-            <View
+            {/* <View
               style={{
                 flexDirection: "row",
                 justifyContent: "space-between",
                 alignItems: "center",
                 marginBottom: 4,
+                alignSelf: "flex-end"
               }}
             >
-              <Text variant="labelMedium" style={{ color: metaColor }}>
-                {roleLabelMap[message.role]}
-              </Text>
               <Text variant="labelSmall" style={{ color: metaColor }}>
                 {formatDateTime(message.createdAt)}
               </Text>
-            </View>
+            </View> */}
 
             {hasVisibleText ? (
               <>
@@ -159,7 +143,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             style={{
               width: "85%",
               marginTop: showBubble ? 10 : 0,
-              gap: 14,
+              flexDirection: 'column',
+              gap: 5,
             }}
           >
             {assistantActivities.map((activity) => (

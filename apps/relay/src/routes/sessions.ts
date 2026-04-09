@@ -28,6 +28,19 @@ type SessionMessagesResponse = {
   error?: string;
 };
 
+type SessionDiffFile = {
+  file: string;
+  before: string;
+  after: string;
+  additions: number;
+  deletions: number;
+};
+
+type SessionDiffResponse = {
+  diff: SessionDiffFile[];
+  error?: string;
+};
+
 type SessionCreateResponse = {
   session: SessionPayload;
   requestId: string;
@@ -156,6 +169,10 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.get("/:id/messages", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    console.log(userId, "user id");
+    console.log(req.params.id, "id");
+    
+    
     const sessionLookup = await requestUntilMatch<SessionResponse>(
       userId,
       "session_get_request",
@@ -183,11 +200,47 @@ router.get("/:id/messages", async (req: Request, res: Response) => {
         limit,
       },
       sessionLookup.serverId,
-    );
+    );    
 
     res.json({ messages: result.response.messages || [] });
   } catch (error) {
     handleRouteError(res, "Failed to get session messages", error);
+  }
+});
+
+router.get("/:id/diff", async (req: Request, res: Response) => {
+  try {
+    const userId = requireUserId(req.headers["x-user-id"]);
+    const sessionLookup = await requestUntilMatch<SessionResponse>(
+      userId,
+      "session_get_request",
+      "session_get_response",
+      { sessionId: req.params.id },
+      (response) => Boolean(response.session),
+    );
+
+    if (!sessionLookup?.response.session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    const messageId =
+      typeof req.query.messageID === "string" ? req.query.messageID : undefined;
+
+    const result = await requestConnectedServer<SessionDiffResponse>(
+      userId,
+      "session_diff_request",
+      "session_diff_response",
+      {
+        sessionId: req.params.id,
+        messageId,
+      },
+      sessionLookup.serverId,
+    );
+
+    res.json({ diff: result.response.diff || [] });
+  } catch (error) {
+    handleRouteError(res, "Failed to get session diff", error);
   }
 });
 
