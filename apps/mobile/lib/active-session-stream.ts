@@ -31,6 +31,22 @@ export function isStreamingSessionStatus(status?: string | null): boolean {
   return status === "pending" || status === "running";
 }
 
+function hasRecoveredAssistantMessage(message: SessionMessage): boolean {
+  if (message.role !== "assistant") {
+    return false;
+  }
+
+  if (message.visibleContent.trim()) {
+    return true;
+  }
+
+  if (message.parts.some((part) => part.type === "tool" || part.type === "step")) {
+    return true;
+  }
+
+  return Boolean(message.time?.completed);
+}
+
 export async function getActiveSessionStream(): Promise<ActiveSessionStream | null> {
   try {
     const stored = await AsyncStorage.getItem(ACTIVE_SESSION_STREAM_KEY);
@@ -80,8 +96,13 @@ export function shouldScheduleSessionRefresh(
   messages: SessionMessage[] | undefined,
   output: string,
 ): boolean {
+  if (!messages) {
+    return true;
+  }
+
   if (!output.trim()) {
-    return false;
+    const lastMessage = messages[messages.length - 1];
+    return !lastMessage || !hasRecoveredAssistantMessage(lastMessage);
   }
 
   const lastMessage = messages?.[messages.length - 1];
@@ -93,7 +114,7 @@ export function shouldScheduleSessionRefresh(
     return true;
   }
 
-  return !lastMessage.visibleContent.trim();
+  return !hasRecoveredAssistantMessage(lastMessage);
 }
 
 export function hasRecoveredAssistantResponse(
@@ -110,8 +131,5 @@ export function hasRecoveredAssistantResponse(
   const candidateMessages =
     baselineIndex >= 0 ? messages.slice(baselineIndex + 1) : messages;
 
-  return candidateMessages.some(
-    (message) =>
-      message.role === "assistant" && Boolean(message.visibleContent.trim()),
-  );
+  return candidateMessages.some(hasRecoveredAssistantMessage);
 }

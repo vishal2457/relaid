@@ -95,6 +95,20 @@ export async function emitRequestToServer<TResponse>(
   });
 }
 
+export function emitEventToServer(
+  serverId: string,
+  event: string,
+  payload: Record<string, unknown>,
+): void {
+  const socket = localServerSockets.get(serverId);
+
+  if (!socket) {
+    throw new Error(`Local server ${serverId} is not connected`);
+  }
+
+  socket.emit(event, payload);
+}
+
 export function resolvePendingRequest(
   responseEvent: string,
   payload: { requestId?: string } & Record<string, unknown>,

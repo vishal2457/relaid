@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
 } from "react-native";
+import { useTheme } from "react-native-paper";
 import {
   useFileDiff,
   type FileDiff,
@@ -14,19 +15,31 @@ import {
   type DiffLine,
 } from "../lib/api/git";
 
-const DiffLineItem = ({ line }: { line: DiffLine }) => {
+const DiffLineItem = ({
+  line,
+  isDark,
+}: {
+  line: DiffLine;
+  isDark: boolean;
+}) => {
   const bgColor =
     line.type === "add"
-      ? "#1a3a1a"
+      ? isDark
+        ? "#1a3a1a"
+        : "#d4edda"
       : line.type === "remove"
-        ? "#3a1a1a"
+        ? isDark
+          ? "#3a1a1a"
+          : "#f8d7da"
         : "transparent";
   const textColor =
     line.type === "add"
       ? "#4caf50"
       : line.type === "remove"
         ? "#f44336"
-        : "#ccc";
+        : isDark
+          ? "#ccc"
+          : "#333";
   const prefix = line.type === "add" ? "+" : line.type === "remove" ? "-" : " ";
 
   return (
@@ -39,30 +52,42 @@ const DiffLineItem = ({ line }: { line: DiffLine }) => {
   );
 };
 
-const HunkItem = ({ hunk }: { hunk: DiffHunk }) => (
+const HunkItem = ({ hunk, isDark }: { hunk: DiffHunk; isDark: boolean }) => (
   <View style={styles.hunk}>
-    <Text style={styles.hunkHeader}>{hunk.header}</Text>
+    <Text style={[styles.hunkHeader, isDark && styles.hunkHeaderDark]}>
+      {hunk.header}
+    </Text>
     {hunk.lines.map((line, i) => (
-      <DiffLineItem key={i} line={line} />
+      <DiffLineItem key={i} line={line} isDark={isDark} />
     ))}
   </View>
 );
 
-const FileDiffItem = ({ file }: { file: FileDiff }) => {
+const FileDiffItem = ({
+  file,
+  isDark,
+}: {
+  file: FileDiff;
+  isDark: boolean;
+}) => {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <View style={styles.fileDiff}>
+    <View style={[styles.fileDiff, isDark && styles.fileDiffDark]}>
       <TouchableOpacity
-        style={styles.fileHeader}
+        style={[styles.fileHeader, isDark && styles.fileHeaderDark]}
         onPress={() => setCollapsed((c) => !c)}
       >
-        <Text style={styles.fileName}>{file.fileName}</Text>
+        <Text style={[styles.fileName, isDark && styles.fileNameDark]}>
+          {file.fileName}
+        </Text>
         <Text style={styles.collapseIcon}>{collapsed ? "▶" : "▼"}</Text>
       </TouchableOpacity>
 
       {!collapsed &&
-        file.hunks.map((hunk, i) => <HunkItem key={i} hunk={hunk} />)}
+        file.hunks.map((hunk, i) => (
+          <HunkItem key={i} hunk={hunk} isDark={isDark} />
+        ))}
     </View>
   );
 };
@@ -73,76 +98,100 @@ interface DiffViewerProps {
 }
 
 export default function DiffViewer({ projectId, filePath }: DiffViewerProps) {
+  const theme = useTheme();
+  const isDark = theme.dark;
   const { data, isLoading, error } = useFileDiff(projectId, filePath);
 
   if (isLoading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#61dafb" />
+      <View
+        style={[styles.center, { backgroundColor: theme.colors.background }]}
+      >
+        <ActivityIndicator size="large" color={theme.colors.primary} />
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.error}>Error: {error.message}</Text>
+      <View
+        style={[styles.center, { backgroundColor: theme.colors.background }]}
+      >
+        <Text style={[styles.error, { color: theme.colors.error }]}>
+          Error: {error.message}
+        </Text>
       </View>
     );
   }
 
   if (!data || data.files.length === 0) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.noChanges}>No changes</Text>
+      <View
+        style={[styles.center, { backgroundColor: theme.colors.background }]}
+      >
+        <Text style={[styles.noChanges, { color: theme.colors.onSurface }]}>
+          No changes
+        </Text>
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+    >
       {data.files.map((file, i) => (
-        <FileDiffItem key={i} file={file} />
+        <FileDiffItem key={i} file={file} isDark={isDark} />
       ))}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1e1e1e", padding: 8 },
+  container: { flex: 1, padding: 8 },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#1e1e1e",
     padding: 16,
   },
-  error: { color: "#f44336", fontSize: 14 },
-  noChanges: { color: "#888", fontSize: 14 },
+  error: { fontSize: 14 },
+  noChanges: { fontSize: 14 },
 
   fileDiff: {
     marginBottom: 16,
     borderRadius: 6,
     overflow: "hidden",
     borderWidth: 1,
+    borderColor: "#ccc",
+  },
+  fileDiffDark: {
     borderColor: "#333",
   },
   fileHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    backgroundColor: "#2d2d2d",
+    backgroundColor: "#f5f5f5",
     padding: 10,
   },
-  fileName: { color: "#61dafb", fontWeight: "bold", fontSize: 13 },
-  collapseIcon: { color: "#888", fontSize: 12 },
+  fileHeaderDark: {
+    backgroundColor: "#2d2d2d",
+  },
+  fileName: { color: "#007acc", fontWeight: "bold", fontSize: 13 },
+  fileNameDark: { color: "#61dafb" },
+  collapseIcon: { color: "#666", fontSize: 12 },
 
-  hunk: { borderTopWidth: 1, borderTopColor: "#333" },
+  hunk: { borderTopWidth: 1, borderTopColor: "#ccc" },
   hunkHeader: {
-    backgroundColor: "#1a2533",
-    color: "#6af",
+    backgroundColor: "#e8f4fd",
+    color: "#0066b3",
     padding: 4,
     fontSize: 11,
     fontFamily: "monospace",
+  },
+  hunkHeaderDark: {
+    backgroundColor: "#1a2533",
+    color: "#6af",
   },
 
   line: { flexDirection: "row", paddingHorizontal: 6, paddingVertical: 1 },

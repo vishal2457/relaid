@@ -30,7 +30,7 @@ import {
 const HEADER_HEIGHT = 44;
 const HEADER_TOP_MARGIN = 12;
 
-const formatDateTime = (value: string | null) => {
+const formatDateTime = (value: string | number | null | undefined) => {
   if (!value) {
     return null;
   }

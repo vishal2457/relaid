@@ -1,28 +1,40 @@
 import { useQuery } from "@tanstack/react-query";
 import baseApi from "../axios/base";
+import type {
+  Project as OpenCodeProject,
+  ProjectDirectoryNode as OpenCodeDirectoryNode,
+  ProjectFileMatch as OpenCodeFileMatch,
+} from "../opencode-types";
 
-export type Project = {
+// Mobile app representation of a project
+export interface Project {
   id: string;
   name: string;
   description: string;
   folder: string;
   localServerId?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
-};
+  createdAt?: number;
+  updatedAt?: number;
+}
 
-export type ProjectDirectoryNode = {
-  name: string;
-  path: string;
-  type: "file" | "directory";
-  children?: ProjectDirectoryNode[];
-};
+// Convert OpenCode Project to mobile Project
+export function adaptProject(openCodeProject: OpenCodeProject): Project {
+  // Extract project name from directory path
+  const pathParts = openCodeProject.worktree.split("/");
+  const name = pathParts[pathParts.length - 1] || "Unnamed Project";
 
-export type ProjectFileMatch = {
-  name: string;
-  path: string;
-  type: "file" | "directory";
-};
+  return {
+    id: openCodeProject.id,
+    name,
+    description: "", // OpenCode doesn't have description in the same way
+    folder: openCodeProject.worktree,
+    createdAt: openCodeProject.time.created,
+    updatedAt: openCodeProject.time.initialized ?? openCodeProject.time.created,
+  };
+}
+
+export type ProjectDirectoryNode = OpenCodeDirectoryNode;
+export type ProjectFileMatch = OpenCodeFileMatch;
 
 export const projectsKeys = {
   all: ["projects"] as const,
@@ -34,15 +46,18 @@ export const projectsKeys = {
   directories: () => [...projectsKeys.all, "directory"] as const,
   directory: (id: string) => [...projectsKeys.directories(), id] as const,
   searches: () => [...projectsKeys.all, "search"] as const,
-  search: (id: string, query: string) => [...projectsKeys.searches(), id, query] as const,
+  search: (id: string, query: string) =>
+    [...projectsKeys.searches(), id, query] as const,
 };
 
 export function useProjects() {
   return useQuery<Project[]>({
     queryKey: projectsKeys.lists(),
     queryFn: async () => {
-      const response = await baseApi.get<{ projects: Project[] }>("/projects");
-      return response.data.projects ?? [];
+      const response = await baseApi.get<{ projects: OpenCodeProject[] }>(
+        "/projects",
+      );
+      return (response.data.projects ?? []).map(adaptProject);
     },
   });
 }

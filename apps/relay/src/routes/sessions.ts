@@ -28,6 +28,19 @@ type SessionMessagesResponse = {
   error?: string;
 };
 
+type SessionDiffFile = {
+  file: string;
+  before: string;
+  after: string;
+  additions: number;
+  deletions: number;
+};
+
+type SessionDiffResponse = {
+  diff: SessionDiffFile[];
+  error?: string;
+};
+
 type SessionCreateResponse = {
   session: SessionPayload;
   requestId: string;
@@ -71,8 +84,11 @@ router.get("/", async (req: Request, res: Response) => {
       "sessions_list_response",
       {
         projectId:
-          typeof req.query.projectId === "string" ? req.query.projectId : undefined,
-        status: typeof req.query.status === "string" ? req.query.status : undefined,
+          typeof req.query.projectId === "string"
+            ? req.query.projectId
+            : undefined,
+        status:
+          typeof req.query.status === "string" ? req.query.status : undefined,
         limit:
           typeof req.query.limit === "string"
             ? Number.parseInt(req.query.limit, 10)
@@ -80,17 +96,47 @@ router.get("/", async (req: Request, res: Response) => {
       },
     );
 
-    const sessions = results.flatMap((result) => result.response.sessions || []);
+    const sessions = results.flatMap(
+      (result) => result.response.sessions || [],
+    );
     const projectId =
       typeof req.query.projectId === "string" ? req.query.projectId : undefined;
     const status =
       typeof req.query.status === "string" ? req.query.status : undefined;
+
+    // Handle both OpenCode format (projectID, time.created) and legacy format (projectId, createdAt)
     const filteredSessions = sessions
-      .filter((session) => (projectId ? session.projectId === projectId : true))
-      .filter((session) => (status ? session.status === status : true))
-      .sort((left, right) =>
-        right.createdAt.localeCompare(left.createdAt),
-      );
+      .filter((session) => {
+        const sessionProjectId =
+          (session as Record<string, unknown>).projectID ??
+          (session as Record<string, unknown>).projectId;
+        return projectId ? sessionProjectId === projectId : true;
+      })
+      .filter((session) => {
+        const sessionStatus = (session as Record<string, unknown>).status;
+        return status ? sessionStatus === status : true;
+      })
+      .sort((left, right) => {
+        const leftTime = (left as Record<string, unknown>).time as
+          | { created?: number }
+          | undefined;
+        const rightTime = (right as Record<string, unknown>).time as
+          | { created?: number }
+          | undefined;
+        const leftCreated =
+          leftTime?.created ??
+          ((left as Record<string, unknown>).createdAt as string);
+        const rightCreated =
+          rightTime?.created ??
+          ((right as Record<string, unknown>).createdAt as string);
+        if (
+          typeof leftCreated === "number" &&
+          typeof rightCreated === "number"
+        ) {
+          return rightCreated - leftCreated;
+        }
+        return String(rightCreated).localeCompare(String(leftCreated));
+      });
 
     res.json({ sessions: filteredSessions });
   } catch (error) {
@@ -123,6 +169,10 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.get("/:id/messages", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    console.log(userId, "user id");
+    console.log(req.params.id, "id");
+    
+    
     const sessionLookup = await requestUntilMatch<SessionResponse>(
       userId,
       "session_get_request",
@@ -150,11 +200,47 @@ router.get("/:id/messages", async (req: Request, res: Response) => {
         limit,
       },
       sessionLookup.serverId,
-    );
+    );    
 
     res.json({ messages: result.response.messages || [] });
   } catch (error) {
     handleRouteError(res, "Failed to get session messages", error);
+  }
+});
+
+router.get("/:id/diff", async (req: Request, res: Response) => {
+  try {
+    const userId = requireUserId(req.headers["x-user-id"]);
+    const sessionLookup = await requestUntilMatch<SessionResponse>(
+      userId,
+      "session_get_request",
+      "session_get_response",
+      { sessionId: req.params.id },
+      (response) => Boolean(response.session),
+    );
+
+    if (!sessionLookup?.response.session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    const messageId =
+      typeof req.query.messageID === "string" ? req.query.messageID : undefined;
+
+    const result = await requestConnectedServer<SessionDiffResponse>(
+      userId,
+      "session_diff_request",
+      "session_diff_response",
+      {
+        sessionId: req.params.id,
+        messageId,
+      },
+      sessionLookup.serverId,
+    );
+
+    res.json({ diff: result.response.diff || [] });
+  } catch (error) {
+    handleRouteError(res, "Failed to get session diff", error);
   }
 });
 
@@ -255,13 +341,16 @@ router.post("/:id/abort", async (req: Request, res: Response) => {
       return;
     }
 
+    const session = sessionLookup.response.session as Record<string, unknown>;
+    const projectId = session.projectID ?? session.projectId;
+
     const result = await requestConnectedServer<SessionAbortResponse>(
       userId,
       "session_abort",
       "session_aborted",
       {
         sessionId: req.params.id,
-        projectId: sessionLookup.response.session.projectId,
+        projectId: projectId as string,
       },
       sessionLookup.serverId,
     );

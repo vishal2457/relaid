@@ -1,4 +1,6 @@
 import { io, Socket } from "socket.io-client";
+import { randomUUID } from "crypto";
+import { eq, max } from "drizzle-orm";
 import { logger } from "../shared/logger";
 import type {
   MessagePayload,
@@ -10,12 +12,10 @@ import type {
   ProjectUpdateRequestPayload,
   ProjectsListRequestPayload,
   ProvidersListRequestPayload,
-  RunRequestPayload,
-  RunResponsePayload,
-  RunStreamChunkPayload,
   SessionAbortPayload,
   SessionAbortedPayload,
   SessionCreateRequestPayload,
+  SessionDiffRequestPayload,
   SessionGetRequestPayload,
   SessionMessagesRequestPayload,
   SessionPromptRequestPayload,
@@ -24,9 +24,27 @@ import type {
   SessionStreamChunkPayload,
   SessionUpdateRequestPayload,
   SessionsListRequestPayload,
+  PermissionRequestPayload,
+  PermissionResponsePayload,
+  QuestionRequestPayload,
+  QuestionResponsePayload,
+  MessageQueueListRequestPayload,
+  MessageQueueListResponsePayload,
+  MessageQueueAddRequestPayload,
+  MessageQueueAddResponsePayload,
+  MessageQueueRemoveRequestPayload,
+  MessageQueueRemoveResponsePayload,
+  MessageQueueUpdateRequestPayload,
+  MessageQueueUpdateResponsePayload,
+  MessageQueueExecuteRequestPayload,
+  MessageQueueExecuteResponsePayload,
+  QueueItemPayload,
 } from "../types";
 import { opencodeCatalogService } from "./opencode-catalog-service";
 import { GitService } from "./git-service";
+import { runOpenCodeStream } from "./open-code-runner";
+import { getDb } from "../db";
+import { messageQueue } from "../db/schema";
 import {
   createPairingSession,
   getRelayServerName,
@@ -50,30 +68,6 @@ const LOCAL_SERVER_SECRET = RELAY_DEVICE.serverSecret;
 const LOCAL_SERVER_NAME = getRelayServerName();
 const RECONNECT_INTERVAL_MS = 5000;
 
-function ensureProjectIsoDate(value?: Date | string | number | null): string {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString();
-  }
-
-  if (typeof value === "string" || typeof value === "number") {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
-  }
-
-  return new Date().toISOString();
-}
-
-export type RunRequestHandler = (
-  payload: RunRequestPayload,
-) => Promise<RunResponsePayload>;
-
-export type RunRequestStreamHandler = (
-  payload: RunRequestPayload,
-  onChunk: (chunk: RunStreamChunkPayload) => void,
-) => Promise<RunResponsePayload>;
-
 export type SessionAbortHandler = (
   payload: SessionAbortPayload,
 ) => Promise<SessionAbortedPayload>;
@@ -92,19 +86,23 @@ export class ChatServerClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
   private pairingQrPrinted = false;
-  private onRunRequest: RunRequestHandler | null = null;
-  private onRunRequestStream: RunRequestStreamHandler | null = null;
   private onSessionAbort: SessionAbortHandler | null = null;
   private onSessionPrompt: SessionPromptHandler | null = null;
   private onSessionPromptStream: SessionPromptStreamHandler | null = null;
-
-  setRunRequestHandler(handler: RunRequestHandler): void {
-    this.onRunRequest = handler;
-  }
-
-  setRunRequestStreamHandler(handler: RunRequestStreamHandler): void {
-    this.onRunRequestStream = handler;
-  }
+  private pendingPermissionRequests: Map<
+    string,
+    {
+      resolve: (reply: PermissionResponsePayload["reply"]) => void;
+      reject: (error: Error) => void;
+    }
+  > = new Map();
+  private pendingQuestionRequests: Map<
+    string,
+    {
+      resolve: (answers: string[][]) => void;
+      reject: (error: Error) => void;
+    }
+  > = new Map();
 
   setSessionAbortHandler(handler: SessionAbortHandler): void {
     this.onSessionAbort = handler;
@@ -116,6 +114,90 @@ export class ChatServerClient {
 
   setSessionPromptStreamHandler(handler: SessionPromptStreamHandler): void {
     this.onSessionPromptStream = handler;
+  }
+
+  requestPermission(
+    payload: PermissionRequestPayload,
+  ): Promise<PermissionResponsePayload["reply"]> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        logger.error("Cannot request permission: socket not connected", {
+          requestId: payload.requestId,
+        });
+        reject(new Error("Socket not connected"));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        this.pendingPermissionRequests.delete(payload.requestId);
+        logger.warn("Permission request timed out", {
+          requestId: payload.requestId,
+          permission: payload.permission,
+        });
+        reject(new Error("Permission request timed out"));
+      }, 120000);
+
+      this.pendingPermissionRequests.set(payload.requestId, {
+        resolve: (reply) => {
+          clearTimeout(timeout);
+          resolve(reply);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+
+      logger.info("Emitting permission_request to relay", {
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        permission: payload.permission,
+        projectId: payload.projectId,
+        socketConnected: this.socket?.connected,
+      });
+
+      this.emit("permission_request", payload);
+    });
+  }
+
+  requestQuestion(payload: QuestionRequestPayload): Promise<string[][]> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        logger.error("Cannot request question: socket not connected", {
+          requestId: payload.requestId,
+        });
+        reject(new Error("Socket not connected"));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        this.pendingQuestionRequests.delete(payload.requestId);
+        logger.warn("Question request timed out", {
+          requestId: payload.requestId,
+        });
+        reject(new Error("Question request timed out"));
+      }, 120000);
+
+      this.pendingQuestionRequests.set(payload.requestId, {
+        resolve: (answers) => {
+          clearTimeout(timeout);
+          resolve(answers);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+
+      logger.info("Emitting question_request to relay", {
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        questionCount: payload.questions.length,
+        socketConnected: this.socket?.connected,
+      });
+
+      this.emit("question_request", payload);
+    });
   }
 
   async start(): Promise<void> {
@@ -231,10 +313,6 @@ export class ChatServerClient {
       this.scheduleReconnect();
     });
 
-    this.socket.on("run_request", (payload: RunRequestPayload) => {
-      void this.handleRunRequest(payload);
-    });
-
     this.socket.on("session_abort", (payload: SessionAbortPayload) => {
       void this.handleSessionAbort(payload);
     });
@@ -317,6 +395,13 @@ export class ChatServerClient {
     );
 
     this.socket.on(
+      "session_diff_request",
+      (payload: { requestId: string } & SessionDiffRequestPayload) => {
+        void this.handleSessionDiffRequest(payload);
+      },
+    );
+
+    this.socket.on(
       "session_messages_request",
       (payload: { requestId: string } & SessionMessagesRequestPayload) => {
         void this.handleSessionMessagesRequest(payload);
@@ -371,6 +456,77 @@ export class ChatServerClient {
         void this.handleGitDiscardFileRequest(payload);
       },
     );
+
+    // Message Queue handlers
+    this.socket.on(
+      "message_queue_list_request",
+      (payload: { requestId: string } & MessageQueueListRequestPayload) => {
+        void this.handleMessageQueueListRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "message_queue_add_request",
+      (payload: { requestId: string } & MessageQueueAddRequestPayload) => {
+        void this.handleMessageQueueAddRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "message_queue_remove_request",
+      (payload: { requestId: string } & MessageQueueRemoveRequestPayload) => {
+        void this.handleMessageQueueRemoveRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "message_queue_update_request",
+      (payload: { requestId: string } & MessageQueueUpdateRequestPayload) => {
+        void this.handleMessageQueueUpdateRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "message_queue_execute_request",
+      (payload: { requestId: string } & MessageQueueExecuteRequestPayload) => {
+        void this.handleMessageQueueExecuteRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "permission_response",
+      (payload: PermissionResponsePayload) => {
+        const pending = this.pendingPermissionRequests.get(payload.requestId);
+        if (pending) {
+          this.pendingPermissionRequests.delete(payload.requestId);
+          pending.resolve(payload.reply);
+          logger.info("Permission response received", {
+            requestId: payload.requestId,
+            reply: payload.reply,
+          });
+        } else {
+          logger.warn("Received permission response for unknown request", {
+            requestId: payload.requestId,
+          });
+        }
+      },
+    );
+
+    this.socket.on("question_response", (payload: QuestionResponsePayload) => {
+      const pending = this.pendingQuestionRequests.get(payload.requestId);
+      if (pending) {
+        this.pendingQuestionRequests.delete(payload.requestId);
+        pending.resolve(payload.answers);
+        logger.info("Question response received", {
+          requestId: payload.requestId,
+          answerCount: payload.answers.length,
+        });
+      } else {
+        logger.warn("Received question response for unknown request", {
+          requestId: payload.requestId,
+        });
+      }
+    });
   }
 
   private scheduleReconnect(): void {
@@ -395,69 +551,12 @@ export class ChatServerClient {
       );
       return;
     }
+    console.log("Emitting event", event, this.socket.id);
     this.socket.emit(event, payload);
   }
 
   private sendError(requestId: string, code: string, message: string): void {
     this.emit("error_response", { requestId, code, message });
-  }
-
-  private async handleRunRequest(
-    payload: RunRequestPayload & { requestId: string },
-  ): Promise<void> {
-    logger.info("handleRunRequest called", {
-      requestId: payload.requestId,
-      projectId: payload.projectId,
-    });
-
-    const handler = this.onRunRequestStream || this.onRunRequest;
-    if (!handler) {
-      this.sendError(
-        payload.requestId,
-        "NO_HANDLER",
-        "No run request handler configured",
-      );
-      return;
-    }
-
-    try {
-      if (this.onRunRequestStream) {
-        logger.info("Using stream handler for run request", {
-          requestId: payload.requestId,
-        });
-        let chunkCount = 0;
-        const onChunk = (chunk: RunStreamChunkPayload) => {
-          chunkCount++;
-          logger.info(
-            `Streaming chunk #${chunkCount} for request ${payload.requestId}`,
-            {
-              type: chunk.type,
-              contentLength: chunk.chunk.length,
-            },
-          );
-          this.emit("run_stream_chunk", {
-            ...chunk,
-            requestId: payload.requestId,
-            projectId: payload.projectId,
-          });
-        };
-
-        const response = await this.onRunRequestStream(payload, onChunk);
-        logger.info(
-          `Run request ${payload.requestId} completed with ${chunkCount} chunks`,
-          {
-            success: response.success,
-          },
-        );
-        this.emit("run_response", response);
-      } else if (this.onRunRequest) {
-        const response = await this.onRunRequest(payload);
-        this.emit("run_response", response);
-      }
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      this.sendError(payload.requestId, "RUN_ERROR", errMsg);
-    }
   }
 
   private async handleSessionAbort(
@@ -527,18 +626,7 @@ export class ChatServerClient {
     payload: { requestId: string } & ProjectsListRequestPayload,
   ): Promise<void> {
     try {
-      const projects = (await opencodeCatalogService.listProjects()).map(
-        (project) => ({
-          id: project.id,
-          name: project.name,
-          description: project.description,
-          folder: project.folder,
-          localServerId: LOCAL_SERVER_ID,
-          createdAt: project.createdAt,
-          updatedAt: project.updatedAt,
-        }),
-      );
-
+      const projects = await opencodeCatalogService.listProjects();
       this.emit("projects_list_response", {
         requestId: payload.requestId,
         projects,
@@ -558,17 +646,7 @@ export class ChatServerClient {
       );
       this.emit("project_get_response", {
         requestId: payload.requestId,
-        project: project
-          ? {
-              id: project.id,
-              name: project.name,
-              description: project.description,
-              folder: project.folder,
-              localServerId: LOCAL_SERVER_ID,
-              createdAt: project.createdAt,
-              updatedAt: project.updatedAt,
-            }
-          : null,
+        project: project,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -654,22 +732,7 @@ export class ChatServerClient {
 
       this.emit("sessions_list_response", {
         requestId: payload.requestId,
-        sessions: sessions.map((session) => ({
-          id: session.id,
-          projectId: session.projectId,
-          userId: null,
-          status: session.status,
-          prompt: session.prompt,
-          output: session.output,
-          error: session.error,
-          exitCode: session.exitCode,
-          duration: session.duration,
-          sessionId: session.sessionId,
-          createdAt: session.createdAt,
-          updatedAt: session.updatedAt,
-          startedAt: session.startedAt,
-          completedAt: session.completedAt,
-        })),
+        sessions: sessions,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -686,24 +749,7 @@ export class ChatServerClient {
       );
       this.emit("session_get_response", {
         requestId: payload.requestId,
-        session: session
-          ? {
-              id: session.id,
-              projectId: session.projectId,
-              userId: null,
-              status: session.status,
-              prompt: session.prompt,
-              output: session.output,
-              error: session.error,
-              exitCode: session.exitCode,
-              duration: session.duration,
-              sessionId: session.sessionId,
-              createdAt: session.createdAt,
-              updatedAt: session.updatedAt,
-              startedAt: session.startedAt,
-              completedAt: session.completedAt,
-            }
-          : null,
+        session: session,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -729,22 +775,7 @@ export class ChatServerClient {
 
       this.emit("session_create_response", {
         requestId: payload.requestId,
-        session: {
-          id: session.id,
-          projectId: session.projectId,
-          status: session.status,
-          prompt: session.prompt,
-          output: session.output,
-          error: session.error,
-          exitCode: session.exitCode,
-          duration: session.duration,
-          sessionId: session.sessionId,
-          userId: payload.userId || null,
-          createdAt: session.createdAt,
-          updatedAt: session.updatedAt,
-          startedAt: session.startedAt,
-          completedAt: session.completedAt,
-        },
+        session,
         requestId_data: payload.requestId,
       });
     } catch (error) {
@@ -764,27 +795,30 @@ export class ChatServerClient {
 
       this.emit("session_messages_response", {
         requestId: payload.requestId,
-        messages: messages.map(
-          (message): MessagePayload => ({
-            id: message.id,
-            sessionId: message.sessionId,
-            role: message.role,
-            content: message.content,
-            visibleContent: message.visibleContent,
-            thinkingContent: message.thinkingContent,
-            thinkingDurationSeconds: message.thinkingDurationSeconds,
-            parts: message.parts.map((part) => ({
-              type: part.type,
-              content: part.content,
-              durationSeconds: part.durationSeconds,
-            })),
-            createdAt: message.createdAt,
-          }),
-        ),
+        messages,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.sendError(payload.requestId, "SESSION_MESSAGES_ERROR", errMsg);
+    }
+  }
+
+  private async handleSessionDiffRequest(
+    payload: { requestId: string } & SessionDiffRequestPayload,
+  ): Promise<void> {
+    try {
+      const diff = await opencodeCatalogService.getSessionDiff(
+        payload.sessionId,
+        payload.messageId,
+      );
+
+      this.emit("session_diff_response", {
+        requestId: payload.requestId,
+        diff,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.sendError(payload.requestId, "SESSION_DIFF_ERROR", errMsg);
     }
   }
 
@@ -798,24 +832,7 @@ export class ChatServerClient {
 
       this.emit("session_update_response", {
         requestId: payload.requestId,
-        session: session
-          ? {
-              id: session.id,
-              projectId: session.projectId,
-              userId: null,
-              status: session.status,
-              prompt: session.prompt,
-              output: session.output,
-              error: session.error,
-              exitCode: session.exitCode,
-              duration: session.duration,
-              sessionId: session.sessionId,
-              createdAt: session.createdAt,
-              updatedAt: session.updatedAt,
-              startedAt: session.startedAt,
-              completedAt: session.completedAt,
-            }
-          : null,
+        session,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -827,10 +844,34 @@ export class ChatServerClient {
     payload: { requestId: string } & ProvidersListRequestPayload,
   ): Promise<void> {
     try {
-      const providers = await opencodeCatalogService.listProviders();
+      const opencodeProviders = await opencodeCatalogService.listProviders();
+
+      // Filter to only configured providers (env, config, custom sources have credentials)
+      const configuredProviders = (opencodeProviders ?? []).filter(
+        (provider) =>
+          provider.source === "env" ||
+          provider.source === "config" ||
+          provider.source === "custom",
+      );
+
+      // Convert OpenCode providers (models as object) to relay format (models as array)
+      const providers = configuredProviders.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        models: Object.values(provider.models).map((model) => ({
+          id: model.id,
+          name: model.name,
+        })),
+      }));
+
+      // Deduplicate providers by ID
+      const uniqueProviders = Array.from(
+        new Map(providers.map((provider) => [provider.id, provider])).values(),
+      );
+
       this.emit("providers_list_response", {
         requestId: payload.requestId,
-        providers,
+        providers: uniqueProviders,
       });
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -856,7 +897,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.getFileStatusLists();
 
       this.emit("git_staged_files_response", {
@@ -906,7 +947,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.addFiles(payload.files);
 
       this.emit("git_stage_files_response", {
@@ -949,7 +990,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.unstageFiles(payload.files);
 
       this.emit("git_unstage_files_response", {
@@ -991,7 +1032,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.diffFile(payload.filePath);
 
       this.emit("git_file_diff_response", {
@@ -1036,7 +1077,7 @@ export class ChatServerClient {
         return;
       }
 
-      const gitService = new GitService(project.folder);
+      const gitService = new GitService(project.worktree);
       const result = await gitService.discardChanges([payload.filePath]);
 
       this.emit("git_discard_file_response", {
@@ -1057,6 +1098,375 @@ export class ChatServerClient {
         success: false,
         error: errMsg,
       });
+    }
+  }
+
+  // Message Queue Handlers
+
+  private rowToQueuePayload(
+    row: typeof messageQueue.$inferSelect,
+  ): QueueItemPayload {
+    return {
+      id: row.id,
+      projectId: row.projectId,
+      prompt: row.prompt,
+      status: row.status as QueueItemPayload["status"],
+      sessionId: row.sessionId,
+      error: row.error,
+      position: row.position,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      startedAt: row.startedAt ? row.startedAt.toISOString() : null,
+      completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+    };
+  }
+
+  private async handleMessageQueueListRequest(
+    payload: { requestId: string } & MessageQueueListRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+      const rows = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.projectId, payload.projectId))
+        .orderBy(messageQueue.position);
+
+      const items = rows.map((row) => this.rowToQueuePayload(row));
+
+      this.emit("message_queue_list_response", {
+        requestId: payload.requestId,
+        items,
+      } satisfies MessageQueueListResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to list message queue", { error: errMsg });
+      this.emit("message_queue_list_response", {
+        requestId: payload.requestId,
+        items: [],
+      });
+    }
+  }
+
+  private async handleMessageQueueAddRequest(
+    payload: { requestId: string } & MessageQueueAddRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+      const id = randomUUID();
+      const now = new Date();
+
+      const maxResult = await db
+        .select({ maxPos: max(messageQueue.position) })
+        .from(messageQueue)
+        .where(eq(messageQueue.projectId, payload.projectId));
+
+      const nextPosition = (maxResult[0]?.maxPos ?? -1) + 1;
+
+      await db.insert(messageQueue).values({
+        id,
+        projectId: payload.projectId,
+        prompt: payload.prompt.trim(),
+        status: "pending",
+        position: nextPosition,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const row = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, id))
+        .get();
+
+      if (!row) {
+        throw new Error("Failed to retrieve created queue item");
+      }
+
+      this.emit("message_queue_add_response", {
+        requestId: payload.requestId,
+        item: this.rowToQueuePayload(row),
+      } satisfies MessageQueueAddResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to add queue item", { error: errMsg });
+      this.emit("message_queue_add_response", {
+        requestId: payload.requestId,
+        item: null as unknown as QueueItemPayload,
+        error: errMsg,
+      });
+    }
+  }
+
+  private async handleMessageQueueRemoveRequest(
+    payload: { requestId: string } & MessageQueueRemoveRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+
+      const existing = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId))
+        .get();
+
+      if (!existing) {
+        this.emit("message_queue_remove_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Queue item not found",
+        } satisfies MessageQueueRemoveResponsePayload);
+        return;
+      }
+
+      if (existing.status === "running") {
+        this.emit("message_queue_remove_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Cannot delete a running queue item",
+        } satisfies MessageQueueRemoveResponsePayload);
+        return;
+      }
+
+      await db
+        .delete(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId));
+
+      this.emit("message_queue_remove_response", {
+        requestId: payload.requestId,
+        success: true,
+      } satisfies MessageQueueRemoveResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to remove queue item", { error: errMsg });
+      this.emit("message_queue_remove_response", {
+        requestId: payload.requestId,
+        success: false,
+        error: errMsg,
+      } satisfies MessageQueueRemoveResponsePayload);
+    }
+  }
+
+  private async handleMessageQueueUpdateRequest(
+    payload: { requestId: string } & MessageQueueUpdateRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+
+      const existing = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId))
+        .get();
+
+      if (!existing) {
+        this.emit("message_queue_update_response", {
+          requestId: payload.requestId,
+          item: null,
+          error: "Queue item not found",
+        } satisfies MessageQueueUpdateResponsePayload);
+        return;
+      }
+
+      if (existing.status === "running") {
+        this.emit("message_queue_update_response", {
+          requestId: payload.requestId,
+          item: null,
+          error: "Cannot update a running queue item",
+        } satisfies MessageQueueUpdateResponsePayload);
+        return;
+      }
+
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (payload.prompt !== undefined) updates.prompt = payload.prompt.trim();
+      if (payload.position !== undefined) updates.position = payload.position;
+
+      await db
+        .update(messageQueue)
+        .set(updates)
+        .where(eq(messageQueue.id, payload.queueItemId));
+
+      const updated = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId))
+        .get();
+
+      this.emit("message_queue_update_response", {
+        requestId: payload.requestId,
+        item: updated ? this.rowToQueuePayload(updated) : null,
+      } satisfies MessageQueueUpdateResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to update queue item", { error: errMsg });
+      this.emit("message_queue_update_response", {
+        requestId: payload.requestId,
+        item: null,
+        error: errMsg,
+      } satisfies MessageQueueUpdateResponsePayload);
+    }
+  }
+
+  private async handleMessageQueueExecuteRequest(
+    payload: { requestId: string } & MessageQueueExecuteRequestPayload,
+  ): Promise<void> {
+    try {
+      const db = getDb();
+
+      const queueItem = await db
+        .select()
+        .from(messageQueue)
+        .where(eq(messageQueue.id, payload.queueItemId))
+        .get();
+
+      if (!queueItem) {
+        this.emit("message_queue_execute_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Queue item not found",
+        } satisfies MessageQueueExecuteResponsePayload);
+        return;
+      }
+
+      if (queueItem.status === "running") {
+        this.emit("message_queue_execute_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Queue item is already running",
+        } satisfies MessageQueueExecuteResponsePayload);
+        return;
+      }
+
+      const project = await opencodeCatalogService.getProject(
+        payload.projectId,
+      );
+
+      if (!project) {
+        this.emit("message_queue_execute_response", {
+          requestId: payload.requestId,
+          success: false,
+          error: "Project not found",
+        } satisfies MessageQueueExecuteResponsePayload);
+        return;
+      }
+
+      // Create new session if needed
+      let sessionId = payload.sessionId;
+      if (payload.createNewSession || !sessionId) {
+        const newSession = await opencodeCatalogService.createSession(
+          payload.projectId,
+        );
+        if (!newSession) {
+          this.emit("message_queue_execute_response", {
+            requestId: payload.requestId,
+            success: false,
+            error: "Failed to create session",
+          } satisfies MessageQueueExecuteResponsePayload);
+          return;
+        }
+        sessionId = newSession.id;
+      }
+
+      // Update queue item to running
+      await db
+        .update(messageQueue)
+        .set({
+          status: "running",
+          sessionId,
+          startedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(messageQueue.id, payload.queueItemId));
+
+      this.emit("message_queue_execute_response", {
+        requestId: payload.requestId,
+        success: true,
+        sessionId,
+      } satisfies MessageQueueExecuteResponsePayload);
+
+      // Execute the prompt via streaming
+      const executionRequestId = randomUUID();
+
+      this.emit("session_prompt_started", {
+        requestId: executionRequestId,
+        projectId: payload.projectId,
+        sessionId,
+      } satisfies SessionPromptStartedPayload);
+
+      const streamCallback: (chunk: {
+        messageId?: string;
+        content: string;
+        type: string;
+        isComplete?: boolean;
+      }) => void = (sdkChunk) => {
+        this.emit("session_stream_chunk", {
+          requestId: executionRequestId,
+          projectId: payload.projectId,
+          sessionId,
+          messageId: sdkChunk.messageId,
+          chunk: sdkChunk.content,
+          type: sdkChunk.type as SessionStreamChunkPayload["type"],
+          isComplete: sdkChunk.isComplete,
+        } satisfies SessionStreamChunkPayload);
+      };
+
+      const result = await runOpenCodeStream(
+        queueItem.prompt,
+        project.worktree,
+        streamCallback,
+        sessionId,
+      );
+
+      // Update queue item based on result
+      const finalStatus = result.success ? "completed" : "failed";
+      await db
+        .update(messageQueue)
+        .set({
+          status: finalStatus,
+          error: result.error || null,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(messageQueue.id, payload.queueItemId));
+
+      this.emit("session_prompt_response", {
+        requestId: executionRequestId,
+        projectId: payload.projectId,
+        sessionId,
+        success: result.success,
+        output: result.output,
+        error: result.error,
+        exitCode: result.exitCode,
+        duration: result.duration,
+      } satisfies SessionPromptResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to execute queue item", {
+        error: errMsg,
+        queueItemId: payload.queueItemId,
+      });
+
+      // Update queue item to failed
+      try {
+        const db = getDb();
+        await db
+          .update(messageQueue)
+          .set({
+            status: "failed",
+            error: errMsg,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(messageQueue.id, payload.queueItemId));
+      } catch {
+        // Ignore DB update error
+      }
+
+      this.emit("message_queue_execute_response", {
+        requestId: payload.requestId,
+        success: false,
+        error: errMsg,
+      } satisfies MessageQueueExecuteResponsePayload);
     }
   }
 }

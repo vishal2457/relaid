@@ -6,10 +6,10 @@ import * as fs from "fs";
 import * as os from "os";
 import * as https from "https";
 
-const GITHUB_REPO = "vishal2457/maximus-bot";
+const GITHUB_REPO = "vishal2457/relaid";
 const GITHUB_BRANCH = "main";
 
-const cli = cac("maximus-bot");
+const cli = cac("relaid");
 
 async function downloadAndExtractZip(
   url: string,
@@ -207,7 +207,7 @@ cli
     const port = parseInt(options.port, 10);
 
     console.log("╔════════════════════════════════════════╗");
-    console.log("║         Maximus Bot Starting...        ║");
+    console.log("║     Starting Relaid Local server...    ║");
     console.log("╚════════════════════════════════════════╝\n");
 
     if (options.env) {

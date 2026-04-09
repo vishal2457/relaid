@@ -48,6 +48,7 @@ router.get("/", async (req: Request, res: Response) => {
       (result) => result.response.providers || [],
     );
 
+    // Deduplicate providers by ID
     const uniqueProviders = Array.from(
       new Map(providers.map((provider) => [provider.id, provider])).values(),
     );

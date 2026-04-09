@@ -1,3 +1,12 @@
+import type { Project, Session, Message } from "@opencode-ai/sdk/v2" with {
+  "resolution-mode": "import",
+};
+import type { FileDiff } from "@opencode-ai/sdk/v2" with {
+  "resolution-mode": "import",
+};
+
+export type { Project, Session, Message };
+
 export interface OpenCodeResult {
   success: boolean;
   output: string;
@@ -45,6 +54,8 @@ export type ChatServerEventType =
   | "sessions_list_response"
   | "session_get_request"
   | "session_get_response"
+  | "session_diff_request"
+  | "session_diff_response"
   | "session_messages_request"
   | "session_messages_response"
   | "session_create_request"
@@ -258,6 +269,12 @@ export type SessionsListResponsePayload = { sessions: SessionPayload[] };
 export type SessionGetRequestPayload = { sessionId: string };
 export type SessionGetResponsePayload = { session: SessionPayload | null };
 
+export type SessionDiffRequestPayload = {
+  sessionId: string;
+  messageId?: string;
+};
+export type SessionDiffResponsePayload = { diff: FileDiff[] };
+
 export type SessionMessagesRequestPayload = {
   sessionId: string;
   limit?: number;
@@ -299,3 +316,116 @@ export interface ProviderPayload {
 
 export type ProvidersListRequestPayload = Record<string, never>;
 export type ProvidersListResponsePayload = { providers: ProviderPayload[] };
+
+export type PermissionReply = "once" | "always" | "reject";
+
+export interface PermissionRequestPayload {
+  requestId: string;
+  projectId: string;
+  sessionId: string;
+  jobId: string;
+  threadId: string;
+  permission: string;
+  patterns: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface PermissionResponsePayload {
+  requestId: string;
+  sessionId: string;
+  jobId: string;
+  reply: PermissionReply;
+}
+
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface QuestionPayload {
+  header: string;
+  question: string;
+  options: QuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface QuestionRequestPayload {
+  requestId: string;
+  projectId: string;
+  sessionId: string;
+  jobId: string;
+  threadId: string;
+  questions: QuestionPayload[];
+}
+
+export interface QuestionResponsePayload {
+  requestId: string;
+  sessionId: string;
+  jobId: string;
+  answers: string[][];
+}
+
+// Message Queue types
+
+export interface QueueItemPayload {
+  id: string;
+  projectId: string;
+  prompt: string;
+  status: "pending" | "running" | "completed" | "failed" | "aborted";
+  sessionId: string | null;
+  error: string | null;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export type MessageQueueListRequestPayload = { projectId: string };
+export type MessageQueueListResponsePayload = {
+  requestId: string;
+  items: QueueItemPayload[];
+};
+
+export type MessageQueueAddRequestPayload = {
+  projectId: string;
+  prompt: string;
+};
+export type MessageQueueAddResponsePayload = {
+  requestId: string;
+  item: QueueItemPayload;
+};
+
+export type MessageQueueRemoveRequestPayload = {
+  queueItemId: string;
+};
+export type MessageQueueRemoveResponsePayload = {
+  requestId: string;
+  success: boolean;
+  error?: string;
+};
+
+export type MessageQueueUpdateRequestPayload = {
+  queueItemId: string;
+  prompt?: string;
+  position?: number;
+};
+export type MessageQueueUpdateResponsePayload = {
+  requestId: string;
+  item: QueueItemPayload | null;
+  error?: string;
+};
+
+export type MessageQueueExecuteRequestPayload = {
+  queueItemId: string;
+  sessionId?: string;
+  createNewSession?: boolean;
+  projectId: string;
+};
+export type MessageQueueExecuteResponsePayload = {
+  requestId: string;
+  success: boolean;
+  sessionId?: string;
+  error?: string;
+};

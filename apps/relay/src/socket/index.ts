@@ -30,6 +30,10 @@ import type {
   SessionPromptRequestEvent,
   SessionPromptResponseEvent,
   SessionPayload,
+  PermissionRequestEvent,
+  PermissionResponseEvent,
+  QuestionRequestEvent,
+  QuestionResponseEvent,
 } from "../shared/types";
 import {
   emitRequestToServer,
@@ -39,6 +43,12 @@ import {
   resolvePendingRequest,
   unregisterLocalServerSocket,
 } from "./request-broker";
+import { broadcastToUser } from "../services/sse-bus";
+import {
+  bufferInteraction,
+  clearBufferedInteraction,
+  deliverBufferedInteractions,
+} from "../services/interaction-buffer";
 
 export interface SocketData {
   userId: string;
@@ -115,6 +125,7 @@ export function createSocketServer(httpServer: HttpServer): Server {
       methods: ["GET", "POST"],
     },
     path: "/socket",
+    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB to handle large provider/session lists
   });
 
   io.use(async (socket, next) => {
@@ -206,10 +217,16 @@ async function handleConnection(io: Server, socket: Socket): Promise<void> {
     if (type === "local_server") {
       unregisterLocalServerSocket(serverId, socket.id);
       await updateServerConnectionStatus(serverId, false);
-      io.to(`user:${userId}`).emit("local_server_disconnected", {
-        serverId,
+      const localServerDisconnectedPayload = { serverId, userId };
+      io.to(`user:${userId}`).emit(
+        "local_server_disconnected",
+        localServerDisconnectedPayload,
+      );
+      broadcastToUser(
         userId,
-      });
+        "local_server_disconnected",
+        localServerDisconnectedPayload,
+      );
     }
   });
 }
@@ -224,7 +241,16 @@ async function handleLocalServerConnection(
   registerLocalServerSocket(serverId, socket);
   await updateServerConnectionStatus(serverId, true);
 
-  io.to(`user:${userId}`).emit("local_server_connected", { serverId, userId });
+  const localServerConnectedPayload = { serverId, userId };
+  io.to(`user:${userId}`).emit(
+    "local_server_connected",
+    localServerConnectedPayload,
+  );
+  broadcastToUser(
+    userId,
+    "local_server_connected",
+    localServerConnectedPayload,
+  );
   logger.info("Local server registered", { userId, serverId });
 
   const pipeResponse = (eventName: string) => {
@@ -245,6 +271,7 @@ async function handleLocalServerConnection(
       }
       resolvePendingRequest(eventName, payload);
       io.to(`user:${userId}`).emit(eventName, payload);
+      broadcastToUser(userId, eventName, payload);
 
       if (eventName === "session_prompt_response") {
         const responsePayload = payload as SessionPromptResponseEvent;
@@ -301,18 +328,82 @@ async function handleLocalServerConnection(
   pipeResponse("git_unstage_files_response");
   pipeResponse("git_file_diff_response");
   pipeResponse("git_discard_file_response");
+  pipeResponse("message_queue_list_response");
+  pipeResponse("message_queue_add_response");
+  pipeResponse("message_queue_remove_response");
+  pipeResponse("message_queue_update_response");
+  pipeResponse("message_queue_execute_response");
+
+  socket.on("permission_request", (payload: PermissionRequestEvent) => {
+    logger.info("Forwarding permission_request to mobile", {
+      userId,
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      permission: payload.permission,
+      projectId: payload.projectId,
+    });
+    resolvePendingRequest("permission_request", payload);
+    bufferInteraction(userId, "permission_request", payload);
+    io.to(`user:${userId}`).emit("permission_request", payload);
+    broadcastToUser(
+      userId,
+      "permission_request",
+      payload as unknown as Record<string, unknown>,
+    );
+
+    const permissionType = payload.permission;
+    const patternsPreview = payload.patterns.slice(0, 2).join(", ");
+    const body = `Permission: ${permissionType}${patternsPreview ? ` (${patternsPreview})` : ""}`;
+    void sendPushNotification(userId, "Permission Required", body, {
+      type: "permission_request",
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      jobId: payload.jobId,
+      permission: payload.permission,
+    });
+  });
+
+  socket.on("question_request", (payload: QuestionRequestEvent) => {
+    logger.info("Forwarding question_request to mobile", {
+      userId,
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      questionCount: payload.questions.length,
+    });
+    resolvePendingRequest("question_request", payload);
+    bufferInteraction(userId, "question_request", payload);
+    io.to(`user:${userId}`).emit("question_request", payload);
+    broadcastToUser(
+      userId,
+      "question_request",
+      payload as unknown as Record<string, unknown>,
+    );
+
+    const firstQuestion = payload.questions[0];
+    const body = firstQuestion?.question.slice(0, 100) || "Question required";
+    void sendPushNotification(userId, "Question Required", body, {
+      type: "question_request",
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      jobId: payload.jobId,
+    });
+  });
 
   socket.on(
     "error_response",
     (payload: { requestId: string; code: string; message: string }) => {
       rejectPendingRequest(payload);
       io.to(`user:${userId}`).emit("error_response", payload);
+      broadcastToUser(userId, "error_response", payload);
     },
   );
 }
 
 function handleMobileConnection(socket: Socket, userId: string): void {
   logger.info("Mobile client registered", { userId });
+  deliverBufferedInteractions(userId, (event, payload) =>
+    socket.emit(event, payload),
+  );
 
   socket.on(
     "register_push_token",
@@ -400,6 +491,9 @@ function handleMobileConnection(socket: Socket, userId: string): void {
         return;
       }
 
+      const session = sessionResult.response.session as Record<string, unknown>;
+      const projectId = session.projectID ?? session.projectId;
+
       const response = await emitRequestToServer<SessionAbortedEvent>(
         sessionResult.serverId,
         "session_abort",
@@ -407,7 +501,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
         {
           requestId: data.requestId,
           sessionId: data.sessionId,
-          projectId: sessionResult.response.session.projectId,
+          projectId: projectId as string,
         },
       );
 
@@ -666,12 +760,16 @@ function handleMobileConnection(socket: Socket, userId: string): void {
 
         const sessions = results
           .flatMap((result) => result.response.sessions || [])
-          .filter((session) =>
-            data.projectId ? session.projectId === data.projectId : true,
-          )
-          .filter((session) =>
-            data.status ? session.status === data.status : true,
-          );
+          .filter((session) => {
+            const sessionProjectId =
+              (session as Record<string, unknown>).projectID ??
+              (session as Record<string, unknown>).projectId;
+            return data.projectId ? sessionProjectId === data.projectId : true;
+          })
+          .filter((session) => {
+            const sessionStatus = (session as Record<string, unknown>).status;
+            return data.status ? sessionStatus === data.status : true;
+          });
 
         socket.emit("sessions_list_response", {
           requestId: data.requestId,
@@ -945,6 +1043,87 @@ function handleMobileConnection(socket: Socket, userId: string): void {
         { providers: [] },
         error,
       );
+    }
+  });
+
+  socket.on("permission_response", async (data: PermissionResponseEvent) => {
+    clearBufferedInteraction(data.requestId);
+    try {
+      const sessionResult = await requestUntilMatch<SessionResponse>(
+        userId,
+        "session_get_request",
+        "session_get_response",
+        { sessionId: data.sessionId },
+        (response) => Boolean(response.session),
+      );
+
+      if (!sessionResult?.response.session) {
+        logger.warn("Session not found for permission_response", {
+          sessionId: data.sessionId,
+          requestId: data.requestId,
+        });
+        return;
+      }
+
+      await emitRequestToServer<void>(
+        sessionResult.serverId,
+        "permission_response",
+        "permission_response",
+        data,
+      );
+
+      logger.info("Permission response forwarded to local server", {
+        sessionId: data.sessionId,
+        jobId: data.jobId,
+        reply: data.reply,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to forward permission_response", {
+        sessionId: data.sessionId,
+        requestId: data.requestId,
+        error: errMsg,
+      });
+    }
+  });
+
+  socket.on("question_response", async (data: QuestionResponseEvent) => {
+    clearBufferedInteraction(data.requestId);
+    try {
+      const sessionResult = await requestUntilMatch<SessionResponse>(
+        userId,
+        "session_get_request",
+        "session_get_response",
+        { sessionId: data.sessionId },
+        (response) => Boolean(response.session),
+      );
+
+      if (!sessionResult?.response.session) {
+        logger.warn("Session not found for question_response", {
+          sessionId: data.sessionId,
+          requestId: data.requestId,
+        });
+        return;
+      }
+
+      await emitRequestToServer<void>(
+        sessionResult.serverId,
+        "question_response",
+        "question_response",
+        data,
+      );
+
+      logger.info("Question response forwarded to local server", {
+        sessionId: data.sessionId,
+        jobId: data.jobId,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to forward question_response", {
+        sessionId: data.sessionId,
+        requestId: data.requestId,
+        error: errMsg,
+      });
     }
   });
 }

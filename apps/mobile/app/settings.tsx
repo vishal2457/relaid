@@ -23,7 +23,7 @@ import {
   DEFAULT_SERVER_URL,
 } from "@/components/ServerUrlContext";
 import { usePairingSession } from "@/components/PairingSessionContext";
-import { disconnectChatSocket } from "@/lib/socket/chat";
+import { disconnectSseClient } from "@/lib/sse";
 import { updateBaseUrl } from "@/lib/axios/base";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useAppTheme } from "@/components/ThemeContext";
@@ -35,6 +35,9 @@ export default function SettingsScreen() {
   const { selectedTheme, setSelectedTheme } = useAppTheme();
   const [urlInput, setUrlInput] = useState(serverUrl);
   const [saved, setSaved] = useState(false);
+  const [pingStatus, setPingStatus] = useState<
+    "idle" | "pinging" | "success" | "error"
+  >("idle");
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, "");
@@ -42,7 +45,7 @@ export default function SettingsScreen() {
 
     await setServerUrl(trimmed);
     updateBaseUrl(trimmed);
-    disconnectChatSocket();
+    disconnectSseClient();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }, [urlInput, setServerUrl]);
@@ -50,6 +53,31 @@ export default function SettingsScreen() {
   const handleReset = useCallback(() => {
     setUrlInput(DEFAULT_SERVER_URL);
   }, []);
+
+  const handlePing = useCallback(async () => {
+    const trimmed = urlInput.trim().replace(/\/+$/, "");
+    if (!trimmed) return;
+
+    setPingStatus("pinging");
+    let timeoutId: ReturnType<typeof setTimeout>;
+    try {
+      const controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`${trimmed}/health`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (response.ok) {
+        const data = (await response.json()) as { status?: string };
+        setPingStatus(data.status === "ok" ? "success" : "error");
+      } else {
+        setPingStatus("error");
+      }
+    } catch {
+      setPingStatus("error");
+    }
+    timeoutId = setTimeout(() => setPingStatus("idle"), 3000);
+  }, [urlInput]);
 
   const handleForgetDevice = useCallback(async () => {
     await clearSession();
@@ -151,14 +179,42 @@ export default function SettingsScreen() {
                   keyboardType="url"
                   style={styles.input}
                   outlineStyle={styles.inputOutline}
-                  right={
-                    urlInput !== DEFAULT_SERVER_URL ? (
-                      <TextInput.Icon icon="refresh" onPress={handleReset} />
-                    ) : undefined
-                  }
                 />
 
                 <View style={styles.buttonRow}>
+                  {urlInput !== DEFAULT_SERVER_URL && (
+                    <Button
+                      mode="outlined"
+                      onPress={handleReset}
+                      style={styles.pingButton}
+                      icon="refresh"
+                    >
+                      Reset
+                    </Button>
+                  )}
+                  <Button
+                    mode="outlined"
+                    onPress={handlePing}
+                    disabled={!urlInput.trim() || pingStatus === "pinging"}
+                    style={styles.pingButton}
+                    icon={
+                      pingStatus === "pinging"
+                        ? "loading"
+                        : pingStatus === "success"
+                          ? "check"
+                          : pingStatus === "error"
+                            ? "close"
+                            : "access-point"
+                    }
+                  >
+                    {pingStatus === "pinging"
+                      ? "Pinging..."
+                      : pingStatus === "success"
+                        ? "Connected"
+                        : pingStatus === "error"
+                          ? "Failed"
+                          : "Ping"}
+                  </Button>
                   <Button
                     mode="contained"
                     onPress={handleSave}
@@ -235,7 +291,13 @@ const styles = StyleSheet.create({
   },
   buttonRow: {
     marginTop: 12,
-    alignItems: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  pingButton: {
+    borderRadius: 8,
   },
   saveButton: {
     borderRadius: 8,

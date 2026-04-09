@@ -1,78 +1,28 @@
+import type {
+  FileDiff,
+  OpencodeClient,
+  ServerOptions,
+  Session
+} from "@opencode-ai/sdk/v2" with {
+  "resolution-mode": "import"
+  };
+import { existsSync, statSync } from "fs";
 import { createServer } from "net";
 import { resolve } from "path";
-import { existsSync, statSync } from "fs";
+import { logger } from "../shared/logger";
 import {
   BaseCodingSdk,
+  CodingSdkInteractionHandler,
   CodingSdkOptions,
   CodingSdkResult,
-  CodingSdkInteractionHandler,
   RunOptions,
 } from "./base-sdk";
-import type { OpencodeClient, ServerOptions } from "@opencode-ai/sdk/v2" with {
-  "resolution-mode": "import",
-};
-import { logger } from "../shared/logger";
 
-// Re-export the types from base-sdk for compatibility
 export type {
-  CodingSdkOptions,
-  CodingSdkResult,
-  CodingSdkInteractionHandler,
-  RunOptions,
+  CodingSdkInteractionHandler, CodingSdkOptions,
+  CodingSdkResult, RunOptions
 };
 
-export type OpencodeProjectRecord = {
-  id: string;
-  worktree: string;
-  name?: string;
-  time?: {
-    created?: number;
-    updated?: number;
-  };
-};
-
-export type OpencodeSessionRecord = {
-  id: string;
-  projectID: string;
-  directory: string;
-  title: string;
-  parentID?: string;
-  time?: {
-    created?: number;
-    updated?: number;
-    archived?: number;
-  };
-  status?: "pending" | "running" | "completed";
-};
-
-export type OpencodeMessageRecord = {
-  id: string;
-  sessionId: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  visibleContent: string;
-  thinkingContent: string | null;
-  thinkingDurationSeconds: number | null;
-  parts: OpencodeMessagePartRecord[];
-  createdAt: string;
-};
-
-export type OpencodeMessagePartRecord = {
-  type: "text" | "reasoning" | "tool" | "step" | "other";
-  content: string;
-  durationSeconds: number | null;
-};
-
-export type OpencodeProviderModelRecord = {
-  id: string;
-  name: string;
-};
-
-export type OpencodeProviderRecord = {
-  id: string;
-  name: string;
-  models: OpencodeProviderModelRecord[];
-};
 
 export type StreamChunk = {
   type: "text" | "reasoning" | "tool" | "step" | "status" | "complete";
@@ -80,7 +30,6 @@ export type StreamChunk = {
   messageId?: string;
   isComplete?: boolean;
 };
-
 export type StreamCallback = (chunk: StreamChunk) => void;
 
 // We'll reuse the existing logic from open-code-runner.ts by adapting it
@@ -207,6 +156,8 @@ class OpencodeSdk extends BaseCodingSdk {
   }> {
     if (this.runtime) {
       const healthy = await this.checkRuntimeHealth(this.runtime);
+      console.log(healthy, "healthy");
+      
       if (healthy) {
         logger.debug("Reusing existing OpenCode SDK server");
         return this.runtime;
@@ -757,9 +708,7 @@ class OpencodeSdk extends BaseCodingSdk {
     return sessionResult.data.id;
   }
 
-  async createSession(
-    directory: string,
-  ): Promise<OpencodeSessionRecord | null> {
+  async createSession(directory: string): Promise<Session | null> {
     try {
       const resolvedDir = this.resolveWorkingDir(directory);
       if (!resolvedDir.ok) {
@@ -954,7 +903,7 @@ class OpencodeSdk extends BaseCodingSdk {
     let pendingFetch = false;
     let sawPartDelta = false;
     const assistantMessageIds = new Set<string>();
-    const partTypeById = new Map<string, StreamChunk["type"]>();
+    const partTypeById = new Map<string, string>();
 
     const fetchAndStreamMessage = async () => {
       if (!latestAssistantMessageId || pendingFetch || sawPartDelta) return;
@@ -1120,7 +1069,7 @@ class OpencodeSdk extends BaseCodingSdk {
         }
 
         onChunk({
-          type: partType,
+          type: partType as StreamChunk["type"],
           content: delta,
           messageId,
         });
@@ -1406,9 +1355,7 @@ class OpencodeSdk extends BaseCodingSdk {
     return lines.join("\n").trim();
   }
 
-  private toStreamChunkTypeFromPartType(
-    partType: string,
-  ): StreamChunk["type"] | null {
+  private toStreamChunkTypeFromPartType(partType: string): string | null {
     if (partType === "text") {
       return "text";
     }
@@ -1428,9 +1375,7 @@ class OpencodeSdk extends BaseCodingSdk {
     return null;
   }
 
-  private toStreamChunkTypeFromDeltaField(
-    field: string,
-  ): StreamChunk["type"] | null {
+  private toStreamChunkTypeFromDeltaField(field: string): string | null {
     if (field === "text") {
       return "text";
     }
@@ -1806,23 +1751,16 @@ class OpencodeSdk extends BaseCodingSdk {
     await this.resetRuntime();
   }
 
-  async listProjects(): Promise<OpencodeProjectRecord[]> {
+  async listProjects() {
     try {
       const opencode = await this.getRuntime();
-      const result = (await opencode.client.project.list()) as {
-        data?: unknown;
-        error?: unknown;
-      };
+      const result = await opencode.client.project.list()
 
       if (result.error) {
         throw new Error(this.formatUnknownError(result.error));
       }
 
-      if (!Array.isArray(result.data)) {
-        return [];
-      }
-
-      return result.data as OpencodeProjectRecord[];
+      return result.data;
     } catch (error) {
       const errMsg = this.formatUnknownError(error);
       logger.error("Failed to list OpenCode projects", { error: errMsg });
@@ -1830,203 +1768,12 @@ class OpencodeSdk extends BaseCodingSdk {
     }
   }
 
-  async getProject(projectId: string): Promise<OpencodeProjectRecord | null> {
+  async getProject(projectId: string) {
     const projects = await this.listProjects();
-    return projects.find((project) => project.id === projectId) ?? null;
+    return projects?.find((project) => project.id === projectId) ?? null;
   }
 
-  async listSessions(limit?: number): Promise<OpencodeSessionRecord[]> {
-    try {
-      const opencode = await this.getRuntime();
-      const listResult = (await opencode.client.experimental.session.list({
-        limit,
-        archived: false,
-      })) as {
-        data?: unknown;
-        error?: unknown;
-      };
-
-      if (listResult.error) {
-        throw new Error(this.formatUnknownError(listResult.error));
-      }
-
-      const statusResult = (await opencode.client.session.status()) as {
-        data?: unknown;
-        error?: unknown;
-      };
-
-      if (statusResult.error) {
-        throw new Error(this.formatUnknownError(statusResult.error));
-      }
-
-      const statusMap =
-        statusResult.data && typeof statusResult.data === "object"
-          ? (statusResult.data as Record<string, { type?: string }>)
-          : {};
-
-      if (!Array.isArray(listResult.data)) {
-        return [];
-      }
-
-      return (
-        listResult.data as Array<Omit<OpencodeSessionRecord, "status">>
-      ).map((session) => ({
-        ...session,
-        status: this.mapSessionStatus(statusMap[session.id]),
-      }));
-    } catch (error) {
-      const errMsg = this.formatUnknownError(error);
-      logger.error("Failed to list OpenCode sessions", { error: errMsg });
-      throw error;
-    }
-  }
-
-  async getSession(sessionId: string): Promise<OpencodeSessionRecord | null> {
-    try {
-      const opencode = await this.getRuntime();
-      const sessionResult = (await opencode.client.session.get({
-        sessionID: sessionId,
-      })) as {
-        data?: unknown;
-        error?: unknown;
-      };
-
-      if (sessionResult.error) {
-        throw new Error(this.formatUnknownError(sessionResult.error));
-      }
-
-      if (!sessionResult.data || typeof sessionResult.data !== "object") {
-        return null;
-      }
-
-      const statusResult = (await opencode.client.session.status()) as {
-        data?: unknown;
-        error?: unknown;
-      };
-
-      if (statusResult.error) {
-        throw new Error(this.formatUnknownError(statusResult.error));
-      }
-
-      const statusMap =
-        statusResult.data && typeof statusResult.data === "object"
-          ? (statusResult.data as Record<string, { type?: string }>)
-          : {};
-
-      const session = sessionResult.data as Omit<
-        OpencodeSessionRecord,
-        "status"
-      >;
-      return {
-        ...session,
-        status: this.mapSessionStatus(statusMap[session.id]),
-      };
-    } catch (error) {
-      const errMsg = this.formatUnknownError(error);
-      logger.error("Failed to get OpenCode session", {
-        sessionId,
-        error: errMsg,
-      });
-      return null;
-    }
-  }
-
-  async getSessionMessages(
-    sessionId: string,
-    limit = 100,
-  ): Promise<OpencodeMessageRecord[]> {
-    try {
-      const session = await this.getSession(sessionId);
-      if (!session) {
-        return [];
-      }
-
-      const opencode = await this.getRuntime();
-      const messagesResult = (await opencode.client.session.messages({
-        sessionID: sessionId,
-        directory: session.directory,
-        limit,
-      })) as {
-        data?: Array<{
-          info?: {
-            id?: string;
-            sessionID?: string;
-            role?: string;
-            time?: { created?: number; completed?: number };
-          };
-          parts?: Array<{ type?: string; [key: string]: unknown }>;
-        }>;
-        error?: unknown;
-      };
-
-      if (messagesResult.error) {
-        throw new Error(this.formatUnknownError(messagesResult.error));
-      }
-
-      if (!Array.isArray(messagesResult.data)) {
-        return [];
-      }
-
-      return messagesResult.data
-        .map((message) => {
-          const role = this.mapMessageRole(message.info?.role);
-          if (!role || !message.info?.id || !message.info?.sessionID) {
-            return null;
-          }
-
-          const parts = this.extractMessageParts(message.parts ?? []);
-          const visibleContent = parts
-            .filter((part) => part.type === "text")
-            .map((part) => part.content)
-            .filter(Boolean)
-            .join("\n\n")
-            .trim();
-          const thinkingContent =
-            parts
-              .filter((part) => part.type !== "text")
-              .map((part) => part.content)
-              .filter(Boolean)
-              .join("\n\n")
-              .trim() || null;
-          const thinkingDurationSeconds =
-            this.resolveThinkingDurationSeconds(parts);
-          const content =
-            [visibleContent, thinkingContent]
-              .filter(Boolean)
-              .join("\n\n")
-              .trim() || "[no text content]";
-          const createdAt = new Date(
-            message.info.time?.created ??
-              message.info.time?.completed ??
-              Date.now(),
-          ).toISOString();
-
-          return {
-            id: message.info.id,
-            sessionId: message.info.sessionID,
-            role,
-            content,
-            visibleContent,
-            thinkingContent,
-            thinkingDurationSeconds,
-            parts,
-            createdAt,
-          } satisfies OpencodeMessageRecord;
-        })
-        .filter((message): message is OpencodeMessageRecord =>
-          Boolean(message),
-        );
-    } catch (error) {
-      const errMsg = this.formatUnknownError(error);
-      logger.error("Failed to get OpenCode session messages", {
-        sessionId,
-        error: errMsg,
-      });
-      throw error;
-    }
-  }
-
-  private mapSessionStatus(
+    private mapSessionStatus(
     status: { type?: string } | undefined,
   ): "pending" | "running" | "completed" {
     if (!status?.type) {
@@ -2044,188 +1791,152 @@ class OpencodeSdk extends BaseCodingSdk {
     return "completed";
   }
 
-  private mapMessageRole(
-    role: string | undefined,
-  ): "user" | "assistant" | "system" | null {
-    if (role === "user" || role === "assistant" || role === "system") {
-      return role;
-    }
-
-    return null;
-  }
-
-  private extractMessageParts(
-    parts: Array<{ type?: string; [key: string]: unknown }>,
-  ): OpencodeMessagePartRecord[] {
-    const extracted: OpencodeMessagePartRecord[] = [];
-
-    for (const part of parts) {
-      if (part.type === "text" || part.type === "reasoning") {
-        const text = typeof part.text === "string" ? part.text.trim() : "";
-        if (!text) continue;
-        extracted.push({
-          type: part.type,
-          content: text,
-          durationSeconds: this.durationSecondsFromTime(part.time),
-        });
-        continue;
-      }
-
-      if (part.type === "tool") {
-        const tool = typeof part.tool === "string" ? part.tool : "tool";
-        const state =
-          part.state && typeof part.state === "object" ? part.state : null;
-        const title =
-          state && "title" in state && typeof state.title === "string"
-            ? state.title.trim()
-            : "";
-        const output =
-          state && "output" in state && typeof state.output === "string"
-            ? state.output.trim()
-            : "";
-        const error =
-          state && "error" in state && typeof state.error === "string"
-            ? state.error.trim()
-            : "";
-        const status =
-          state && "status" in state && typeof state.status === "string"
-            ? state.status
-            : "";
-        const content =
-          output ||
-          error ||
-          title ||
-          (status ? `[tool:${tool}] ${status}` : `[tool:${tool}]`);
-
-        extracted.push({
-          type: "tool",
-          content,
-          durationSeconds: this.durationSecondsFromToolState(state),
-        });
-        continue;
-      }
-
-      if (part.type === "step-finish") {
-        const reason =
-          typeof part.reason === "string" ? part.reason.trim() : "completed";
-        extracted.push({
-          type: "step",
-          content: `[session] ${reason}`,
-          durationSeconds: null,
-        });
-        continue;
-      }
-
-      if (part.type === "subtask") {
-        const prompt =
-          typeof part.prompt === "string" ? part.prompt.trim() : "";
-        const description =
-          typeof part.description === "string" ? part.description.trim() : "";
-        const content = [prompt, description].filter(Boolean).join("\n");
-        if (!content) continue;
-        extracted.push({
-          type: "other",
-          content,
-          durationSeconds: null,
-        });
-      }
-    }
-
-    return extracted;
-  }
-
-  private durationSecondsFromTime(time: unknown): number | null {
-    if (!time || typeof time !== "object") {
-      return null;
-    }
-
-    const start =
-      "start" in time && typeof time.start === "number" ? time.start : null;
-    const end = "end" in time && typeof time.end === "number" ? time.end : null;
-
-    if (start === null || end === null || end < start) {
-      return null;
-    }
-
-    return Math.max(1, Math.round((end - start) / 1000));
-  }
-
-  private durationSecondsFromToolState(state: unknown): number | null {
-    if (!state || typeof state !== "object" || !("time" in state)) {
-      return null;
-    }
-
-    return this.durationSecondsFromTime(state.time);
-  }
-
-  private resolveThinkingDurationSeconds(
-    parts: OpencodeMessagePartRecord[],
-  ): number | null {
-    const durations = parts
-      .filter(
-        (part) =>
-          part.type !== "text" && typeof part.durationSeconds === "number",
-      )
-      .map((part) => part.durationSeconds as number);
-
-    if (durations.length === 0) {
-      return null;
-    }
-
-    return durations.reduce((sum, value) => sum + value, 0);
-  }
-
-  async listProviders(): Promise<OpencodeProviderRecord[]> {
+  async listSessions(limit?: number) {
     try {
       const opencode = await this.getRuntime();
-      const result = (await opencode.client.provider.list()) as {
-        data?: unknown;
-        error?: unknown;
+      const listResult = await opencode.client.experimental.session.list({
+        limit,
+        archived: false,
+      })
+
+      if (listResult.error) {
+        throw new Error(this.formatUnknownError(listResult.error));
+      }
+
+      const statusResult = await opencode.client.session.status()
+
+      if (statusResult.error) {
+        throw new Error(this.formatUnknownError(statusResult.error));
+      }
+
+      const statusMap = statusResult.data
+
+      return listResult.data?.map((session) => ({
+        ...session,
+        status: this.mapSessionStatus(statusMap?.[session.id]),
+      }));
+    } catch (error) {
+      const errMsg = this.formatUnknownError(error);
+      logger.error("Failed to list OpenCode sessions", { error: errMsg });
+      throw error;
+    }
+  }
+
+  async getSession(sessionId: string) {
+    try {
+      const opencode = await this.getRuntime();
+      const sessionResult = await opencode.client.session.get({
+        sessionID: sessionId,
+      })
+
+      if (sessionResult.error) {
+        throw new Error(this.formatUnknownError(sessionResult.error));
+      }
+
+      if (!sessionResult.data || typeof sessionResult.data !== "object") {
+        return null;
+      }
+
+      let status: "pending" | "running" | "completed" = "completed";
+      const statusResult = await opencode.client.session.status()
+
+      if (statusResult.error) {
+        logger.warn("Falling back to completed session status", {
+          sessionId,
+          error: this.formatUnknownError(statusResult.error),
+        });
+      } else {
+        status = this.mapSessionStatus(statusResult.data?.[sessionId]);
+      }
+
+      return {
+        ...sessionResult.data,
+        status,
       };
+    } catch (error) {
+      const errMsg = this.formatUnknownError(error);
+      logger.error("Failed to get OpenCode session", {
+        sessionId,
+        error: errMsg,
+      });
+      return null;
+    }
+  }
+
+  async getSessionMessages(
+    sessionId: string,
+    limit = 100,
+  ) {
+    try {
+      const session = await this.getSession(sessionId);
+      if (!session) {
+        return [];
+      }
+
+      const opencode = await this.getRuntime();
+      const messagesResult = await opencode.client.session.messages({
+        sessionID: sessionId,
+        directory: session.directory,
+        limit,
+      });
+
+      if (messagesResult.error) {
+        throw new Error(this.formatUnknownError(messagesResult.error));
+      }
+
+      return messagesResult.data;
+    } catch (error) {
+      const errMsg = this.formatUnknownError(error);
+      logger.error("Failed to get OpenCode session messages", {
+        sessionId,
+        error: errMsg,
+      });
+      throw error;
+    }
+  }
+
+  async getSessionDiff(
+    sessionId: string,
+    messageId?: string,
+  ): Promise<FileDiff[]> {
+    try {
+      const session = await this.getSession(sessionId);
+      if (!session) {
+        return [];
+      }
+
+      const opencode = await this.getRuntime();
+      const diffResult = await opencode.client.session.diff({
+        sessionID: sessionId,
+        directory: session.directory,
+        messageID: messageId,
+      });
+
+      if (diffResult.error) {
+        throw new Error(this.formatUnknownError(diffResult.error));
+      }
+
+      return diffResult.data ?? [];
+    } catch (error) {
+      const errMsg = this.formatUnknownError(error);
+      logger.error("Failed to get OpenCode session diff", {
+        sessionId,
+        messageId,
+        error: errMsg,
+      });
+      throw error;
+    }
+  }
+
+  async listProviders() {
+    try {
+      const opencode = await this.getRuntime();
+      const result = await opencode.client.provider.list()      
 
       if (result.error) {
         throw new Error(this.formatUnknownError(result.error));
       }
-
-      // SDK returns: { all: Provider[], connected: string[] }
-      const data = result.data as {
-        all?: unknown[];
-        connected?: string[];
-      };
-
-      if (!data || !Array.isArray(data.all)) {
-        logger.warn("OpenCode provider.list() returned unexpected format", {
-          data: result.data,
-        });
-        return [];
-      }
-
-      // Only include providers that are actually connected/authenticated
-      const connectedProviderIds = new Set(data.connected ?? []);
-
-      if (connectedProviderIds.size === 0) {
-        logger.warn("OpenCode has no connected providers");
-        return [];
-      }
-
-      return data.all
-        .filter((provider: any) => connectedProviderIds.has(provider?.id))
-        .map((provider: any) => {
-          // SDK returns models as an object { [modelId]: Model }, convert to array
-          let modelsArray: OpencodeProviderModelRecord[] = [];
-          if (provider.models && typeof provider.models === "object") {
-            modelsArray = Object.values(provider.models).map((model: any) => ({
-              id: model.id,
-              name: model.name,
-            }));
-          }
-
-          return {
-            id: provider.id,
-            name: provider.name,
-            models: modelsArray,
-          };
-        });
+      return result.data?.all;
     } catch (error) {
       const errMsg = this.formatUnknownError(error);
       logger.error("Failed to list OpenCode providers", { error: errMsg });

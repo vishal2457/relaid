@@ -33,7 +33,7 @@ export function createRunRouter(): Router {
 
       logger.info("OpenCode run triggered via HTTP", { projectId, sessionId });
 
-      const result = await runOpenCode(prompt, project.folder, sessionId);
+      const result = await runOpenCode(prompt, project.worktree, sessionId);
 
       success(
         res,

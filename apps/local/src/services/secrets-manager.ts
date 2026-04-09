@@ -1,6 +1,6 @@
 import keytar from "keytar";
 
-const SERVICE_NAME = "maximus-bot";
+const SERVICE_NAME = "relaid";
 
 export type SecretKey = string;
 

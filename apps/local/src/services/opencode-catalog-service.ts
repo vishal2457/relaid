@@ -1,69 +1,21 @@
-import {
-  OpencodeSdk,
-  type OpencodeMessagePartRecord,
-  type OpencodeMessageRecord,
-  type OpencodeProjectRecord,
-  type OpencodeSessionRecord
-} from "../sdk/opencode-sdk";
+import { OpencodeSdk } from "../sdk/opencode-sdk";
+import type {
+  FileDiff,
+  Project,
+  Session,
+  Message,
+  Provider,
+} from "@opencode-ai/sdk/v2" with {
+  "resolution-mode": "import",
+};
 import Fuse from "fuse.js";
 import fg from "fast-glob";
 import { promises as fs } from "fs";
 import path from "path";
 import ignore from "ignore";
+import { compareAsc } from "date-fns";
 
-export type OpencodeProjectSummary = {
-  id: string;
-  name: string;
-  description: string;
-  folder: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type OpencodeSessionSummary = {
-  id: string;
-  projectId: string;
-  status: string;
-  prompt: string;
-  output: string | null;
-  error: string | null;
-  exitCode: number | null;
-  duration: number | null;
-  sessionId: string;
-  createdAt: string;
-  updatedAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-};
-
-export type OpencodeMessageSummary = {
-  id: string;
-  sessionId: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  visibleContent: string;
-  thinkingContent: string | null;
-  thinkingDurationSeconds: number | null;
-  parts: OpencodeMessagePartSummary[];
-  createdAt: string;
-};
-
-export type OpencodeMessagePartSummary = {
-  type: OpencodeMessagePartRecord["type"];
-  content: string;
-  durationSeconds: number | null;
-};
-
-export type OpencodeProviderModelSummary = {
-  id: string;
-  name: string;
-};
-
-export type OpencodeProviderSummary = {
-  id: string;
-  name: string;
-  models: OpencodeProviderModelSummary[];
-};
+export type { Project, Session, Message, Provider };
 
 export type OpencodeProjectDirectoryNode = {
   name: string;
@@ -102,67 +54,6 @@ type ProjectFileCacheEntry = {
   topLevelEntries: OpencodeProjectFileMatch[];
   allEntries: OpencodeProjectFileMatch[];
 };
-
-function toIsoDate(value?: number): string {
-  if (!value) {
-    return new Date().toISOString();
-  }
-
-  return new Date(value).toISOString();
-}
-
-function mapProject(project: OpencodeProjectRecord): OpencodeProjectSummary {
-  return {
-    id: project.id,
-    name:
-      project.name?.trim() ||
-      project.worktree.split("/").filter(Boolean).pop() ||
-      project.id,
-    description: "",
-    folder: project.worktree,
-    createdAt: toIsoDate(project.time?.created),
-    updatedAt: toIsoDate(project.time?.updated),
-  };
-}
-
-function mapSession(session: OpencodeSessionRecord): OpencodeSessionSummary {
-  return {
-    id: session.id,
-    projectId: session.projectID,
-    status: session.status || "completed",
-    prompt: session.title || "Untitled session",
-    output: null,
-    error: null,
-    exitCode: null,
-    duration: null,
-    sessionId: session.id,
-    createdAt: toIsoDate(session.time?.created),
-    updatedAt: toIsoDate(session.time?.updated),
-    startedAt: toIsoDate(session.time?.created),
-    completedAt:
-      session.status === "running" || session.status === "pending"
-        ? null
-        : toIsoDate(session.time?.updated),
-  };
-}
-
-function mapMessage(message: OpencodeMessageRecord): OpencodeMessageSummary {
-  return {
-    id: message.id,
-    sessionId: message.sessionId,
-    role: message.role,
-    content: message.content,
-    visibleContent: message.visibleContent,
-    thinkingContent: message.thinkingContent,
-    thinkingDurationSeconds: message.thinkingDurationSeconds,
-    parts: message.parts.map((part) => ({
-      type: part.type,
-      content: part.content,
-      durationSeconds: part.durationSeconds,
-    })),
-    createdAt: message.createdAt,
-  };
-}
 
 class OpencodeCatalogService {
   private sdk = new OpencodeSdk();
@@ -228,11 +119,13 @@ class OpencodeCatalogService {
         type: entry.path.endsWith("/") ? "directory" : "file",
       }))
       .filter((entry) => entry.path.length > 0)
-      .filter((entry) => !ignoreMatcher.ignores(entry.path));
+      .filter(
+        (entry) => !ignoreMatcher.ignores(entry.path),
+      ) as OpencodeProjectFileMatch[];
 
     const topLevelEntries = allEntries.filter(
       (entry) => !entry.path.includes("/"),
-    );
+    ) as OpencodeProjectFileMatch[];
 
     const sortEntries = (items: OpencodeProjectFileMatch[]) =>
       [...items].sort((left, right) => {
@@ -313,25 +206,23 @@ class OpencodeCatalogService {
     return root;
   }
 
-  async listProjects(): Promise<OpencodeProjectSummary[]> {
+  async listProjects() {
     const projects = await this.sdk.listProjects();
-    return projects.map(mapProject);
+    return projects;
   }
 
-  async getProject(projectId: string): Promise<OpencodeProjectSummary | null> {
+  async getProject(projectId: string) {
     const project = await this.sdk.getProject(projectId);
-    return project ? mapProject(project) : null;
+    return project;
   }
 
-  async getProjectDirectory(
-    projectId: string,
-  ): Promise<OpencodeProjectDirectoryNode[] | null> {
+  async getProjectDirectory(projectId: string) {
     const project = await this.getProject(projectId);
     if (!project) {
       return null;
     }
 
-    const cache = await this.getProjectFileCache(projectId, project.folder);
+    const cache = await this.getProjectFileCache(projectId, project.worktree);
 
     return this.buildProjectDirectoryTree(
       cache.allEntries
@@ -353,7 +244,7 @@ class OpencodeCatalogService {
       return null;
     }
 
-    const cache = await this.getProjectFileCache(projectId, project.folder);
+    const cache = await this.getProjectFileCache(projectId, project.worktree);
     const normalizedLimit =
       Number.isFinite(limit) && limit > 0
         ? Math.min(Math.floor(limit), PROJECT_FILE_SEARCH_LIMIT)
@@ -379,25 +270,25 @@ class OpencodeCatalogService {
       .map((result) => result.item);
   }
 
-  async createSession(
-    projectId: string,
-  ): Promise<OpencodeSessionSummary | null> {
+  async createSession(projectId: string) {
     const project = await this.getProject(projectId);
     if (!project) {
       return null;
     }
 
-    const session = await this.sdk.createSession(project.folder);
-    return session ? mapSession(session) : null;
+    const session = await this.sdk.createSession(project.worktree);
+    return session;
   }
 
   async listSessions(filters: {
     projectId?: string;
     limit?: number;
     status?: string;
-  }): Promise<OpencodeSessionSummary[]> {
+  }) {
     const sessions = await this.sdk.listSessions(filters.limit);
-
+    if (!sessions) {
+      return [];
+    }
     return sessions
       .filter((session) =>
         filters.projectId ? session.projectID === filters.projectId : true,
@@ -405,35 +296,33 @@ class OpencodeCatalogService {
       .filter((session) =>
         filters.status ? session.status === filters.status : true,
       )
-      .map(mapSession)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort((left, right) =>
+        compareAsc(new Date(right.time.updated), new Date(left.time.updated)),
+      );
   }
 
-  async getSession(sessionId: string): Promise<OpencodeSessionSummary | null> {
+  async getSession(sessionId: string) {
     const session = await this.sdk.getSession(sessionId);
-    return session ? mapSession(session) : null;
+    return session;
   }
 
-  async getSessionMessages(
-    sessionId: string,
-    limit?: number,
-  ): Promise<OpencodeMessageSummary[]> {
+  async getSessionMessages(sessionId: string, limit?: number) {
     const messages = await this.sdk.getSessionMessages(sessionId, limit);
-    return messages
-      .map(mapMessage)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    return messages.sort((left, right) =>
+      compareAsc(
+        new Date(left.info.time.created),
+        new Date(right.info.time.created),
+      ),
+    );
   }
 
-  async listProviders(): Promise<OpencodeProviderSummary[]> {
-    const providers = await this.sdk.listProviders();    
-    return providers.map((provider) => ({
-      id: provider.id,
-      name: provider.name,
-      models: provider.models.map((model) => ({
-        id: model.id,
-        name: model.name,
-      })),
-    }));
+  async getSessionDiff(sessionId: string, messageId?: string): Promise<FileDiff[]> {
+    return this.sdk.getSessionDiff(sessionId, messageId);
+  }
+
+  async listProviders() {
+    const providers = await this.sdk.listProviders();
+    return providers;
   }
 }
 

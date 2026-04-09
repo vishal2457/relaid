@@ -6,3 +6,4 @@ export * from "./pending-interaction.schema";
 export * from "./user.schema";
 
 export * from "./session.schema";
+export * from "./message-queue.schema";

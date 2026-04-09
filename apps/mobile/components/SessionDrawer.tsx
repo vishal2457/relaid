@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Alert,
   Dimensions,
   Pressable,
   ScrollView,
@@ -12,6 +13,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useSessions } from "@/lib/api/sessions";
 import { type Project } from "@/lib/api/projects";
+import { clearActiveSessionStream } from "@/lib/active-session-stream";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DRAWER_WIDTH = Math.min(320, SCREEN_WIDTH * 0.85);
@@ -51,6 +53,23 @@ export function SessionDrawer({
   const handleNewSession = () => {
     onSelectSession(null);
     onClose();
+  };
+
+  const handleClearPendingSession = () => {
+    Alert.alert(
+      "Clear Pending Session",
+      "This will clear the pending session that auto-focuses on app open. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            await clearActiveSessionStream();
+          },
+        },
+      ],
+    );
   };
 
   if (!visible) return null;
@@ -216,6 +235,25 @@ export function SessionDrawer({
             })
           )}
         </ScrollView>
+
+        <Pressable
+          onPress={handleClearPendingSession}
+          style={[styles.footer, { borderTopColor: borderColor }]}
+          accessibilityRole="button"
+          accessibilityLabel="Clear pending session"
+        >
+          <MaterialCommunityIcons
+            name="close-circle-outline"
+            size={22}
+            color={theme.colors.onSurfaceVariant}
+          />
+          <Text
+            variant="labelLarge"
+            style={{ color: theme.colors.onSurfaceVariant, marginLeft: 12 }}
+          >
+            Clear Pending Session
+          </Text>
+        </Pressable>
 
         <Pressable
           onPress={() => {

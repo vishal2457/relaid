@@ -38,7 +38,24 @@ import {
   shouldScheduleSessionRefresh,
 } from "@/lib/active-session-stream";
 import { queryClient } from "@/lib/query-client";
-import { getChatSocket } from "@/lib/socket/chat";
+import { useBufferedStreamingText } from "@/lib/streaming-text";
+import {
+  connectSseClient,
+  getSseClient,
+  sendPromptRequest,
+  sendAbortRequest,
+  sendPermissionResponse,
+  sendQuestionResponse,
+  subscribeToSse,
+} from "@/lib/sse";
+import {
+  PermissionCard,
+  QuestionCard,
+  type PermissionRequest,
+  type QuestionRequest,
+} from "@/components/PermissionCard";
+import { MessageRow } from "@/components/Message";
+import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
 
 type TextSegment = {
   type: "normal" | "bold" | "code";
@@ -117,25 +134,12 @@ const FormattedText = ({
   );
 };
 
-const formatDateTime = (value: string | null | undefined) => {
+const formatDateTime = (value: string | number | null | undefined) => {
   if (!value) return null;
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
-};
-
-const roleLabelMap: Record<SessionMessage["role"], string> = {
-  assistant: "Assistant",
-  user: "You",
-  system: "System",
-};
-
-const formatThinkingLabel = (seconds: number | null) => {
-  if (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0) {
-    return `Thought for ${seconds}s`;
-  }
-  return "Thinking...";
 };
 
 const MIN_INPUT_HEIGHT = 44;
@@ -172,24 +176,63 @@ type SessionStreamChunkEvent = {
   isComplete?: boolean;
 };
 
+type PermissionRequestEvent = {
+  requestId: string;
+  projectId: string;
+  sessionId: string;
+  jobId: string;
+  threadId: string;
+  permission: string;
+  patterns: string[];
+  metadata: Record<string, unknown>;
+};
+
+type QuestionRequestEvent = {
+  requestId: string;
+  projectId: string;
+  sessionId: string;
+  jobId: string;
+  threadId: string;
+  questions: Array<{
+    header: string;
+    question: string;
+    options: Array<{ label: string; description: string }>;
+    multiple?: boolean;
+    custom?: boolean;
+  }>;
+};
+
 export default function SessionMessagesScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const flatListRef = React.useRef<FlatListType<SessionMessage>>(null);
-  const [expandedThinking, setExpandedThinking] = React.useState<
-    Record<string, boolean>
-  >({});
   const [inputText, setInputText] = React.useState("");
   const [inputHeight, setInputHeight] = React.useState(MIN_INPUT_HEIGHT);
   const [pendingRequestId, setPendingRequestId] = React.useState<string | null>(
     null,
   );
   const pendingRequestIdRef = React.useRef<string | null>(null);
-  const [streamingContent, setStreamingContent] = React.useState<string>("");
+  const {
+    text: streamingContent,
+    appendChunk: appendStreamingChunk,
+    flush: flushStreamingContent,
+    reset: resetStreamingContent,
+  } = useBufferedStreamingText();
   const [optimisticMessage, setOptimisticMessage] =
     React.useState<SessionMessage | null>(null);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+  const [pendingPermission, setPendingPermission] =
+    React.useState<PermissionRequestEvent | null>(null);
+  const [pendingQuestion, setPendingQuestion] =
+    React.useState<QuestionRequestEvent | null>(null);
+  const [isRespondingToPermission, setIsRespondingToPermission] =
+    React.useState(false);
+  const [isRespondingToQuestion, setIsRespondingToQuestion] =
+    React.useState(false);
+  const streamScrollTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
 
   React.useEffect(() => {
     const showListener = Keyboard.addListener(
@@ -266,11 +309,14 @@ export default function SessionMessagesScreen() {
       return;
     }
 
-    const timer = setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 50);
+    if (streamScrollTimeoutRef.current) {
+      return;
+    }
 
-    return () => clearTimeout(timer);
+    streamScrollTimeoutRef.current = setTimeout(() => {
+      streamScrollTimeoutRef.current = null;
+      flatListRef.current?.scrollToEnd({ animated: false });
+    }, 120);
   }, [streamingContent]);
 
   React.useEffect(() => {
@@ -309,11 +355,11 @@ export default function SessionMessagesScreen() {
       pendingRequestIdRef.current = null;
       setPendingRequestId(null);
       setOptimisticMessage(null);
-      setStreamingContent("");
+      resetStreamingContent();
       clearFollowUpRefreshTimeout();
       void clearActiveSessionStream(requestId);
     },
-    [clearFollowUpRefreshTimeout],
+    [clearFollowUpRefreshTimeout, resetStreamingContent],
   );
 
   const recoverPendingStream = React.useCallback(async () => {
@@ -333,7 +379,7 @@ export default function SessionMessagesScreen() {
     pendingRequestIdRef.current = activeStream.requestId;
     setPendingRequestId(activeStream.requestId);
     setOptimisticMessage(null);
-    setStreamingContent("");
+    resetStreamingContent();
 
     const [sessionResult, messagesResult] = await Promise.allSettled([
       refetchSession(),
@@ -356,9 +402,18 @@ export default function SessionMessagesScreen() {
         activeStream.baselineMessageId,
       )
     ) {
+      flushStreamingContent();
       clearPendingStreamState(activeStream.requestId);
     }
-  }, [clearPendingStreamState, projectId, refetch, refetchSession, sessionId]);
+  }, [
+    clearPendingStreamState,
+    flushStreamingContent,
+    projectId,
+    refetch,
+    refetchSession,
+    resetStreamingContent,
+    sessionId,
+  ]);
 
   React.useEffect(() => {
     return () => {
@@ -372,8 +427,15 @@ export default function SessionMessagesScreen() {
 
   React.useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active" && pendingRequestIdRef.current) {
-        void recoverPendingStream();
+      if (nextState === "active") {
+        const sseClient = getSseClient();
+        if (!sseClient || sseClient.getState() !== "connected") {
+          connectSseClient();
+        }
+
+        if (pendingRequestIdRef.current) {
+          void recoverPendingStream();
+        }
       }
     });
 
@@ -383,15 +445,6 @@ export default function SessionMessagesScreen() {
   React.useEffect(() => {
     if (!sessionId || !projectId) {
       return;
-    }
-
-    const socket = getChatSocket();
-    if (!socket) {
-      return;
-    }
-
-    if (!socket.connected) {
-      socket.connect();
     }
 
     const handlePromptStarted = (payload: SessionPromptStartedEvent) => {
@@ -411,8 +464,8 @@ export default function SessionMessagesScreen() {
         return;
       }
 
-      if (payload.type === "text" || payload.type === "reasoning") {
-        setStreamingContent((prev) => prev + payload.chunk);
+      if (payload.type === "text") {
+        appendStreamingChunk(payload.chunk);
       }
     };
 
@@ -424,6 +477,7 @@ export default function SessionMessagesScreen() {
         return;
       }
 
+      flushStreamingContent();
       clearPendingStreamState(payload.requestId);
 
       if (payload.messages) {
@@ -452,28 +506,75 @@ export default function SessionMessagesScreen() {
         return;
       }
 
+      flushStreamingContent();
       clearPendingStreamState(payload.requestId);
-      Alert.alert("Socket error", payload.message || "Failed to send message");
+      Alert.alert("Error", payload.message || "Failed to send message");
     };
 
-    const handleReconnect = () => {
-      if (pendingRequestIdRef.current) {
-        void recoverPendingStream();
+    const handlePermissionRequest = (payload: PermissionRequestEvent) => {
+      if (payload.projectId !== projectId) {
+        return;
       }
+
+      setPendingPermission(payload);
+      setPendingQuestion(null);
     };
 
-    socket.on("session_prompt_started", handlePromptStarted);
-    socket.on("session_stream_chunk", handleStreamChunk);
-    socket.on("session_prompt_response", handlePromptResponse);
-    socket.on("error_response", handleErrorResponse);
-    socket.on("connect", handleReconnect);
+    const handleQuestionRequest = (payload: QuestionRequestEvent) => {
+      if (payload.projectId !== projectId) {
+        return;
+      }
+
+      setPendingQuestion(payload);
+      setPendingPermission(null);
+    };
+
+    const { unsubscribe } = subscribeToSse({
+      onEvent(event, data) {
+        switch (event) {
+          case "session_prompt_started":
+            handlePromptStarted(data as unknown as SessionPromptStartedEvent);
+            break;
+          case "session_stream_chunk":
+            handleStreamChunk(data as unknown as SessionStreamChunkEvent);
+            break;
+          case "session_prompt_response":
+            handlePromptResponse(data as unknown as SessionPromptResponseEvent);
+            break;
+          case "error_response":
+            handleErrorResponse(
+              data as { requestId?: string; message?: string },
+            );
+            break;
+          case "permission_request":
+            handlePermissionRequest(data as unknown as PermissionRequestEvent);
+            break;
+          case "question_request":
+            handleQuestionRequest(data as unknown as QuestionRequestEvent);
+            break;
+        }
+      },
+      onConnect() {
+        console.log("[SSE] Connected", { projectId, sessionId });
+        if (pendingRequestIdRef.current) {
+          void recoverPendingStream();
+        }
+      },
+      onDisconnect() {
+        console.log("[SSE] Disconnected", { projectId, sessionId });
+      },
+      onError(error) {
+        console.log("[SSE] Error:", error.message);
+      },
+    });
+
+    const sseClient = connectSseClient() ?? getSseClient();
+    if (sseClient) {
+      sseClient.connect();
+    }
 
     return () => {
-      socket.off("session_prompt_started", handlePromptStarted);
-      socket.off("session_stream_chunk", handleStreamChunk);
-      socket.off("session_prompt_response", handlePromptResponse);
-      socket.off("error_response", handleErrorResponse);
-      socket.off("connect", handleReconnect);
+      unsubscribe();
     };
   }, [
     clearPendingStreamState,
@@ -488,7 +589,6 @@ export default function SessionMessagesScreen() {
   const userBubble = theme.dark ? "#1D4ED8" : "#DBEAFE";
   const assistantBubble = theme.dark ? "#1F2937" : "#FFFFFF";
   const systemBubble = theme.dark ? "#3F3F46" : "#E2E8F0";
-  const thinkingSurface = theme.dark ? "#111827" : "#F8FAFC";
   const backButtonSurface = theme.dark
     ? "rgba(17, 24, 39, 0.92)"
     : "rgba(255, 255, 255, 0.96)";
@@ -534,7 +634,25 @@ export default function SessionMessagesScreen() {
     </View>
   );
 
-  const handleSend = React.useCallback(() => {
+  const handleAbortSession = React.useCallback(async () => {
+    if (!sessionId || !projectId || !pendingRequestId) {
+      return;
+    }
+
+    try {
+      await sendAbortRequest({
+        sessionId,
+        requestId: pendingRequestId,
+        projectId,
+      });
+    } catch (error) {
+      console.error("[Session] Failed to abort:", error);
+    }
+
+    clearPendingStreamState(pendingRequestId);
+  }, [sessionId, projectId, pendingRequestId, clearPendingStreamState]);
+
+  const handleSend = React.useCallback(async () => {
     if (!sessionId || !projectId || !trimmedInput || isSending) {
       return;
     }
@@ -547,17 +665,18 @@ export default function SessionMessagesScreen() {
     pendingRequestIdRef.current = requestId;
     setOptimisticMessage({
       id: `optimistic_${requestId}`,
-      sessionId,
+      sessionID: sessionId,
       role: "user",
       content: trimmedInput,
       visibleContent: trimmedInput,
       thinkingContent: null,
       thinkingDurationSeconds: null,
       parts: [{ type: "text", content: trimmedInput, durationSeconds: null }],
-      createdAt: new Date().toISOString(),
+      createdAt: Date.now(),
     });
     setInputText("");
     setInputHeight(MIN_INPUT_HEIGHT);
+    resetStreamingContent();
     void saveActiveSessionStream({
       requestId,
       projectId,
@@ -565,23 +684,27 @@ export default function SessionMessagesScreen() {
       baselineMessageId: messages?.[messages.length - 1]?.id ?? null,
     });
 
-    const socket = getChatSocket();
-    if (!socket) {
-      Alert.alert("Connection Error", "This device is not paired yet.");
-      return;
+    try {
+      await sendPromptRequest({
+        sessionId,
+        requestId,
+        projectId,
+        prompt: trimmedInput,
+      });
+    } catch (error) {
+      console.error("[Session] Failed to send prompt:", error);
+      clearPendingStreamState(requestId);
+      Alert.alert("Error", "Failed to send message. Please try again.");
     }
-
-    if (!socket.connected) {
-      socket.connect();
-    }
-
-    socket.emit("session_prompt_request", {
-      requestId,
-      projectId,
-      sessionId,
-      prompt: trimmedInput,
-    });
-  }, [isSending, messages, projectId, sessionId, trimmedInput]);
+  }, [
+    clearPendingStreamState,
+    isSending,
+    messages,
+    projectId,
+    resetStreamingContent,
+    sessionId,
+    trimmedInput,
+  ]);
 
   const handleCreateSession = React.useCallback(async () => {
     if (!projectId || createSessionMutation.isPending) {
@@ -604,184 +727,94 @@ export default function SessionMessagesScreen() {
     }
   }, [createSessionMutation, projectId, router]);
 
-  const toggleThinking = (messageId: string) => {
-    setExpandedThinking((current: Record<string, boolean>) => ({
-      ...current,
-      [messageId]: !current[messageId],
-    }));
-  };
+  const handlePermissionResponse = React.useCallback(
+    async (reply: "once" | "always" | "reject") => {
+      if (!pendingPermission) {
+        console.warn(
+          "[PermissionResponse] No pending permission to respond to",
+        );
+        return;
+      }
 
-  const renderMessage = ({ item }: { item: SessionMessage }) => {
-    const isUser = item.role === "user";
-    const isSystem = item.role === "system";
-    const isAssistant = item.role === "assistant";
-    const hasThinking = Boolean(item.thinkingContent?.trim());
-    const hasVisibleContent = Boolean(item.visibleContent.trim());
-    const bubbleColor = isSystem
-      ? systemBubble
-      : isUser
-        ? userBubble
-        : assistantBubble;
-    const textColor = isUser ? "#0F172A" : theme.colors.onSurface;
-    const mainContent =
-      item.role === "assistant" ? item.visibleContent : item.content;
-    const isThinkingExpanded = Boolean(expandedThinking[item.id]);
-    const thinkingParts = item.parts.filter((part) => part.type !== "text");
-    const thinkingLabel = formatThinkingLabel(item.thinkingDurationSeconds);
-    const shouldUsePlainThoughtRow =
-      isAssistant && hasThinking && !hasVisibleContent;
-    const canToggleThinking = isAssistant && hasThinking;
+      setIsRespondingToPermission(true);
+      const responsePayload = {
+        requestId: pendingPermission.requestId,
+        sessionId: pendingPermission.sessionId,
+        jobId: pendingPermission.jobId,
+        reply,
+      };
+
+      console.log("[PermissionResponse] Sending:", responsePayload);
+
+      try {
+        await sendPermissionResponse(responsePayload);
+        setPendingPermission(null);
+      } catch (error) {
+        console.error("[PermissionResponse] Failed to send:", error);
+        Alert.alert(
+          "Permission response failed",
+          "The request was not delivered. Please try again.",
+        );
+      } finally {
+        setIsRespondingToPermission(false);
+      }
+    },
+    [pendingPermission],
+  );
+
+  const handleQuestionResponse = React.useCallback(
+    async (answers: string[][]) => {
+      if (!pendingQuestion) {
+        return;
+      }
+
+      setIsRespondingToQuestion(true);
+      const responsePayload = {
+        requestId: pendingQuestion.requestId,
+        sessionId: pendingQuestion.sessionId,
+        jobId: pendingQuestion.jobId,
+        answers,
+      };
+
+      try {
+        await sendQuestionResponse(responsePayload);
+        setPendingQuestion(null);
+      } catch (error) {
+        console.error("[QuestionResponse] Failed to send:", error);
+        Alert.alert(
+          "Question response failed",
+          "The answers were not delivered. Please try again.",
+        );
+      } finally {
+        setIsRespondingToQuestion(false);
+      }
+    },
+    [pendingQuestion],
+  );
+
+  const renderMessage = ({
+    item,
+    index,
+  }: {
+    item: SessionMessage;
+    index: number;
+  }) => {
+    const responseSummary = getAssistantResponseSummaryContext(
+      displayedMessages,
+      index,
+    );
 
     return (
-      <View
-        style={[
-          styles.messageRow,
-          isUser ? styles.messageRowRight : styles.messageRowLeft,
-        ]}
-      >
-        {shouldUsePlainThoughtRow ? (
-          <View style={styles.plainThoughtWrap}>
-            <Pressable
-              onPress={() => toggleThinking(item.id)}
-              style={styles.plainThoughtTrigger}
-            >
-              <View style={styles.plainThoughtHeader}>
-                <MaterialCommunityIcons
-                  name="brain"
-                  size={16}
-                  color={metaColor}
-                />
-                <Text variant="bodyMedium" style={{ color: metaColor }}>
-                  {thinkingLabel}
-                </Text>
-              </View>
-            </Pressable>
-
-            {isThinkingExpanded ? (
-              <View
-                style={[
-                  styles.thinkingPanel,
-                  {
-                    borderColor,
-                    backgroundColor: thinkingSurface,
-                    alignSelf: "flex-start",
-                  },
-                ]}
-              >
-                <Text
-                  variant="labelSmall"
-                  style={[styles.reasoningTitle, { color: metaColor }]}
-                >
-                  Reasoning
-                </Text>
-                {thinkingParts.map((part, index) => (
-                  <View
-                    key={`${item.id}-${part.type}-${index}`}
-                    style={styles.thinkingBlock}
-                  >
-                    <Text
-                      variant="labelSmall"
-                      style={[styles.thinkingLabel, { color: metaColor }]}
-                    >
-                      {part.type}
-                    </Text>
-                    <FormattedText
-                      text={part.content}
-                      baseStyle={[
-                        styles.thinkingText,
-                        { color: theme.colors.onSurface },
-                      ]}
-                    />
-                  </View>
-                ))}
-              </View>
-            ) : null}
-          </View>
-        ) : (
-          <View
-            style={[
-              styles.messageBubble,
-              {
-                backgroundColor: bubbleColor,
-                borderColor,
-                alignSelf: isUser ? "flex-end" : "flex-start",
-              },
-            ]}
-          >
-            <View style={styles.messageHeader}>
-              <Text
-                variant="labelMedium"
-                style={[styles.roleLabel, { color: metaColor }]}
-              >
-                {roleLabelMap[item.role]}
-              </Text>
-              <Text variant="labelSmall" style={{ color: metaColor }}>
-                {formatDateTime(item.createdAt)}
-              </Text>
-            </View>
-
-            <Pressable
-              disabled={!canToggleThinking}
-              onPress={() => toggleThinking(item.id)}
-              style={styles.messageBodyPressable}
-            >
-              <FormattedText
-                text={mainContent}
-                baseStyle={[styles.messageText, { color: textColor }]}
-              />
-
-              {canToggleThinking ? (
-                <View style={styles.thinkingInlineLabel}>
-                  <MaterialCommunityIcons
-                    name="brain"
-                    size={14}
-                    color={metaColor}
-                  />
-                  <Text variant="labelSmall" style={{ color: metaColor }}>
-                    {thinkingLabel}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-
-            {canToggleThinking && isThinkingExpanded ? (
-              <View
-                style={[
-                  styles.thinkingPanel,
-                  { borderColor, backgroundColor: thinkingSurface },
-                ]}
-              >
-                <Text
-                  variant="labelSmall"
-                  style={[styles.reasoningTitle, { color: metaColor }]}
-                >
-                  Reasoning
-                </Text>
-                {thinkingParts.map((part, index) => (
-                  <View
-                    key={`${item.id}-${part.type}-${index}`}
-                    style={styles.thinkingBlock}
-                  >
-                    <Text
-                      variant="labelSmall"
-                      style={[styles.thinkingLabel, { color: metaColor }]}
-                    >
-                      {part.type}
-                    </Text>
-                    <FormattedText
-                      text={part.content}
-                      baseStyle={[
-                        styles.thinkingText,
-                        { color: theme.colors.onSurface },
-                      ]}
-                    />
-                  </View>
-                ))}
-              </View>
-            ) : null}
-          </View>
-        )}
-      </View>
+      <MessageRow
+        message={item}
+        responseSummary={responseSummary}
+        borderColor={borderColor}
+        metaColor={metaColor}
+        userBubble={userBubble}
+        assistantBubble={assistantBubble}
+        systemBubble={systemBubble}
+        textColor={item.role === "user" ? "#0F172A" : theme.colors.onSurface}
+      />
     );
   };
 
@@ -822,16 +855,21 @@ export default function SessionMessagesScreen() {
       <Pressable
         disabled={!trimmedInput || isSending}
         onPress={handleSend}
+        onLongPress={isSending ? handleAbortSession : undefined}
         style={[
           styles.sendButton,
           {
-            backgroundColor: theme.colors.primary,
+            backgroundColor: isSending ? "#EF4444" : theme.colors.primary,
             opacity: !trimmedInput || isSending ? 0.7 : 1,
           },
         ]}
       >
         {isSending ? (
-          <ActivityIndicator size={18} color={theme.colors.onPrimary} />
+          <MaterialCommunityIcons
+            name="stop"
+            size={20}
+            color={theme.colors.onPrimary}
+          />
         ) : (
           <MaterialCommunityIcons
             name="send"
@@ -840,6 +878,35 @@ export default function SessionMessagesScreen() {
           />
         )}
       </Pressable>
+    </View>
+  );
+
+  const permissionCard = (() => {
+    if (pendingPermission) {
+      return (
+        <PermissionCard
+          request={pendingPermission}
+          onRespond={handlePermissionResponse}
+          isResponding={isRespondingToPermission}
+        />
+      );
+    }
+    if (pendingQuestion) {
+      return (
+        <QuestionCard
+          request={pendingQuestion}
+          onRespond={handleQuestionResponse}
+          isResponding={isRespondingToQuestion}
+        />
+      );
+    }
+    return null;
+  })();
+
+  const bottomContent = (
+    <View style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
+      {permissionCard}
+      {inputBar}
     </View>
   );
 
@@ -974,7 +1041,7 @@ export default function SessionMessagesScreen() {
             />
           )}
         </View>
-        {inputBar}
+        {bottomContent}
       </View>
     </SafeAreaView>
   );

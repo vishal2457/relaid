@@ -2,7 +2,7 @@
   "name": "relaid",
   "private": true,
   "scripts": {
-    "build": "turbo run build",
+    "build:apk": "turbo run build:apk --filter=mobile",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",

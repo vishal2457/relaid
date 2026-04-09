@@ -1,4 +1,14 @@
 import { z } from "zod";
+import type {
+  Project,
+  Session,
+  Message,
+  Provider,
+} from "@opencode-ai/sdk/v2" with {
+  "resolution-mode": "import",
+};
+
+export type { Project, Session, Message, Provider };
 
 export const SessionStatusSchema = z.enum([
   "pending",
@@ -402,3 +412,158 @@ export const ProvidersListResponseSchema = z.object({
 
 export type ProvidersListRequest = z.infer<typeof ProvidersListRequestSchema>;
 export type ProvidersListResponse = z.infer<typeof ProvidersListResponseSchema>;
+
+export const PermissionReplySchema = z.enum(["once", "always", "reject"]);
+
+export type PermissionReply = z.infer<typeof PermissionReplySchema>;
+
+export const PermissionRequestEventSchema = z.object({
+  requestId: z.string(),
+  projectId: z.string(),
+  sessionId: z.string(),
+  jobId: z.string(),
+  threadId: z.string(),
+  permission: z.string(),
+  patterns: z.array(z.string()),
+  metadata: z.record(z.unknown()),
+});
+
+export type PermissionRequestEvent = z.infer<
+  typeof PermissionRequestEventSchema
+>;
+
+export const PermissionResponseEventSchema = z.object({
+  requestId: z.string(),
+  sessionId: z.string(),
+  jobId: z.string(),
+  reply: PermissionReplySchema,
+});
+
+export type PermissionResponseEvent = z.infer<
+  typeof PermissionResponseEventSchema
+>;
+
+export const QuestionOptionSchema = z.object({
+  label: z.string(),
+  description: z.string(),
+});
+
+export type QuestionOption = z.infer<typeof QuestionOptionSchema>;
+
+export const QuestionSchema = z.object({
+  header: z.string(),
+  question: z.string(),
+  options: z.array(QuestionOptionSchema),
+  multiple: z.boolean().optional(),
+  custom: z.boolean().optional(),
+});
+
+export type Question = z.infer<typeof QuestionSchema>;
+
+export const QuestionRequestEventSchema = z.object({
+  requestId: z.string(),
+  projectId: z.string(),
+  sessionId: z.string(),
+  jobId: z.string(),
+  threadId: z.string(),
+  questions: z.array(QuestionSchema),
+});
+
+export type QuestionRequestEvent = z.infer<typeof QuestionRequestEventSchema>;
+
+export const QuestionResponseEventSchema = z.object({
+  requestId: z.string(),
+  sessionId: z.string(),
+  jobId: z.string(),
+  answers: z.array(z.array(z.string())),
+});
+
+export type QuestionResponseEvent = z.infer<typeof QuestionResponseEventSchema>;
+
+// Message Queue Types
+
+export const QueueItemPayloadSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  prompt: z.string(),
+  status: z.enum(["pending", "running", "completed", "failed", "aborted"]),
+  sessionId: z.string().nullable(),
+  error: z.string().nullable(),
+  position: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+});
+
+export type QueueItemPayload = z.infer<typeof QueueItemPayloadSchema>;
+
+export const MessageQueueListRequestSchema = z.object({
+  projectId: z.string(),
+});
+
+export const MessageQueueListResponseSchema = z.object({
+  items: z.array(QueueItemPayloadSchema),
+});
+
+export type MessageQueueListResponse = z.infer<
+  typeof MessageQueueListResponseSchema
+>;
+
+export const MessageQueueAddRequestSchema = z.object({
+  projectId: z.string(),
+  prompt: z.string(),
+});
+
+export const MessageQueueAddResponseSchema = z.object({
+  item: QueueItemPayloadSchema,
+});
+
+export type MessageQueueAddResponse = z.infer<
+  typeof MessageQueueAddResponseSchema
+>;
+
+export const MessageQueueRemoveRequestSchema = z.object({
+  queueItemId: z.string(),
+});
+
+export const MessageQueueRemoveResponseSchema = z.object({
+  success: z.boolean(),
+  error: z.string().optional(),
+});
+
+export type MessageQueueRemoveResponse = z.infer<
+  typeof MessageQueueRemoveResponseSchema
+>;
+
+export const MessageQueueUpdateRequestSchema = z.object({
+  queueItemId: z.string(),
+  prompt: z.string().optional(),
+  position: z.number().optional(),
+});
+
+export const MessageQueueUpdateResponseSchema = z.object({
+  item: QueueItemPayloadSchema.nullable(),
+  error: z.string().optional(),
+});
+
+export type MessageQueueUpdateResponse = z.infer<
+  typeof MessageQueueUpdateResponseSchema
+>;
+
+export const MessageQueueExecuteRequestSchema = z.object({
+  queueItemId: z.string(),
+  sessionId: z.string().optional(),
+  createNewSession: z.boolean().optional(),
+  projectId: z.string(),
+});
+
+export const MessageQueueExecuteResponseSchema = z.object({
+  success: z.boolean(),
+  sessionId: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export type MessageQueueExecuteResponse = z.infer<
+  typeof MessageQueueExecuteResponseSchema
+>;

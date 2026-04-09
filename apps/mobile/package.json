@@ -1,7 +1,7 @@
 {
   "name": "mobile",
   "main": "expo-router/entry",
-  "version": "1.0.7",
+  "version": "1.0.10",
   "scripts": {
     "start": "expo start",
     "dev": "expo start",
@@ -21,6 +21,7 @@
     "@react-navigation/native": "^7.1.8",
     "@tanstack/react-query": "^5.96.0",
     "axios": "^1.14.0",
+    "diff": "^8.0.4",
     "expo": "~54.0.33",
     "expo-camera": "^55.0.13",
     "expo-constants": "~18.0.13",
@@ -47,8 +48,7 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-web": "~0.21.0",
-    "react-native-worklets": "0.5.1",
-    "socket.io-client": "^4.8.3"
+    "react-native-worklets": "0.5.1"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
