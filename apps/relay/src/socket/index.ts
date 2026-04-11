@@ -315,10 +315,13 @@ async function handleLocalServerConnection(
   pipeResponse("project_create_response");
   pipeResponse("project_update_response");
   pipeResponse("project_delete_response");
+  pipeResponse("project_branches_response");
+  pipeResponse("project_branch_switch_response");
   pipeResponse("sessions_list_response");
   pipeResponse("session_get_response");
   pipeResponse("session_messages_response");
   pipeResponse("session_create_response");
+  pipeResponse("session_diff_response");
   pipeResponse("session_update_response");
   pipeResponse("local_servers_list_response");
   pipeResponse("local_server_register_response");

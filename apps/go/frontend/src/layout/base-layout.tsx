@@ -1,19 +1,15 @@
 import React from "react";
-import { Link } from "react-router-dom";
-import { Settings } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
+import { Settings, Home } from "lucide-react";
 
 import {
-  SidebarInset,
-  SidebarProvider,
-  Sidebar,
-  SidebarHeader,
-  SidebarContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarRail,
-  SidebarTrigger,
-} from "../shared/components/ui/sidebar";
+  NavigationMenu,
+  NavigationMenuList,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  navigationMenuTriggerStyle,
+} from "../shared/components/ui/navigation-menu";
+import { cn } from "../shared/utils/cn.utils";
 import { ROUTES_PATH } from "../routes/routes";
 
 export default function BaseLayout({
@@ -21,39 +17,61 @@ export default function BaseLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const location = useLocation();
+
   return (
-    <SidebarProvider defaultOpen={true}>
-      <Sidebar side="left" variant="sidebar" collapsible="offcanvas">
-        <SidebarHeader>
-          <div className="flex items-center gap-2 px-2 py-1">
-            <SidebarTrigger />
-            <span className="text-sm font-semibold">Menu</span>
-          </div>
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={false}>
-                <Link to={ROUTES_PATH.Home}>
-                  <span>Home</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={false}>
-                <Link to={ROUTES_PATH.Settings}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  <span>Settings</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarContent>
-        <SidebarRail />
-      </Sidebar>
-      <SidebarInset>
-        <div className="flex flex-1 flex-col gap-4">{children}</div>
-      </SidebarInset>
-    </SidebarProvider>
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="flex h-14 items-center px-4">
+          <Link
+            to={ROUTES_PATH.Home}
+            className="mr-6 flex items-center space-x-2"
+          >
+            <span className="text-sm font-bold">Relaid</span>
+          </Link>
+          <NavigationMenu>
+            <NavigationMenuList>
+              <NavigationMenuItem>
+                <NavigationMenuLink
+                  asChild
+                  className={navigationMenuTriggerStyle()}
+                >
+                  <Link
+                    to={ROUTES_PATH.Home}
+                    className={cn(
+                      navigationMenuTriggerStyle(),
+                      location.pathname === ROUTES_PATH.Home &&
+                        "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    <Home className="mr-2 h-4 w-4" />
+                    Home
+                  </Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+              <NavigationMenuItem>
+                <NavigationMenuLink
+                  asChild
+                  className={navigationMenuTriggerStyle()}
+                >
+                  <Link
+                    to={ROUTES_PATH.Settings}
+                    className={cn(
+                      navigationMenuTriggerStyle(),
+                      location.pathname === ROUTES_PATH.Settings &&
+                        "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    <Settings className="mr-2 h-4 w-4" />
+                    Settings
+                  </Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+            </NavigationMenuList>
+          </NavigationMenu>
+        </div>
+      </header>
+      <main className="flex-1 p-4">{children}</main>
+    </div>
   );
 }
