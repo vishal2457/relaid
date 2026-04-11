@@ -1,0 +1,80 @@
+name: Tag and Release
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get current version
+        id: current_version
+        run: |
+          VERSION=$(cat version.txt | xargs)
+          # Remove 'v' prefix if it exists for calculation
+          CLEAN_VERSION=${VERSION#v}
+          echo "version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version is $VERSION"
+
+      - name: Increment version
+        id: next_version
+        run: |
+          VERSION=${{ steps.current_version.outputs.version }}
+          IFS='.' read -ra ADDR <<< "$VERSION"
+          MAJOR=${ADDR[0]:-0}
+          MINOR=${ADDR[1]:-0}
+          PATCH=${ADDR[2]:-0}
+
+          BUMP=${{ github.event.inputs.bump }}
+
+          if [ "$BUMP" == "major" ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$BUMP" == "minor" ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo $NEXT_VERSION > version.txt
+          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          echo "Next version is $NEXT_VERSION"
+
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.txt
+          git commit -m "chore: bump version to v${{ steps.next_version.outputs.version }}"
+          git push
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.next_version.outputs.version }}
+          name: Release v${{ steps.next_version.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

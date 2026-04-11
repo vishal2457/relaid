@@ -1,0 +1,16 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Derived",
+  "outputfilename": "Derived",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm run build",
+  "frontend:dev:watcher": "pnpm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "vishal acharya",
+    "email": "44444485+vishal2457@users.noreply.github.com"
+  },
+  "mac": {
+    "icon": "./frontend/public/iconfile.icns"
+  }
+}

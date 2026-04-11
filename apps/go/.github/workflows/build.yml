@@ -1,0 +1,302 @@
+name: Wails build
+on:
+  release:
+    types: [created]
+
+env:
+  NODE_OPTIONS: "--max-old-space-size=4096"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - name: "App"
+            platform: "linux/amd64"
+            os: "ubuntu-latest"
+            output: "linux-amd64"
+          - name: "App"
+            platform: "windows/amd64"
+            os: "windows-latest"
+            output: "windows-amd64"
+          - name: "App-Intel"
+            platform: "darwin/amd64"
+            os: "macos-15"
+            output: "darwin-amd64"
+          - name: "App-AppleSilicon"
+            platform: "darwin/arm64"
+            os: "macos-latest"
+            output: "darwin-arm64"
+    runs-on: ${{ matrix.build.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 10  # Reduced from 100, sufficient for version info
+          submodules: recursive
+
+      # Combined caching for better efficiency
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.pnpm-store
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/go.sum', '**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache: false # Using our combined cache
+
+      - name: Setup Node.js and pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      # Optimized Linux dependencies installation
+      - name: Install Linux dependencies
+        if: matrix.build.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            pkg-config \
+            build-essential
+          # Create symlink for webkit2gtk-4.0 compatibility
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc
+
+      # Streamlined macOS code signing
+      - name: Import code signing certificates
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          # Verify secrets are present
+          if [ -z "$MACOS_CERTIFICATE" ] || [ -z "$MACOS_CERTIFICATE_PASSWORD" ]; then
+            echo "❌ Missing required secrets"
+            exit 1
+          fi
+          
+          # Create temporary keychain
+          KEYCHAIN_PATH="$HOME/build.keychain"
+          KEYCHAIN_PASSWORD="temp_$(date +%s)"
+          
+          # Clean up any existing keychain
+          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+          
+          # Create and configure keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 3600 "$KEYCHAIN_PATH"
+          
+          # Import certificate
+          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          
+          # Validate certificate before import
+          if ! openssl pkcs12 -in certificate.p12 -nokeys -clcerts -passin pass:"$MACOS_CERTIFICATE_PASSWORD" >/dev/null 2>&1; then
+            echo "❌ Invalid certificate or password"
+            exit 1
+          fi
+          
+          # Import to keychain
+          security import certificate.p12 \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -A
+          
+          # Configure keychain access
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          
+          rm certificate.p12
+          
+          # Store for later use
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+
+      # Install Wails and frontend dependencies in parallel
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          pnpm install --frozen-lockfile --prefer-offline
+
+      # Simplified version generation
+      - name: Generate version info
+        id: version
+        shell: bash
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION=${VERSION#v}  # Remove 'v' prefix if present
+          COMMIT="${{ github.sha }}"
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+
+      - name: Build App
+        shell: bash
+        run: |
+          wails build \
+            -platform ${{ matrix.build.platform }} \
+            -ldflags "-X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.version.outputs.commit }} -X main.BuildDate=${{ steps.version.outputs.build_date }} -s -w" \
+            -tags production \
+            -trimpath
+
+      # Optimized macOS signing and notarization
+      - name: Sign and notarize macOS app
+        if: runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          APP_PATH=$(find build/bin -name "*.app" | head -1)
+          APP_NAME=$(basename "$APP_PATH")
+          
+          # Find signing identity
+          CERT_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | sed -n 's/.*"\(.*\)".*/\1/p')
+          
+          if [ -z "$CERT_IDENTITY" ]; then
+            echo "❌ No Developer ID Application certificate found"
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+            exit 1
+          fi
+          
+          echo "Using certificate: $CERT_IDENTITY"
+          
+          # Sign with hardened runtime
+          codesign --force --options runtime --sign "$CERT_IDENTITY" --timestamp "$APP_PATH" --deep
+          
+          # Verify signing
+          codesign --verify --deep --strict "$APP_PATH"
+          
+          # Create zip for notarization
+          cd build/bin
+          zip -r "../${APP_NAME}.zip" "$APP_NAME"
+          cd ../..
+          
+          # Submit for notarization
+          xcrun notarytool submit "build/${APP_NAME}.zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait \
+            --output-format json > notarization_result.json
+          
+          NOTARIZATION_STATUS=$(jq -r '.status' notarization_result.json)
+          
+          if [ "$NOTARIZATION_STATUS" != "Accepted" ]; then
+            echo "❌ Notarization failed: $NOTARIZATION_STATUS"
+            cat notarization_result.json
+            exit 1
+          fi
+          
+          echo "✅ Notarization successful"
+          
+          # Extract and staple
+          cd build/bin
+          rm -rf "$APP_NAME"
+          unzip "../${APP_NAME}.zip"
+          xcrun stapler staple "$APP_NAME"
+          xcrun stapler validate "$APP_NAME"
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          
+          if [[ "${{ matrix.build.os }}" == "windows-latest" ]]; then
+            # Windows: Single executable, no compression needed
+            cp build/bin/*.exe "dist/app-${{ matrix.build.output }}-v${{ steps.version.outputs.version }}.exe"
+          elif [[ "${{ matrix.build.os }}" == "ubuntu-latest" ]]; then
+            # Linux: Single binary, no compression needed
+            cp build/bin/* "dist/app-${{ matrix.build.output }}-v${{ steps.version.outputs.version }}"
+          else
+            # macOS: Create zip for .app bundle distribution
+            cd build/bin
+            zip -r -1 "../../dist/app-${{ matrix.build.output }}-v${{ steps.version.outputs.version }}.zip" *.app
+          fi
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.build.output }}-v${{ steps.version.outputs.version }}
+          path: dist/
+          compression-level: 1
+
+      - name: Cleanup keychain
+        if: runner.os == 'macOS' && always()
+        run: |
+          [ -n "$KEYCHAIN_PATH" ] && security delete-keychain "$KEYCHAIN_PATH" || true
+
+  release:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Generate version info
+        id: version
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Upload Release Assets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs').promises;
+            const path = require('path');
+
+            const { owner, repo } = context.repo;
+            const release_id = context.payload.release.id;
+
+            async function uploadFile(filePath, name) {
+              const data = await fs.readFile(filePath);
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id,
+                name,
+                data,
+              });
+              console.log(`✅ Uploaded: ${name}`);
+            }
+
+            const artifactDirs = await fs.readdir('./artifacts');
+
+            for (const dir of artifactDirs) {
+              const artifactDir = `./artifacts/${dir}`;
+              try {
+                const files = await fs.readdir(artifactDir);
+                for (const file of files) {
+                  await uploadFile(path.join(artifactDir, file), file);
+                }
+              } catch (error) {
+                console.log(`❌ Error processing ${dir}: ${error.message}`);
+              }
+            }

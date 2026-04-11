@@ -58,16 +58,18 @@ function handleRouteError(
 router.get("/", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
-    
+
     const results = await requestAllConnectedServers<ProjectsListResponse>(
       userId,
       "projects_list_request",
       "projects_list_response",
       {},
-    );    
+    );
 
-    const projects = results.flatMap((result) => result.response.projects || []);
-    
+    const projects = results.flatMap(
+      (result) => result.response.projects || [],
+    );
+
     const uniqueProjects = Array.from(
       new Map(projects.map((project) => [project.id, project])).values(),
     );
@@ -165,9 +167,7 @@ router.post("/", async (req: Request, res: Response) => {
     const { localServerId, name, description, folder } = req.body;
 
     if (!name || !folder) {
-      res
-        .status(400)
-        .json({ error: "name and folder are required" });
+      res.status(400).json({ error: "name and folder are required" });
       return;
     }
 
@@ -236,6 +236,67 @@ router.delete("/:id", async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (error) {
     handleRouteError(res, "Failed to delete project", error);
+  }
+});
+
+type BranchesResponse = {
+  branches: Array<{ name: string; isCurrent: boolean }>;
+  error?: string;
+};
+
+router.get("/:id/branches", async (req: Request, res: Response) => {
+  try {
+    const userId = requireUserId(req.headers["x-user-id"]);
+    const result = await requestUntilMatch<BranchesResponse>(
+      userId,
+      "project_branches_request",
+      "project_branches_response",
+      { projectId: req.params.id },
+      (response) => Array.isArray(response.branches),
+    );
+
+    if (!result?.response.branches) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    res.json({ branches: result.response.branches });
+  } catch (error) {
+    handleRouteError(res, "Failed to get branches", error);
+  }
+});
+
+type BranchSwitchResponse = {
+  branch: string;
+  error?: string;
+};
+
+router.post("/:id/branches/switch", async (req: Request, res: Response) => {
+  try {
+    const userId = requireUserId(req.headers["x-user-id"]);
+    const { branch } = req.body;
+
+    if (!branch) {
+      res.status(400).json({ error: "Branch name is required" });
+      return;
+    }
+
+    const result = await requestUntilMatch<BranchSwitchResponse>(
+      userId,
+      "project_branch_switch_request",
+      "project_branch_switch_response",
+      { projectId: req.params.id, branch },
+      (response) => Boolean(response.branch),
+    );
+
+    if (!result?.response.branch) {
+      res.status(404).json({ error: "Failed to switch branch" });
+      return;
+    }
+
+    res.json({ branch: result.response.branch });
+  } catch (error) {
+    handleRouteError(res, "Failed to switch branch", error);
   }
 });
 

@@ -258,6 +258,17 @@ export type ProjectUpdateResponsePayload = { project: ProjectPayload | null };
 export type ProjectDeleteRequestPayload = { projectId: string };
 export type ProjectDeleteResponsePayload = { success: boolean };
 
+export type ProjectBranchesRequestPayload = { projectId: string };
+export type ProjectBranchesResponsePayload = {
+  branches: Array<{ name: string; isCurrent: boolean }>;
+};
+
+export type ProjectBranchSwitchRequestPayload = {
+  projectId: string;
+  branch: string;
+};
+export type ProjectBranchSwitchResponsePayload = { branch: string };
+
 export type SessionsListRequestPayload = {
   projectId?: string;
   userId?: string;

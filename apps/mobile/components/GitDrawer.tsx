@@ -65,7 +65,6 @@ function CollapsibleSection({
   selectedFiles,
   onToggleFile,
   onSelectAll,
-  isActive,
   disabled,
   onCollapse,
   onFilePress,
@@ -80,8 +79,6 @@ function CollapsibleSection({
     : someSelected
       ? "indeterminate"
       : "unchecked";
-
-  const selectedCount = files.filter((f) => selectedFiles.has(f.path)).length;
 
   const handleSelectAllPress = () => {
     const paths = files.map((f) => f.path);
@@ -228,7 +225,7 @@ export function GitDrawer({
 
   const staged = data?.staged ?? [];
   const unstaged = data?.unstaged ?? [];
-  const branch = data?.branch ?? "HEAD";
+  const branch = data?.branch ?? "";
 
   const clearSelection = useCallback(() => {
     setSelectedFiles(new Set());
@@ -495,7 +492,7 @@ export function GitDrawer({
                 disabled={stageFiles.isPending || unstageFiles.isPending}
               >
                 {(activeSection === "changes" && stageFiles.isPending) ||
-                (activeSection === "staged" && unstageFiles.isPending) ? (
+                  (activeSection === "staged" && unstageFiles.isPending) ? (
                   <ActivityIndicator size={14} color="#fff" />
                 ) : (
                   <MaterialCommunityIcons

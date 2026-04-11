@@ -29,6 +29,7 @@ type ChatComposerProps = {
   activeProject: boolean;
   activeProjectName: string;
   borderColor: string;
+  branchName?: string;
   fileSuggestions?: ProjectFileMatch[];
   fileSuggestionsLoading: boolean;
   inputHeight: number;
@@ -39,6 +40,7 @@ type ChatComposerProps = {
   metaColor: string;
   onChangeText: (value: string) => void;
   onInputHeightChange: (height: number) => void;
+  onPressBranch: () => void;
   onSelectionChange: (
     event: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
   ) => void;
@@ -55,6 +57,7 @@ export function ChatComposer({
   activeProject,
   activeProjectName,
   borderColor,
+  branchName,
   fileSuggestions,
   fileSuggestionsLoading,
   inputHeight,
@@ -65,6 +68,7 @@ export function ChatComposer({
   metaColor,
   onChangeText,
   onInputHeightChange,
+  onPressBranch,
   onSelectionChange,
   onSelectFileSuggestion,
   onSend,
@@ -258,6 +262,7 @@ export function ChatComposer({
                   { color: theme.colors.onSurface },
                 ]}
                 numberOfLines={1}
+                ellipsizeMode="tail"
               >
                 {activeProjectName}
               </Text>
@@ -286,6 +291,7 @@ export function ChatComposer({
                   { color: theme.colors.onSurface },
                 ]}
                 numberOfLines={1}
+                ellipsizeMode="tail"
               >
                 {selectedModelName}
               </Text>
@@ -314,6 +320,20 @@ export function ChatComposer({
           </Pressable>
         </View>
       </View>
+      <Pressable
+        onPress={onPressBranch}
+        style={({ pressed }) => [
+          styles.branchRow,
+          pressed && styles.metaButtonPressed,
+        ]}
+      >
+        <MaterialCommunityIcons
+          name="source-branch"
+          size={14}
+          color={metaColor}
+        />
+        <Text>{branchName}</Text>
+      </Pressable>
     </View>
   );
 }
@@ -332,10 +352,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   metaRow: {
+    flex: 1,
     flexDirection: "row",
     gap: 0,
+    marginRight: 12,
   },
   metaButton: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
@@ -357,8 +380,17 @@ const styles = StyleSheet.create({
   metaButtonPressed: {
     opacity: 0.7,
   },
+  branchRow: {
+    justifyContent: "flex-end",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 5,
+    flexDirection: "row",
+    gap: 5,
+  },
   metaButtonText: {
     fontSize: 12,
+    flex: 1,
   },
   metaDivider: {
     width: 1,
@@ -398,7 +430,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 2
+    marginBottom: 2,
   },
   bottomRow: {
     flexDirection: "row",

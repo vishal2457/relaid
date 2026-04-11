@@ -39,6 +39,8 @@ import type {
   MessageQueueExecuteRequestPayload,
   MessageQueueExecuteResponsePayload,
   QueueItemPayload,
+  ProjectBranchesRequestPayload,
+  ProjectBranchSwitchRequestPayload,
 } from "../types";
 import { opencodeCatalogService } from "./opencode-catalog-service";
 import { GitService } from "./git-service";
@@ -370,6 +372,20 @@ export class ChatServerClient {
       "project_delete_request",
       (payload: { requestId: string } & ProjectDeleteRequestPayload) => {
         void this.handleProjectDeleteRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "project_branches_request",
+      (payload: { requestId: string } & ProjectBranchesRequestPayload) => {
+        void this.handleProjectBranchesRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "project_branch_switch_request",
+      (payload: { requestId: string } & ProjectBranchSwitchRequestPayload) => {
+        void this.handleProjectBranchSwitchRequest(payload);
       },
     );
 
@@ -718,6 +734,83 @@ export class ChatServerClient {
       "PROJECT_DELETE_ERROR",
       "Project deletion via the app database is deprecated; OpenCode owns projects",
     );
+  }
+
+  private async handleProjectBranchesRequest(
+    payload: { requestId: string } & ProjectBranchesRequestPayload,
+  ): Promise<void> {
+    try {
+      const project = await opencodeCatalogService.getProject(
+        payload.projectId,
+      );
+      if (!project) {
+        this.sendError(
+          payload.requestId,
+          "PROJECT_NOT_FOUND",
+          "Project not found",
+        );
+        return;
+      }
+      const gitService = new GitService(project.worktree);
+      const result = await gitService.listBranches(false);
+      if (!result.success) {
+        this.sendError(
+          payload.requestId,
+          "LIST_BRANCHES_ERROR",
+          result.error ?? "Failed to list branches",
+        );
+        return;
+      }
+      const branches =
+        result.data
+          ?.filter((b) => !b.isRemote)
+          .map((b) => ({
+            name: b.name,
+            isCurrent: b.isCurrent,
+          })) ?? [];
+      this.emit("project_branches_response", {
+        requestId: payload.requestId,
+        branches,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.sendError(payload.requestId, "LIST_BRANCHES_ERROR", errMsg);
+    }
+  }
+
+  private async handleProjectBranchSwitchRequest(
+    payload: { requestId: string } & ProjectBranchSwitchRequestPayload,
+  ): Promise<void> {
+    try {
+      const project = await opencodeCatalogService.getProject(
+        payload.projectId,
+      );
+      if (!project) {
+        this.sendError(
+          payload.requestId,
+          "PROJECT_NOT_FOUND",
+          "Project not found",
+        );
+        return;
+      }
+      const gitService = new GitService(project.worktree);
+      const result = await gitService.switchBranch(payload.branch);
+      if (!result.success) {
+        this.sendError(
+          payload.requestId,
+          "SWITCH_BRANCH_ERROR",
+          result.error ?? "Failed to switch branch",
+        );
+        return;
+      }
+      this.emit("project_branch_switch_response", {
+        requestId: payload.requestId,
+        branch: payload.branch,
+      });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.sendError(payload.requestId, "SWITCH_BRANCH_ERROR", errMsg);
+    }
   }
 
   private async handleSessionsListRequest(

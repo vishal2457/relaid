@@ -59,6 +59,7 @@ import {
   type Project,
   type ProjectFileMatch,
 } from "@/lib/api/projects";
+import { useBranches, useSwitchBranch, type Branch } from "@/lib/api/branches";
 import {
   useProviders,
   type Provider,
@@ -83,6 +84,7 @@ import {
 } from "@/lib/notifications";
 import { AppState, type AppStateStatus } from "react-native";
 import { GitDrawer } from "@/components/GitDrawer";
+import { useGitFileStatus } from "@/lib/api/git";
 import { QueueDrawer } from "@/components/QueueDrawer";
 import { MessageRow, TypingIndicator } from "@/components/Message";
 import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
@@ -266,7 +268,9 @@ export default function ChatScreen() {
     React.useState<SessionMessage | null>(null);
   const [showProjectSheet, setShowProjectSheet] = React.useState(false);
   const [showProviderSheet, setShowProviderSheet] = React.useState(false);
+  const [showBranchSheet, setShowBranchSheet] = React.useState(false);
   const [modelSearchQuery, setModelSearchQuery] = React.useState("");
+  const [branchSearchQuery, setBranchSearchQuery] = React.useState("");
   const [activeProject, setActiveProject] = React.useState<Project | null>(
     null,
   );
@@ -425,7 +429,7 @@ export default function ChatScreen() {
     if (!hydrated) return;
     if (activeProject) {
       AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => { },
+        () => {},
       );
     }
   }, [activeProject, hydrated]);
@@ -436,7 +440,7 @@ export default function ChatScreen() {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
-      ).catch(() => { });
+      ).catch(() => {});
     }
   }, [activeModel, hydrated]);
 
@@ -457,7 +461,7 @@ export default function ChatScreen() {
             setActiveModel(savedModel);
           }
         }
-      } catch { }
+      } catch {}
     })();
   }, [hydrated, providers]);
 
@@ -468,6 +472,16 @@ export default function ChatScreen() {
     refetch,
   } = useSessionMessages(activeSessionId ?? "");
   const { refetch: refetchActiveSession } = useSession(activeSessionId ?? "");
+  const { data: gitFileStatus } = useGitFileStatus(
+    activeProject?.id ?? "",
+    Boolean(activeProject),
+  );
+  const currentBranch = gitFileStatus?.branch ?? "main";
+  const { data: branches, isLoading: branchesLoading } = useBranches(
+    activeProject?.id ?? "",
+    showBranchSheet && Boolean(activeProject),
+  );
+  const switchBranchMutation = useSwitchBranch(activeProject?.id ?? "");
 
   const displayedMessages = React.useMemo(() => {
     if (!optimisticMessage) {
@@ -482,18 +496,18 @@ export default function ChatScreen() {
 
     const filtered = normalizedQuery
       ? models
-        .map((model) => ({
-          model,
-          score: getModelSearchScore(model, normalizedQuery),
-        }))
-        .filter((entry) => entry.score >= 0)
-        .sort((a, b) => {
-          if (b.score !== a.score) {
-            return b.score - a.score;
-          }
-          return a.model.name.localeCompare(b.model.name);
-        })
-        .map((entry) => entry.model)
+          .map((model) => ({
+            model,
+            score: getModelSearchScore(model, normalizedQuery),
+          }))
+          .filter((entry) => entry.score >= 0)
+          .sort((a, b) => {
+            if (b.score !== a.score) {
+              return b.score - a.score;
+            }
+            return a.model.name.localeCompare(b.model.name);
+          })
+          .map((entry) => entry.model)
       : models;
 
     if (!activeModel) {
@@ -517,6 +531,22 @@ export default function ChatScreen() {
     );
     return sorted;
   }, [projects, activeProject]);
+
+  const sortedBranches = React.useMemo(() => {
+    const normalizedQuery = branchSearchQuery.toLowerCase().trim();
+    let filtered = branches ?? [];
+    if (normalizedQuery) {
+      filtered = filtered.filter((b) =>
+        b.name.toLowerCase().includes(normalizedQuery),
+      );
+    }
+    filtered.sort((a, b) => {
+      if (a.isCurrent) return -1;
+      if (b.isCurrent) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    return filtered;
+  }, [branches, branchSearchQuery, currentBranch]);
 
   const hasScrolledToBottom = React.useRef(false);
   React.useEffect(() => {
@@ -697,7 +727,7 @@ export default function ChatScreen() {
 
   const connectSse = React.useCallback(() => {
     if (!isMountedRef.current) {
-      return () => { };
+      return () => {};
     }
 
     setConnectionState("connecting");
@@ -769,7 +799,7 @@ export default function ChatScreen() {
       setConnectionState("disconnected");
       sseClientRef.current = null;
       unsubscribe();
-      return () => { };
+      return () => {};
     }
 
     sseClientRef.current = client;
@@ -968,9 +998,9 @@ export default function ChatScreen() {
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-      mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
-      220,
-    ) + 8
+        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
+        220,
+      ) + 8
     : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
@@ -1053,9 +1083,9 @@ export default function ChatScreen() {
         prompt: trimmedInput,
         model: activeModel
           ? {
-            providerId: activeModel.providerId,
-            modelId: activeModel.id,
-          }
+              providerId: activeModel.providerId,
+              modelId: activeModel.id,
+            }
           : undefined,
       });
     } catch (error) {
@@ -1358,8 +1388,8 @@ export default function ChatScreen() {
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
-            activeSessionId &&
-            displayedMessages.length === 0 ? (
+          activeSessionId &&
+          displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
@@ -1450,12 +1480,14 @@ export default function ChatScreen() {
           activeProject={Boolean(activeProject)}
           activeProjectName={activeProject?.name ?? "No project"}
           borderColor={borderColor}
+          branchName={currentBranch}
           fileSuggestions={fileSuggestions}
           fileSuggestionsLoading={fileSuggestionsLoading}
           inputHeight={inputHeight}
           inputSelection={inputSelection}
           inputText={inputText}
           isSending={isSessionSending}
+          onPressBranch={() => setShowBranchSheet(true)}
           mentionQuery={activeMention?.query ?? ""}
           metaColor={metaColor}
           onChangeText={setInputText}
@@ -1711,6 +1743,120 @@ export default function ChatScreen() {
         </Pressable>
       </Modal>
 
+      <Modal
+        visible={showBranchSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowBranchSheet(false);
+          setBranchSearchQuery("");
+        }}
+      >
+        <Pressable
+          style={styles.sheetOverlay}
+          onPress={() => {
+            setShowBranchSheet(false);
+            setBranchSearchQuery("");
+          }}
+        >
+          <View style={[styles.sheetContainer, { backgroundColor: sheetBg }]}>
+            <View style={styles.sheetHandle} />
+            <Text variant="titleMedium" style={styles.sheetTitle}>
+              Select Branch
+            </Text>
+            <View style={styles.sheetSearchContainer}>
+              <PaperTextInput
+                mode="outlined"
+                dense
+                value={branchSearchQuery}
+                onChangeText={setBranchSearchQuery}
+                placeholder="Search branches"
+                autoCapitalize="none"
+                autoCorrect={false}
+                left={<PaperTextInput.Icon icon="magnify" />}
+                right={
+                  branchSearchQuery ? (
+                    <PaperTextInput.Icon
+                      icon="close"
+                      onPress={() => setBranchSearchQuery("")}
+                    />
+                  ) : undefined
+                }
+              />
+            </View>
+            {branchesLoading ? (
+              <View style={styles.sheetLoading}>
+                <ActivityIndicator />
+              </View>
+            ) : (
+              <FlatList
+                data={sortedBranches}
+                keyExtractor={(item) => item.name}
+                style={styles.sheetList}
+                renderItem={({ item }) => {
+                  const isCurrentBranch = item.name === currentBranch;
+                  return (
+                    <Pressable
+                      onPress={async () => {
+                        if (!isCurrentBranch) {
+                          await switchBranchMutation.mutateAsync(item.name);
+                        }
+                        setShowBranchSheet(false);
+                        setBranchSearchQuery("");
+                      }}
+                      style={[
+                        styles.sheetItem,
+                        {
+                          backgroundColor: isCurrentBranch
+                            ? "rgba(150,150,150,0.12)"
+                            : "transparent",
+                          borderColor,
+                        },
+                      ]}
+                    >
+                      <View style={styles.sheetItemRow}>
+                        <View
+                          style={[
+                            styles.statusDot,
+                            {
+                              backgroundColor: isCurrentBranch
+                                ? "#00FF41"
+                                : "#F2A900",
+                            },
+                          ]}
+                        />
+                        <View style={styles.sheetItemContent}>
+                          <Text
+                            variant="bodyLarge"
+                            style={{
+                              fontWeight: isCurrentBranch ? "600" : "500",
+                              color: theme.colors.onSurface,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {item.name}
+                          </Text>
+                        </View>
+                      </View>
+                    </Pressable>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={styles.sheetEmpty}>
+                    <Text
+                      variant="bodyMedium"
+                      style={{ color: theme.colors.onSurfaceVariant }}
+                    >
+                      No branches found
+                    </Text>
+                  </View>
+                }
+              />
+            )}
+          </View>
+        </Pressable>
+      </Modal>
+
       <SessionDrawer
         visible={showDrawer}
         onClose={() => setShowDrawer(false)}
@@ -1897,5 +2043,15 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
     alignItems: "center",
     justifyContent: "center",
+  },
+  branchBadge: {
+    position: "absolute",
+    right: 16,
+    bottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
 });
