@@ -94,6 +94,10 @@ func (s *Server) Issues() []string {
 	return s.cfg.MissingConfig
 }
 
+func (s *Server) Registry() *agent.Registry {
+	return s.registry
+}
+
 func (s *Server) Address() string {
 	return s.cfg.ServerAddr
 }
