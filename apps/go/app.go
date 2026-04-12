@@ -25,6 +25,8 @@ type App struct {
 	ctx      context.Context
 	server   *server.Server
 	keychain *secrets.Keychain
+	handler  *relay.Handler
+	client   *relay.Client
 }
 
 func NewApp() *App {
@@ -48,9 +50,65 @@ func (a *App) startup(ctx context.Context) {
 			wruntime.LogErrorf(ctx, "embedded server stopped: %v", err)
 		}
 	}()
+
+	a.startRelayClient(cfg)
+}
+
+func (a *App) startRelayClient(cfg config.Config) {
+	relayURL, err := a.keychain.Get(RELAY_URL_KEY)
+	if err != nil || relayURL == "" {
+		log.Println("relay: URL not configured, skipping relay connection")
+		return
+	}
+
+	relayURL = relay.NormalizeRelayURL(relayURL)
+	creds, err := relay.LoadOrCreateDeviceCredentials(
+		os.Getenv("LOCAL_SERVER_ID"),
+		os.Getenv("LOCAL_SERVER_SECRET"),
+	)
+	if err != nil {
+		log.Printf("relay: failed to load device credentials: %v", err)
+		return
+	}
+
+	if err := relay.PingRelayHealth(relayURL); err != nil {
+		log.Printf("relay: relay server not reachable: %v", err)
+		return
+	}
+
+	client := relay.NewClient(relay.ClientOptions{
+		RelayURL:          relayURL,
+		ServerID:          creds.ServerID,
+		ServerSecret:      creds.ServerSecret,
+		ServerName:        relay.GetServerName(),
+		ReconnectInterval: 5 * time.Second,
+		Logger:            log.Default(),
+		OnConnect: func() {
+			log.Println("relay: connected to relay server")
+		},
+		OnDisconnect: func(reason string) {
+			log.Printf("relay: disconnected from relay server: %s", reason)
+		},
+	})
+
+	handler := relay.NewHandler(client, a.server.Registry(), log.Default())
+	client.SetEventHandler(handler.OnEvent)
+
+	a.client = client
+	a.handler = handler
+
+	go func() {
+		if err := client.Connect(); err != nil {
+			log.Printf("relay: failed to connect: %v", err)
+		}
+	}()
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.client != nil {
+		a.client.Close()
+	}
+
 	if a.server == nil {
 		return
 	}
