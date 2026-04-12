@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"sync"
 	"time"
 
 	opencode "github.com/sst/opencode-sdk-go"
@@ -15,8 +16,11 @@ import (
 )
 
 type Adapter struct {
-	client *opencode.Client
-	cwd    string
+	client    *opencode.Client
+	cwd       string
+	lazySetup func() (string, error)
+	initOnce  sync.Once
+	initErr   error
 }
 
 func New(baseURL, cwd string) *Adapter {
@@ -31,7 +35,36 @@ func New(baseURL, cwd string) *Adapter {
 	}
 }
 
+func NewLazy(cwd string, resolveURL func() (string, error)) *Adapter {
+	return &Adapter{
+		cwd:       cwd,
+		lazySetup: resolveURL,
+	}
+}
+
+func (a *Adapter) ensureClient() error {
+	if a.client != nil {
+		return nil
+	}
+	if a.lazySetup == nil {
+		return fmt.Errorf("opencode SDK client not configured")
+	}
+	a.initOnce.Do(func() {
+		baseURL, err := a.lazySetup()
+		if err != nil {
+			a.initErr = fmt.Errorf("start opencode server: %w", err)
+			return
+		}
+		opts := []option.RequestOption{option.WithBaseURL(baseURL)}
+		a.client = opencode.NewClient(opts...)
+	})
+	return a.initErr
+}
+
 func (a *Adapter) ListProjects(ctx context.Context) ([]agent.Project, error) {
+	if err := a.ensureClient(); err != nil {
+		return nil, err
+	}
 	projects, err := a.client.Project.List(ctx, opencode.ProjectListParams{
 		Directory: opencode.F(a.cwd),
 	})
@@ -61,6 +94,9 @@ func (a *Adapter) GetProject(ctx context.Context, projectID string) (*agent.Proj
 }
 
 func (a *Adapter) GetSession(ctx context.Context, sessionID string) (*agent.Session, error) {
+	if err := a.ensureClient(); err != nil {
+		return nil, err
+	}
 	session, err := a.client.Session.Get(ctx, sessionID, opencode.SessionGetParams{})
 	if err != nil {
 		return nil, err
@@ -70,6 +106,9 @@ func (a *Adapter) GetSession(ctx context.Context, sessionID string) (*agent.Sess
 }
 
 func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limit int) ([]agent.MessageEnvelope, error) {
+	if err := a.ensureClient(); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 100
 	}
@@ -119,6 +158,9 @@ func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limi
 }
 
 func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID string) ([]agent.FileDiff, error) {
+	if err := a.ensureClient(); err != nil {
+		return nil, err
+	}
 	session, err := a.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -160,6 +202,9 @@ func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID strin
 }
 
 func (a *Adapter) ListProviders(ctx context.Context) ([]agent.Provider, error) {
+	if err := a.ensureClient(); err != nil {
+		return nil, err
+	}
 	response, err := a.client.App.Providers(ctx, opencode.AppProvidersParams{
 		Directory: opencode.F(a.cwd),
 	})
@@ -247,6 +292,28 @@ func mapSession(session opencode.Session) agent.Session {
 	}
 
 	return value
+}
+
+func (a *Adapter) ListSessions(ctx context.Context, directory string) ([]agent.Session, error) {
+	if err := a.ensureClient(); err != nil {
+		return nil, err
+	}
+
+	params := opencode.SessionListParams{}
+	if directory != "" {
+		params.Directory = opencode.F(directory)
+	}
+
+	sessions, err := a.client.Session.List(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]agent.Session, 0, len(*sessions))
+	for _, session := range *sessions {
+		result = append(result, mapSession(session))
+	}
+	return result, nil
 }
 
 func (a *Adapter) ResolveProjectByDirectory(ctx context.Context, directory string) (string, error) {

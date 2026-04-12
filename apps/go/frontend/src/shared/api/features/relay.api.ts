@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 const getApp = () => {
   const app = (window as any).go?.main?.App;
@@ -13,6 +13,19 @@ export const useRelayHooks = () => {
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isCreating, setIsCreating] = useState<boolean>(false);
+  const [isPinging, setIsPinging] = useState<boolean>(false);
+
+  const checkConnection = useCallback(async () => {
+    try {
+      const App = getApp();
+      const connected = await App.PingRelay();
+      setIsConnected(connected);
+      return connected;
+    } catch {
+      setIsConnected(false);
+      return false;
+    }
+  }, []);
 
   const fetchStoredUrl = async () => {
     try {
@@ -21,8 +34,7 @@ export const useRelayHooks = () => {
       setStoredUrl(url || "");
 
       if (url) {
-        const connected = await App.PingRelay();
-        setIsConnected(connected);
+        await checkConnection();
       } else {
         setIsConnected(false);
       }
@@ -42,13 +54,23 @@ export const useRelayHooks = () => {
       const App = getApp();
       await App.StoreRelayURL(url);
       setStoredUrl(url);
-      setIsConnected(true);
+      await checkConnection();
     } catch (err) {
       console.error("Failed to save URL:", err);
     } finally {
       setIsSaving(false);
     }
   };
+
+  const pingRelay = useCallback(async () => {
+    setIsPinging(true);
+    try {
+      const connected = await checkConnection();
+      return connected;
+    } finally {
+      setIsPinging(false);
+    }
+  }, [checkConnection]);
 
   const createPairing = async () => {
     setIsCreating(true);
@@ -68,7 +90,9 @@ export const useRelayHooks = () => {
     isConnected,
     isSaving,
     isCreating,
+    isPinging,
     saveUrl,
+    pingRelay,
     createPairing,
   };
 };

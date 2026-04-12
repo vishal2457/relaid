@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -85,6 +86,32 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 		go h.handlePermissionResponse(args)
 	case EventQuestionResponse:
 		go h.handleQuestionResponse(args)
+
+	// Response events — handled by the relay server or other clients, ignore here
+	case EventProjectsListResponse,
+		EventProjectGetResponse,
+		EventProjectDirectoryResponse,
+		EventProjectFileSearchResponse,
+		EventProjectBranchesResponse,
+		EventProjectBranchSwitchResponse,
+		EventSessionsListResponse,
+		EventSessionGetResponse,
+		EventSessionCreateResponse,
+		EventSessionMessagesResponse,
+		EventSessionDiffResponse,
+		EventSessionUpdateResponse,
+		EventSessionPromptStarted,
+		EventSessionStreamChunk,
+		EventSessionPromptResponse,
+		EventSessionAborted,
+		EventProvidersListResponse,
+		EventGitStagedFilesResponse,
+		EventGitStageFilesResponse,
+		EventGitUnstageFilesResponse,
+		EventGitFileDiffResponse,
+		EventGitDiscardFileResponse,
+		EventErrorResponse:
+		// silently ignore response events
 	default:
 		h.logger.Printf("relay: unhandled event: %s", event)
 	}
@@ -126,8 +153,11 @@ func (h *Handler) handleProjectsList(args []json.RawMessage) {
 		return
 	}
 
+	h.logger.Printf("relay: provider: %v", provider)
+
 	projects, err := provider.Projects().List(context.Background())
 	if err != nil {
+		h.logger.Printf("relay: failed to list projects: %v", err)
 		h.emit(EventProjectsListResponse, ProjectsListResponse{
 			RequestID: req.RequestID,
 			Projects:  []ProjectPayload{},
@@ -140,9 +170,13 @@ func (h *Handler) handleProjectsList(args []json.RawMessage) {
 		Projects:  make([]ProjectPayload, 0, len(projects)),
 	}
 	for _, p := range projects {
+		name := p.ID
+		if p.Worktree != "" {
+			name = filepath.Base(p.Worktree)
+		}
 		pp := ProjectPayload{
 			ID:        p.ID,
-			Name:      p.ID,
+			Name:      name,
 			Folder:    p.Worktree,
 			CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
 			UpdatedAt: p.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
@@ -181,9 +215,13 @@ func (h *Handler) handleProjectGet(args []json.RawMessage) {
 		return
 	}
 
+	name := project.ID
+	if project.Worktree != "" {
+		name = filepath.Base(project.Worktree)
+	}
 	pp := &ProjectPayload{
 		ID:        project.ID,
-		Name:      project.ID,
+		Name:      name,
 		Folder:    project.Worktree,
 		CreatedAt: project.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
 		UpdatedAt: project.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
@@ -343,19 +381,16 @@ func (h *Handler) handleSessionMessages(args []json.RawMessage) {
 	if err != nil {
 		h.emit(EventSessionMessagesResponse, SessionMessagesResponse{
 			RequestID: req.RequestID,
-			Messages:  []MessagePayload{},
+			Envelopes: []EnvelopePayload{},
 		})
 		return
 	}
 
-	msgs := make([]MessagePayload, 0, len(envelopes))
-	for _, env := range envelopes {
-		msgs = append(msgs, convertMessages(env)...)
-	}
+	h.logger.Printf("relay: session envelopes: %v", len(envelopes))
 
 	h.emit(EventSessionMessagesResponse, SessionMessagesResponse{
 		RequestID: req.RequestID,
-		Messages:  msgs,
+		Envelopes: envelopes,
 	})
 }
 
@@ -369,8 +404,22 @@ func (h *Handler) handleSessionCreate(args []json.RawMessage) {
 		return
 	}
 
-	_ = req
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "session create via relay not yet supported; use session_prompt_request instead")
+	provider, err := h.getProvider()
+	if err != nil {
+		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
+		return
+	}
+
+	session, err := provider.Sessions().Create(context.Background(), req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "SESSION_CREATE_ERROR", err.Error())
+		return
+	}
+
+	h.emit(EventSessionCreateResponse, SessionCreateResponse{
+		RequestID: req.RequestID,
+		Session:   convertSession(*session),
+	})
 }
 
 func (h *Handler) handleSessionDiff(args []json.RawMessage) {
@@ -784,46 +833,4 @@ func convertSessionPtr(s *agent.Session) *SessionPayload {
 	}
 	sp := convertSession(*s)
 	return &sp
-}
-
-func convertMessages(env agent.MessageEnvelope) []MessagePayload {
-	var msgs []MessagePayload
-	for _, part := range env.Parts {
-		var pType struct {
-			Type    string          `json:"type"`
-			Content json.RawMessage `json:"content"`
-		}
-		if err := json.Unmarshal(part, &pType); err != nil {
-			continue
-		}
-
-		content := string(pType.Content)
-		if len(content) > 2 && content[0] == '"' && content[len(content)-1] == '"' {
-			var unquoted string
-			json.Unmarshal(pType.Content, &unquoted)
-			content = unquoted
-		}
-
-		var parsedParts []MessagePart
-		parsedParts = append(parsedParts, MessagePart{
-			Type:    pType.Type,
-			Content: content,
-		})
-
-		var info struct {
-			ID        string `json:"id"`
-			SessionID string `json:"sessionId"`
-			Role      string `json:"role"`
-		}
-		json.Unmarshal(env.Info, &info)
-
-		msgs = append(msgs, MessagePayload{
-			ID:        info.ID,
-			SessionID: info.SessionID,
-			Role:      info.Role,
-			Content:   content,
-			Parts:     parsedParts,
-		})
-	}
-	return msgs
 }

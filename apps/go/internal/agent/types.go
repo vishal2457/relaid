@@ -40,6 +40,7 @@ type ProjectService interface {
 type SessionService interface {
 	List(context.Context, SessionFilters) ([]Session, string, error)
 	Get(context.Context, string) (*Session, error)
+	Create(context.Context, string) (*Session, error)
 	Messages(context.Context, string, int) ([]MessageEnvelope, error)
 	Diff(context.Context, string, string) ([]FileDiff, error)
 	Run(context.Context, RunInput) (*RunResult, error)
@@ -153,6 +154,6 @@ type Provider struct {
 }
 
 type MessageEnvelope struct {
-	Info  json.RawMessage
-	Parts []json.RawMessage
+	Info  json.RawMessage   `json:"info"`
+	Parts []json.RawMessage `json:"parts"`
 }

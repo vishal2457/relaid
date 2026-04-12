@@ -17,19 +17,39 @@ export interface Project {
   updatedAt?: number;
 }
 
-// Convert OpenCode Project to mobile Project
-export function adaptProject(openCodeProject: OpenCodeProject): Project {
-  // Extract project name from directory path
-  const pathParts = openCodeProject.worktree.split("/");
-  const name = pathParts[pathParts.length - 1] || "Unnamed Project";
+// Convert relay ProjectPayload to mobile Project
+export function adaptProject(project: OpenCodeProject): Project {
+  // Relay sends: { id, name, description, folder, createdAt, updatedAt }
+  // OpenCode SDK sends: { id, worktree, time: { created, initialized } }
+  const folder = project.folder ?? project.worktree ?? "";
+
+  let createdAt: number | undefined;
+  let updatedAt: number | undefined;
+
+  if (typeof project.createdAt === "string") {
+    createdAt = new Date(project.createdAt).getTime();
+  } else if (project.time?.created) {
+    createdAt = project.time.created;
+  }
+
+  if (typeof project.updatedAt === "string") {
+    updatedAt = new Date(project.updatedAt).getTime();
+  } else {
+    updatedAt = project.time?.initialized ?? project.time?.created ?? createdAt;
+  }
+
+  const pathParts = folder.split("/");
+  const name =
+    project.name || pathParts[pathParts.length - 1] || "Unnamed Project";
 
   return {
-    id: openCodeProject.id,
+    id: project.id,
     name,
-    description: "", // OpenCode doesn't have description in the same way
-    folder: openCodeProject.worktree,
-    createdAt: openCodeProject.time.created,
-    updatedAt: openCodeProject.time.initialized ?? openCodeProject.time.created,
+    description: project.description ?? "",
+    folder,
+    localServerId: project.localServerId ?? null,
+    createdAt,
+    updatedAt,
   };
 }
 

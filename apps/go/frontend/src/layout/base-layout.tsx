@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Settings, Home } from "lucide-react";
+import { Home } from "lucide-react";
 
 import {
   NavigationMenu,
@@ -46,24 +46,6 @@ export default function BaseLayout({
                   >
                     <Home className="mr-2 h-4 w-4" />
                     Home
-                  </Link>
-                </NavigationMenuLink>
-              </NavigationMenuItem>
-              <NavigationMenuItem>
-                <NavigationMenuLink
-                  asChild
-                  className={navigationMenuTriggerStyle()}
-                >
-                  <Link
-                    to={ROUTES_PATH.Settings}
-                    className={cn(
-                      navigationMenuTriggerStyle(),
-                      location.pathname === ROUTES_PATH.Settings &&
-                        "bg-accent text-accent-foreground",
-                    )}
-                  >
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
                   </Link>
                 </NavigationMenuLink>
               </NavigationMenuItem>

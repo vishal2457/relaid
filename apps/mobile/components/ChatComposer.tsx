@@ -13,6 +13,7 @@ import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { type ProjectFileMatch } from "@/lib/api/projects";
+import { type Skill } from "@/lib/api/skills";
 
 export const MIN_INPUT_HEIGHT = 44;
 export const MAX_INPUT_HEIGHT = 150;
@@ -50,6 +51,10 @@ type ChatComposerProps = {
   onPressProject: () => void;
   selectedModelName: string;
   showMentionSuggestions: boolean;
+  showSkillSuggestions: boolean;
+  skillSuggestions?: Skill[];
+  skillSuggestionsLoading: boolean;
+  onSelectSkillSuggestion: (skill: Skill) => void;
   trimmedInput: string;
 };
 
@@ -76,6 +81,10 @@ export function ChatComposer({
   onPressProject,
   selectedModelName,
   showMentionSuggestions,
+  showSkillSuggestions,
+  skillSuggestions,
+  skillSuggestionsLoading,
+  onSelectSkillSuggestion,
   trimmedInput,
 }: ChatComposerProps) {
   const theme = useTheme();
@@ -120,6 +129,16 @@ export function ChatComposer({
       });
     },
     [onSelectFileSuggestion],
+  );
+
+  const handleSkillSuggestionPress = React.useCallback(
+    (skill: Skill) => {
+      onSelectSkillSuggestion(skill);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+    },
+    [onSelectSkillSuggestion],
   );
 
   return (
@@ -202,6 +221,66 @@ export function ChatComposer({
             <View style={styles.mentionEmptyState}>
               <Text variant="bodySmall" style={{ color: metaColor }}>
                 No matching files or folders
+              </Text>
+            </View>
+          )}
+        </View>
+      ) : null}
+      {showSkillSuggestions ? (
+        <View
+          style={[
+            styles.mentionPanel,
+            {
+              backgroundColor: theme.colors.background,
+              borderColor,
+            },
+          ]}
+        >
+          {skillSuggestionsLoading ? (
+            <View style={styles.mentionEmptyState}>
+              <ActivityIndicator size="small" />
+            </View>
+          ) : skillSuggestions && skillSuggestions.length > 0 ? (
+            <ScrollView
+              style={styles.mentionResults}
+              contentContainerStyle={styles.mentionResultsContent}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              {skillSuggestions.map((item) => (
+                <Pressable
+                  key={item.name}
+                  onPress={() => handleSkillSuggestionPress(item)}
+                  style={styles.mentionItem}
+                >
+                  <MaterialCommunityIcons
+                    name="lightning-bolt-outline"
+                    size={18}
+                    color={theme.colors.primary}
+                  />
+                  <View style={styles.mentionItemContent}>
+                    <Text
+                      variant="bodyMedium"
+                      style={{ color: theme.colors.onSurface }}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </Text>
+                    <Text
+                      variant="bodySmall"
+                      style={{ color: metaColor }}
+                      numberOfLines={2}
+                    >
+                      {item.description}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={styles.mentionEmptyState}>
+              <Text variant="bodySmall" style={{ color: metaColor }}>
+                No skills found
               </Text>
             </View>
           )}

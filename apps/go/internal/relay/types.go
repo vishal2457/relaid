@@ -1,6 +1,12 @@
 package relay
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"relaid/internal/agent"
+)
+
+type EnvelopePayload = agent.MessageEnvelope
 
 const (
 	EventProjectsListRequest         = "projects_list_request"
@@ -191,8 +197,8 @@ type SessionMessagesRequest struct {
 }
 
 type SessionMessagesResponse struct {
-	RequestID string           `json:"requestId"`
-	Messages  []MessagePayload `json:"messages"`
+	RequestID string            `json:"requestId"`
+	Envelopes []EnvelopePayload `json:"messages"`
 }
 
 type SessionDiffRequest struct {

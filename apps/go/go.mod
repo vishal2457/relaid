@@ -10,6 +10,7 @@ require (
 	github.com/labstack/echo/v4 v4.10.2
 	github.com/sst/opencode-sdk-go v0.19.0
 	github.com/wailsapp/wails/v2 v2.9.3
+	nhooyr.io/websocket v1.8.17
 )
 
 require (
@@ -43,7 +44,6 @@ require (
 	golang.org/x/net v0.39.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
-	nhooyr.io/websocket v1.8.17 // indirect
 )
 
 // replace github.com/wailsapp/wails/v2 v2.9.3 => /Users/vishalacharya/go/pkg/mod

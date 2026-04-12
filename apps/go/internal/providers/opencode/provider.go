@@ -25,7 +25,18 @@ type Provider struct {
 }
 
 func New(cfg config.Config, logger *log.Logger) *Provider {
-	sdk := sdkclient.New(cfg.OpencodeBaseURL, cfg.OpencodeCwd)
+	var sdk *sdkclient.Adapter
+	var serverMgr *ServerManager
+
+	if cfg.OpencodeBaseURL != "" {
+		sdk = sdkclient.New(cfg.OpencodeBaseURL, cfg.OpencodeCwd)
+	} else {
+		serverMgr = NewServerManager(cfg.OpencodeBin, cfg.OpencodeCwd, logger)
+		sdk = sdkclient.NewLazy(cfg.OpencodeCwd, func() (string, error) {
+			return serverMgr.Start(context.Background())
+		})
+	}
+
 	acp := acpclient.NewClient(cfg.OpencodeBin, cfg.OpencodeCwd, logger)
 	activeRuns := &activeRunStore{runs: map[string]context.CancelFunc{}}
 
@@ -119,48 +130,39 @@ type activeRunStore struct {
 }
 
 func (s *sessionService) List(ctx context.Context, filters agent.SessionFilters) ([]agent.Session, string, error) {
-	result, err := s.acp.ListSessions(ctx, s.clientInfo, filters.Cursor)
+	directory := ""
+	if filters.ProjectID != "" {
+		dir, err := s.sdk.EnsureProjectDirectory(ctx, filters.ProjectID, "")
+		if err != nil {
+			return nil, "", err
+		}
+		directory = dir
+	}
+
+	sessions, err := s.sdk.ListSessions(ctx, directory)
 	if err != nil {
 		return nil, "", err
 	}
 
-	sessions := make([]agent.Session, 0, len(result.Sessions))
-	for _, session := range result.Sessions {
-		projectID, err := s.sdk.ResolveProjectByDirectory(ctx, session.Cwd)
-		if err != nil {
-			return nil, "", err
+	filtered := make([]agent.Session, 0, len(sessions))
+	for _, session := range sessions {
+		if s.active.Has(session.ID) {
+			session.Status = agent.SessionRunning
 		}
 
-		updatedAt := parseTime(session.UpdatedAt)
-		status := agent.SessionCompleted
-		if s.active.Has(session.SessionID) {
-			status = agent.SessionRunning
-		}
-
-		value := agent.Session{
-			ID:        session.SessionID,
-			ProjectID: projectID,
-			Directory: session.Cwd,
-			Title:     session.Title,
-			Version:   "acp",
-			Status:    status,
-			CreatedAt: updatedAt,
-			UpdatedAt: updatedAt,
-		}
-
-		if filters.ProjectID != "" && value.ProjectID != filters.ProjectID {
+		if filters.ProjectID != "" && session.ProjectID != filters.ProjectID {
 			continue
 		}
-		if filters.Status != "" && string(value.Status) != filters.Status {
+		if filters.Status != "" && string(session.Status) != filters.Status {
 			continue
 		}
-		sessions = append(sessions, value)
+		filtered = append(filtered, session)
 	}
 
-	if filters.Limit > 0 && len(sessions) > filters.Limit {
-		sessions = sessions[:filters.Limit]
+	if filters.Limit > 0 && len(filtered) > filters.Limit {
+		filtered = filtered[:filters.Limit]
 	}
-	return sessions, result.NextCursor, nil
+	return filtered, "", nil
 }
 
 func (s *sessionService) Get(ctx context.Context, id string) (*agent.Session, error) {
@@ -183,6 +185,34 @@ func (s *sessionService) Messages(ctx context.Context, id string, limit int) ([]
 
 func (s *sessionService) Diff(ctx context.Context, id string, messageID string) ([]agent.FileDiff, error) {
 	return s.sdk.GetSessionDiff(ctx, id, messageID)
+}
+
+func (s *sessionService) Create(ctx context.Context, projectID string) (*agent.Session, error) {
+	workingDir, err := s.sdk.EnsureProjectDirectory(ctx, projectID, "")
+	if err != nil {
+		return nil, fmt.Errorf("resolve project directory: %w", err)
+	}
+
+	conn, err := s.acp.Start(ctx, s.clientInfo, nil)
+	if err != nil {
+		return nil, fmt.Errorf("start acp connection: %w", err)
+	}
+	defer conn.Close()
+
+	result, err := conn.NewSession(ctx, workingDir)
+	if err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+
+	now := time.Now().UTC()
+	return &agent.Session{
+		ID:        result.SessionID,
+		ProjectID: projectID,
+		Directory: workingDir,
+		Status:    agent.SessionCompleted,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
 }
 
 func (s *sessionService) Run(ctx context.Context, input agent.RunInput) (*agent.RunResult, error) {

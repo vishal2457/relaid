@@ -413,9 +413,15 @@ export type Part =
 export interface Project {
   id: string;
   worktree: string;
+  folder?: string;
+  name?: string;
+  description?: string;
+  localServerId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
   vcsDir?: string;
   vcs?: "git";
-  time: {
+  time?: {
     created: number;
     initialized?: number;
   };

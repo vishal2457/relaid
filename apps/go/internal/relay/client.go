@@ -1,20 +1,16 @@
 package relay
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"log"
-	"net/http"
-	"net/url"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 
 	"context"
+	"encoding/json"
+	"fmt"
 )
 
 type EventCallback func(event string, args []json.RawMessage)
@@ -24,6 +20,8 @@ type Client struct {
 	serverID     string
 	serverSecret string
 	serverName   string
+
+	writeMu sync.Mutex
 
 	conn      *websocket.Conn
 	mu        sync.Mutex
@@ -37,9 +35,13 @@ type Client struct {
 	cancel context.CancelFunc
 
 	reconnectInterval time.Duration
+	maxReconnectDelay time.Duration
 	logger            *log.Logger
 
-	done chan struct{}
+	startOnce sync.Once
+	doneOnce  sync.Once
+	started   atomic.Bool
+	done      chan struct{}
 }
 
 type ClientOptions struct {
@@ -48,6 +50,7 @@ type ClientOptions struct {
 	ServerSecret      string
 	ServerName        string
 	ReconnectInterval time.Duration
+	MaxReconnectDelay time.Duration
 	Logger            *log.Logger
 	OnEvent           EventCallback
 	OnConnect         func()
@@ -57,6 +60,9 @@ type ClientOptions struct {
 func NewClient(opts ClientOptions) *Client {
 	if opts.ReconnectInterval == 0 {
 		opts.ReconnectInterval = 5 * time.Second
+	}
+	if opts.MaxReconnectDelay == 0 {
+		opts.MaxReconnectDelay = 30 * time.Second
 	}
 	if opts.Logger == nil {
 		opts.Logger = log.Default()
@@ -70,6 +76,7 @@ func NewClient(opts ClientOptions) *Client {
 		serverSecret:      opts.ServerSecret,
 		serverName:        opts.ServerName,
 		reconnectInterval: opts.ReconnectInterval,
+		maxReconnectDelay: opts.MaxReconnectDelay,
 		logger:            opts.Logger,
 		onEvent:           opts.OnEvent,
 		onConnect:         opts.OnConnect,
@@ -81,18 +88,22 @@ func NewClient(opts ClientOptions) *Client {
 }
 
 func (c *Client) Connect() error {
-	return c.dial()
+	c.startOnce.Do(func() {
+		c.started.Store(true)
+		go c.run()
+	})
+
+	return nil
 }
 
 func (c *Client) Close() {
 	c.cancel()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		c.conn.Close(websocket.StatusNormalClosure, "client shutting down")
-		c.conn = nil
-		c.connected = false
+	c.closeCurrentConnection("client shutting down")
+
+	if !c.started.Load() {
+		return
 	}
+
 	<-c.done
 }
 
@@ -106,12 +117,43 @@ func (c *Client) SetEventHandler(fn EventCallback) {
 	c.onEvent = fn
 }
 
+func (c *Client) WaitUntilConnected(timeout time.Duration) bool {
+	if c.IsConnected() {
+		return true
+	}
+
+	if timeout <= 0 {
+		return false
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if c.IsConnected() {
+			return true
+		}
+
+		select {
+		case <-c.ctx.Done():
+			return false
+		case <-timer.C:
+			return c.IsConnected()
+		case <-ticker.C:
+		}
+	}
+}
+
 func (c *Client) Emit(event string, payload interface{}) error {
 	c.mu.Lock()
 	conn := c.conn
+	connected := c.connected
 	c.mu.Unlock()
 
-	if conn == nil {
+	if conn == nil || !connected {
 		return fmt.Errorf("not connected")
 	}
 
@@ -119,111 +161,18 @@ func (c *Client) Emit(event string, payload interface{}) error {
 	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer cancel()
 
-	return conn.Write(ctx, websocket.MessageText, []byte(msg))
+	return c.writeText(ctx, conn, msg)
 }
 
-func (c *Client) dial() error {
-	u, err := url.Parse(c.relayURL)
-	if err != nil {
-		return fmt.Errorf("invalid relay URL: %w", err)
+func (c *Client) run() {
+	defer c.doneOnce.Do(func() {
+		close(c.done)
+	})
+
+	delay := c.reconnectInterval
+	if delay <= 0 {
+		delay = 5 * time.Second
 	}
-
-	sid, err := c.engineIOHandshake(u)
-	if err != nil {
-		return fmt.Errorf("engine.io handshake failed: %w", err)
-	}
-
-	wsURL := c.buildWebSocketURL(u, sid)
-
-	ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
-	defer cancel()
-
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("websocket dial failed: %w", err)
-	}
-
-	conn.SetReadLimit(10 * 1024 * 1024)
-
-	c.mu.Lock()
-	c.conn = conn
-	c.connected = true
-	c.mu.Unlock()
-
-	go c.readLoop(conn)
-
-	time.Sleep(200 * time.Millisecond)
-
-	auth := map[string]string{
-		"type":         "local_server",
-		"serverId":     c.serverID,
-		"serverSecret": c.serverSecret,
-		"serverName":   c.serverName,
-	}
-
-	if err := conn.Write(c.ctx, websocket.MessageText, []byte(EncodeSIOConnect(auth))); err != nil {
-		c.logger.Printf("relay: failed to send connect packet: %v", err)
-		c.handleDisconnect("connect auth failed")
-		return err
-	}
-
-	return nil
-}
-
-func (c *Client) engineIOHandshake(u *url.URL) (string, error) {
-	handshakeURL := fmt.Sprintf("%s://%s/socket/?EIO=4&transport=polling", u.Scheme, u.Host)
-	if u.Scheme == "wss" {
-		handshakeURL = fmt.Sprintf("https://%s/socket/?EIO=4&transport=polling", u.Host)
-	} else {
-		handshakeURL = fmt.Sprintf("http://%s/socket/?EIO=4&transport=polling", u.Host)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(handshakeURL)
-	if err != nil {
-		return "", fmt.Errorf("handshake request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("handshake returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read handshake body: %w", err)
-	}
-
-	if len(body) == 0 || body[0] != '0' {
-		return "", fmt.Errorf("invalid handshake response: expected open packet")
-	}
-
-	var handshakeData struct {
-		SID string `json:"sid"`
-	}
-	if err := json.Unmarshal(body[1:], &handshakeData); err != nil {
-		return "", fmt.Errorf("failed to parse handshake data: %w", err)
-	}
-
-	return handshakeData.SID, nil
-}
-
-func (c *Client) buildWebSocketURL(u *url.URL, sid string) string {
-	scheme := "ws"
-	if u.Scheme == "wss" || u.Scheme == "https" {
-		scheme = "wss"
-	}
-
-	host := u.Host
-	result := fmt.Sprintf("%s://%s/socket/?EIO=4&transport=websocket&sid=%s", scheme, host, sid)
-	return result
-}
-
-func (c *Client) readLoop(conn *websocket.Conn) {
-	defer func() {
-		c.handleDisconnect("read loop ended")
-	}()
 
 	for {
 		select {
@@ -232,38 +181,215 @@ func (c *Client) readLoop(conn *websocket.Conn) {
 		default:
 		}
 
-		msgType, data, err := conn.Read(c.ctx)
-		if err != nil {
-			select {
-			case <-c.ctx.Done():
-				return
-			default:
-				c.logger.Printf("relay: read error: %v", err)
-				return
-			}
+		reason, err := c.connectAndServe()
+		if c.ctx.Err() != nil {
+			return
 		}
 
-		if msgType != websocket.MessageText {
+		if err != nil {
+			c.logger.Printf("relay: connection failed: %v", err)
+		} else if reason != "" {
+			c.logger.Printf("relay: %s", reason)
+			delay = c.reconnectInterval
+		}
+
+		c.logger.Printf("relay: reconnecting in %v", delay)
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-c.ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-timer.C:
+		}
+
+		delay *= 2
+		if delay > c.maxReconnectDelay {
+			delay = c.maxReconnectDelay
+		}
+	}
+}
+
+func (c *Client) connectAndServe() (string, error) {
+	conn, err := c.dial()
+	if err != nil {
+		return "", err
+	}
+
+	disconnected := false
+	reason := "relay connection closed"
+
+	defer func() {
+		c.clearConnection(conn)
+		_ = conn.Close(websocket.StatusNormalClosure, reason)
+
+		if disconnected && c.onDisconnect != nil && c.ctx.Err() == nil {
+			c.onDisconnect(reason)
+		}
+	}()
+
+	if err := c.performHandshake(conn); err != nil {
+		reason = "relay handshake failed"
+		return reason, err
+	}
+
+	c.mu.Lock()
+	c.conn = conn
+	c.connected = true
+	c.mu.Unlock()
+
+	disconnected = true
+
+	if c.onConnect != nil {
+		c.onConnect()
+	}
+
+	c.logger.Printf("relay: socket.io connected")
+
+	return c.readLoop(conn)
+}
+
+func (c *Client) dial() (*websocket.Conn, error) {
+	u, err := relayWebSocketURL(c.relayURL)
+	if err != nil {
+		return nil, err
+	}
+
+	u.Path = joinURLPath(u.Path, "/socket/")
+	query := u.Query()
+	query.Set("EIO", "4")
+	query.Set("transport", "websocket")
+	u.RawQuery = query.Encode()
+
+	ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("websocket dial failed: %w", err)
+	}
+
+	conn.SetReadLimit(10 * 1024 * 1024)
+
+	return conn, nil
+}
+
+func (c *Client) performHandshake(conn *websocket.Conn) error {
+	ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
+	defer cancel()
+
+	if err := c.awaitEngineOpen(ctx, conn); err != nil {
+		return err
+	}
+
+	auth := map[string]string{
+		"type":         "local_server",
+		"serverId":     c.serverID,
+		"serverSecret": c.serverSecret,
+		"serverName":   c.serverName,
+	}
+
+	if err := c.writeText(ctx, conn, EncodeSIOConnect(auth)); err != nil {
+		return fmt.Errorf("failed to send connect packet: %w", err)
+	}
+
+	for {
+		raw, err := c.readText(ctx, conn)
+		if err != nil {
+			return fmt.Errorf("failed waiting for socket.io connect: %w", err)
+		}
+
+		if raw == "" {
 			continue
 		}
 
-		raw := string(data)
-		if len(raw) == 0 {
+		switch raw[0] {
+		case eioPing:
+			if err := c.writeText(ctx, conn, string(eioPong)); err != nil {
+				return fmt.Errorf("failed to send pong during handshake: %w", err)
+			}
+		case eioOpen:
+			continue
+		case eioClose:
+			return fmt.Errorf("relay closed the connection during handshake")
+		case eioMessage:
+			if len(raw) < 2 {
+				continue
+			}
+
+			sioData := raw[1:]
+			switch sioData[0] {
+			case sioConnect:
+				return nil
+			case sioConnectError:
+				return fmt.Errorf("socket.io connect error: %s", sioErrorString([]byte(sioData[1:])))
+			}
+		}
+	}
+}
+
+func (c *Client) awaitEngineOpen(ctx context.Context, conn *websocket.Conn) error {
+	for {
+		raw, err := c.readText(ctx, conn)
+		if err != nil {
+			return fmt.Errorf("failed waiting for engine.io open: %w", err)
+		}
+
+		if raw == "" {
 			continue
 		}
 
 		switch raw[0] {
 		case eioOpen:
-			c.logger.Printf("relay: received engine.io open")
+			return nil
+		case eioPing:
+			if err := c.writeText(ctx, conn, string(eioPong)); err != nil {
+				return fmt.Errorf("failed to send pong before handshake: %w", err)
+			}
+		case eioClose:
+			return fmt.Errorf("relay closed the connection before handshake")
+		}
+	}
+}
+
+func (c *Client) readLoop(conn *websocket.Conn) (string, error) {
+	for {
+		select {
+		case <-c.ctx.Done():
+			return "relay client shut down", nil
+		default:
+		}
+
+		raw, err := c.readText(c.ctx, conn)
+		if err != nil {
+			select {
+			case <-c.ctx.Done():
+				return "relay client shut down", nil
+			default:
+			}
+
+			return fmt.Sprintf("relay read failed: %v", err), err
+		}
+
+		if raw == "" {
+			continue
+		}
+
+		switch raw[0] {
+		case eioOpen:
+			continue
 
 		case eioClose:
-			c.logger.Printf("relay: received engine.io close")
-			return
+			return "relay closed the engine.io connection", nil
 
 		case eioPing:
-			if err := conn.Write(c.ctx, websocket.MessageText, []byte("3")); err != nil {
-				c.logger.Printf("relay: failed to send pong: %v", err)
-				return
+			ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+			err := c.writeText(ctx, conn, string(eioPong))
+			cancel()
+			if err != nil {
+				return "failed to send relay pong", err
 			}
 
 		case eioPong:
@@ -280,22 +406,13 @@ func (c *Client) readLoop(conn *websocket.Conn) {
 
 			switch sioData[0] {
 			case sioConnect:
-				c.logger.Printf("relay: socket.io connected")
-				if c.onConnect != nil {
-					c.onConnect()
-				}
+				continue
 
 			case sioDisconnect:
-				c.logger.Printf("relay: socket.io disconnected")
-				return
+				return "relay sent a socket.io disconnect", nil
 
 			case sioConnectError:
-				var errData map[string]interface{}
-				if len(sioData) > 1 {
-					json.Unmarshal([]byte(sioData[1:]), &errData)
-				}
-				c.logger.Printf("relay: socket.io connect error: %v", errData)
-				return
+				return "relay rejected the socket.io connection", fmt.Errorf("socket.io connect error: %s", sioErrorString([]byte(sioData[1:])))
 
 			case sioEvent:
 				event, args, err := DecodeSIOEvent(raw)
@@ -317,63 +434,61 @@ func (c *Client) readLoop(conn *websocket.Conn) {
 	}
 }
 
-func (c *Client) handleDisconnect(reason string) {
+func (c *Client) clearConnection(conn *websocket.Conn) {
 	c.mu.Lock()
-	wasConnected := c.connected
-	c.connected = false
+	defer c.mu.Unlock()
 
-	if c.conn != nil {
-		c.conn.Close(websocket.StatusNormalClosure, reason)
+	if c.conn == conn {
 		c.conn = nil
 	}
+	c.connected = false
+}
+
+func (c *Client) closeCurrentConnection(reason string) {
+	c.mu.Lock()
+	conn := c.conn
+	c.conn = nil
+	c.connected = false
 	c.mu.Unlock()
 
-	if wasConnected && c.onDisconnect != nil {
-		c.onDisconnect(reason)
+	if conn != nil {
+		_ = conn.Close(websocket.StatusNormalClosure, reason)
 	}
+}
 
-	select {
-	case <-c.ctx.Done():
-		close(c.done)
-		return
-	default:
-	}
-
-	c.logger.Printf("relay: scheduling reconnect in %v", c.reconnectInterval)
-	time.AfterFunc(c.reconnectInterval, func() {
-		select {
-		case <-c.ctx.Done():
-			return
-		default:
+func (c *Client) readText(ctx context.Context, conn *websocket.Conn) (string, error) {
+	for {
+		msgType, data, err := conn.Read(ctx)
+		if err != nil {
+			return "", err
 		}
 
-		c.logger.Printf("relay: attempting reconnect...")
-		if err := c.dial(); err != nil {
-			c.logger.Printf("relay: reconnect failed: %v", err)
+		if msgType != websocket.MessageText {
+			continue
 		}
-	})
+
+		return string(data), nil
+	}
 }
 
-func NormalizeRelayURL(rawURL string) string {
-	rawURL = strings.TrimRight(rawURL, "/")
+func (c *Client) writeText(ctx context.Context, conn *websocket.Conn, message string) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
+	return conn.Write(ctx, websocket.MessageText, []byte(message))
+}
+
+func sioErrorString(raw []byte) string {
+	if len(raw) == 0 {
+		return "unknown error"
 	}
 
-	u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
-	if u.Scheme == "" {
-		u.Scheme = "ws"
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		if msg, ok := payload["message"].(string); ok && msg != "" {
+			return msg
+		}
 	}
 
-	return u.String()
-}
-
-func ReadJSON(c *websocket.Conn, ctx context.Context, v interface{}) error {
-	return wsjson.Read(ctx, c, v)
-}
-
-func WriteJSON(c *websocket.Conn, ctx context.Context, v interface{}) error {
-	return wsjson.Write(ctx, c, v)
+	return string(raw)
 }

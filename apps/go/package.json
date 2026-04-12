@@ -1,0 +1,7 @@
+{
+  "name": "go",
+  "private": true,
+  "scripts": {
+    "dev": "wails dev"
+  }
+}

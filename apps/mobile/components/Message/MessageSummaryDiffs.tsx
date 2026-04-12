@@ -178,6 +178,11 @@ const DiffFileRow = ({
         >
           {hasDiffContent ? (
             <RawDiffViewer diff={diff.patch || ""} />
+          ) : diff.before || diff.after ? (
+            <InlineDiffViewer
+              oldContent={diff.before || null}
+              newContent={diff.after || null}
+            />
           ) : (
             <View style={{ padding: 12 }}>
               <Text variant="bodySmall" style={{ color: metaColor }}>
@@ -283,10 +288,7 @@ export function RawDiffViewer({ diff }: DiffViewerProps) {
         { backgroundColor: theme.colors.surfaceVariant },
       ]}
     >
-      <ScrollView
-        style={styles.verticalScroll}
-        nestedScrollEnabled
-      >
+      <ScrollView style={styles.verticalScroll} nestedScrollEnabled>
         <ScrollView
           horizontal
           style={styles.outerScroll}
@@ -399,7 +401,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   verticalScroll: {
-    maxHeight: 300,        // caps height, but allows scrolling within
+    maxHeight: 300, // caps height, but allows scrolling within
   },
   outerScroll: {
     flexGrow: 0,

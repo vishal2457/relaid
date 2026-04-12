@@ -336,6 +336,7 @@ async function handleLocalServerConnection(
   pipeResponse("message_queue_remove_response");
   pipeResponse("message_queue_update_response");
   pipeResponse("message_queue_execute_response");
+  pipeResponse("skills_list_response");
 
   socket.on("permission_request", (payload: PermissionRequestEvent) => {
     logger.info("Forwarding permission_request to mobile", {
@@ -1019,6 +1020,33 @@ function handleMobileConnection(socket: Socket, userId: string): void {
           "local_server_register_response",
           data.requestId,
           {},
+          error,
+        );
+      }
+    },
+  );
+
+  socket.on(
+    "skills_list_request",
+    async (data: { requestId: string; projectId: string; query?: string }) => {
+      try {
+        const results = await requestAllConnectedServers<{
+          skills: Array<{ name: string; description: string }>;
+        }>(userId, "skills_list_request", "skills_list_response", {
+          projectId: data.projectId,
+          query: data.query,
+        });
+
+        socket.emit("skills_list_response", {
+          requestId: data.requestId,
+          skills: results.flatMap((result) => result.response.skills || []),
+        });
+      } catch (error) {
+        emitSocketError(
+          socket,
+          "skills_list_response",
+          data.requestId,
+          { skills: [] },
           error,
         );
       }

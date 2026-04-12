@@ -567,3 +567,24 @@ export const MessageQueueExecuteResponseSchema = z.object({
 export type MessageQueueExecuteResponse = z.infer<
   typeof MessageQueueExecuteResponseSchema
 >;
+
+// Skills Types
+
+export const SkillPayloadSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+});
+
+export type SkillPayload = z.infer<typeof SkillPayloadSchema>;
+
+export const SkillsListRequestSchema = z.object({
+  projectId: z.string(),
+  query: z.string().optional(),
+});
+
+export const SkillsListResponseSchema = z.object({
+  skills: z.array(SkillPayloadSchema),
+});
+
+export type SkillsListRequest = z.infer<typeof SkillsListRequestSchema>;
+export type SkillsListResponse = z.infer<typeof SkillsListResponseSchema>;

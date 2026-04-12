@@ -7,11 +7,7 @@ import {
   RouteError,
 } from "../services/local-server-proxy";
 import { logger } from "../shared/logger";
-import type {
-  MessagePayload,
-  ProjectPayload,
-  SessionPayload,
-} from "../shared/types";
+import type { ProjectPayload, SessionPayload } from "../shared/types";
 
 type SessionsListResponse = {
   sessions: SessionPayload[];
@@ -24,7 +20,7 @@ type SessionResponse = {
 };
 
 type SessionMessagesResponse = {
-  messages: MessagePayload[];
+  messages: any[];
   error?: string;
 };
 
@@ -171,8 +167,7 @@ router.get("/:id/messages", async (req: Request, res: Response) => {
     const userId = requireUserId(req.headers["x-user-id"]);
     console.log(userId, "user id");
     console.log(req.params.id, "id");
-    
-    
+
     const sessionLookup = await requestUntilMatch<SessionResponse>(
       userId,
       "session_get_request",
@@ -200,7 +195,7 @@ router.get("/:id/messages", async (req: Request, res: Response) => {
         limit,
       },
       sessionLookup.serverId,
-    );    
+    );
 
     res.json({ messages: result.response.messages || [] });
   } catch (error) {

@@ -59,6 +59,7 @@ import {
   type Project,
   type ProjectFileMatch,
 } from "@/lib/api/projects";
+import { useProjectSkills, type Skill } from "@/lib/api/skills";
 import { useBranches, useSwitchBranch, type Branch } from "@/lib/api/branches";
 import {
   useProviders,
@@ -338,6 +339,21 @@ export default function ChatScreen() {
       activeProject?.id ?? "",
       deferredMentionQuery,
       Boolean(activeProject && activeMention && deferredMentionQuery.trim()),
+    );
+
+  const activeSlash = React.useMemo(() => {
+    if (!inputText.startsWith("/")) return null;
+    const spaceIndex = inputText.indexOf(" ");
+    const query =
+      spaceIndex === -1 ? inputText.slice(1) : inputText.slice(1, spaceIndex);
+    return { query };
+  }, [inputText]);
+  const deferredSlashQuery = React.useDeferredValue(activeSlash?.query ?? "");
+  const { data: skillSuggestions, isLoading: skillSuggestionsLoading } =
+    useProjectSkills(
+      activeProject?.id ?? "",
+      deferredSlashQuery,
+      Boolean(activeProject && activeSlash),
     );
 
   React.useEffect(() => {
@@ -1002,11 +1018,20 @@ export default function ChatScreen() {
         220,
       ) + 8
     : 0;
+  const showSkillSuggestions = Boolean(activeProject && activeSlash);
+  const skillSuggestionCount = skillSuggestions?.length ?? 0;
+  const skillSuggestionHeight = showSkillSuggestions
+    ? Math.min(
+        skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
+        220,
+      ) + 8
+    : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
     COMPOSER_TOP_PADDING +
     Math.max(insets.bottom, COMPOSER_BOTTOM_PADDING) +
     mentionSuggestionHeight +
+    skillSuggestionHeight +
     keyboardHeight +
     (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
   const trimmedInput = inputText.trim();
@@ -1238,6 +1263,27 @@ export default function ChatScreen() {
     [activeMention, inputText],
   );
 
+  const handleSelectSkillSuggestion = React.useCallback(
+    (skill: Skill) => {
+      if (!activeSlash) {
+        return;
+      }
+
+      const slashIndex = inputText.indexOf("/");
+      const replacement = `${skill.name} `;
+      const nextText = [
+        inputText.slice(0, slashIndex),
+        replacement,
+        inputText.slice(slashIndex + 1 + activeSlash.query.length),
+      ].join("");
+      const cursor = slashIndex + replacement.length;
+
+      setInputText(nextText);
+      setInputSelection({ start: cursor, end: cursor });
+    },
+    [activeSlash, inputText],
+  );
+
   return (
     <SafeAreaView
       edges={["top", "left", "right"]}
@@ -1316,31 +1362,6 @@ export default function ChatScreen() {
           >
             <MaterialCommunityIcons
               name="source-branch"
-              size={20}
-              color={theme.colors.onSurface}
-            />
-          </Pressable>
-          <View
-            style={[
-              styles.buttonGroupDivider,
-              { backgroundColor: borderColor },
-            ]}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open Queue drawer"
-            onPress={() => setShowQueueDrawer(true)}
-            style={[
-              styles.gitButton,
-              {
-                backgroundColor: theme.dark
-                  ? "rgba(17, 24, 39, 0.92)"
-                  : "rgba(255, 255, 255, 0.96)",
-              },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name="playlist-play"
               size={20}
               color={theme.colors.onSurface}
             />
@@ -1499,6 +1520,10 @@ export default function ChatScreen() {
           onSend={() => void handleSend()}
           selectedModelName={activeModel?.name ?? "No model"}
           showMentionSuggestions={showMentionSuggestions}
+          showSkillSuggestions={showSkillSuggestions}
+          skillSuggestions={skillSuggestions}
+          skillSuggestionsLoading={skillSuggestionsLoading}
+          onSelectSkillSuggestion={handleSelectSkillSuggestion}
           trimmedInput={trimmedInput}
         />
       </View>

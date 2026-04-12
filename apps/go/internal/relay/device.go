@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -94,10 +95,19 @@ func LoadOrCreateDeviceCredentials(envServerID, envServerSecret string) (DeviceC
 }
 
 func CreatePairingSession(relayURL string, creds DeviceCredentials) (*PairingSessionResponse, error) {
-	relayURL = normalizeURL(relayURL)
+	url, err := buildRelayEndpointURL(relayURL, "/api/pairing/sessions")
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve pairing URL: %w", err)
+	}
 
-	url := fmt.Sprintf("%s/api/pairing/sessions", relayURL)
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+	body, err := json.Marshal(map[string]string{
+		"serverName": GetServerName(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode request body: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -127,10 +137,13 @@ func CreatePairingSession(relayURL string, creds DeviceCredentials) (*PairingSes
 }
 
 func PingRelayHealth(relayURL string) error {
-	relayURL = normalizeURL(relayURL)
+	url, err := buildRelayEndpointURL(relayURL, "/health")
+	if err != nil {
+		return fmt.Errorf("failed to resolve health URL: %w", err)
+	}
 
-	url := fmt.Sprintf("%s/health", relayURL)
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
@@ -140,13 +153,6 @@ func PingRelayHealth(relayURL string) error {
 		return fmt.Errorf("health check returned %d", resp.StatusCode)
 	}
 	return nil
-}
-
-func normalizeURL(url string) string {
-	if len(url) > 0 && url[len(url)-1] == '/' {
-		return url[:len(url)-1]
-	}
-	return url
 }
 
 func generateUUID() string {
