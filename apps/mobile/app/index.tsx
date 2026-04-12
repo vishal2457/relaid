@@ -86,7 +86,8 @@ import {
 import { AppState, type AppStateStatus } from "react-native";
 import { GitDrawer } from "@/components/GitDrawer";
 import { useGitFileStatus } from "@/lib/api/git";
-import { QueueDrawer } from "@/components/QueueDrawer";
+// Message queue temporarily disabled - will be re-enabled later
+// import { QueueDrawer } from "@/components/QueueDrawer";
 import { MessageRow, TypingIndicator } from "@/components/Message";
 import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
 import {
@@ -283,7 +284,8 @@ export default function ChatScreen() {
   );
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showGitDrawer, setShowGitDrawer] = React.useState(false);
-  const [showQueueDrawer, setShowQueueDrawer] = React.useState(false);
+  // Message queue temporarily disabled
+  // const [showQueueDrawer, setShowQueueDrawer] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
   const [isNearBottom, setIsNearBottom] = React.useState(true);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
@@ -445,7 +447,7 @@ export default function ChatScreen() {
     if (!hydrated) return;
     if (activeProject) {
       AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => {},
+        () => { },
       );
     }
   }, [activeProject, hydrated]);
@@ -456,7 +458,7 @@ export default function ChatScreen() {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
-      ).catch(() => {});
+      ).catch(() => { });
     }
   }, [activeModel, hydrated]);
 
@@ -477,7 +479,7 @@ export default function ChatScreen() {
             setActiveModel(savedModel);
           }
         }
-      } catch {}
+      } catch { }
     })();
   }, [hydrated, providers]);
 
@@ -512,18 +514,18 @@ export default function ChatScreen() {
 
     const filtered = normalizedQuery
       ? models
-          .map((model) => ({
-            model,
-            score: getModelSearchScore(model, normalizedQuery),
-          }))
-          .filter((entry) => entry.score >= 0)
-          .sort((a, b) => {
-            if (b.score !== a.score) {
-              return b.score - a.score;
-            }
-            return a.model.name.localeCompare(b.model.name);
-          })
-          .map((entry) => entry.model)
+        .map((model) => ({
+          model,
+          score: getModelSearchScore(model, normalizedQuery),
+        }))
+        .filter((entry) => entry.score >= 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) {
+            return b.score - a.score;
+          }
+          return a.model.name.localeCompare(b.model.name);
+        })
+        .map((entry) => entry.model)
       : models;
 
     if (!activeModel) {
@@ -743,7 +745,7 @@ export default function ChatScreen() {
 
   const connectSse = React.useCallback(() => {
     if (!isMountedRef.current) {
-      return () => {};
+      return () => { };
     }
 
     setConnectionState("connecting");
@@ -815,7 +817,7 @@ export default function ChatScreen() {
       setConnectionState("disconnected");
       sseClientRef.current = null;
       unsubscribe();
-      return () => {};
+      return () => { };
     }
 
     sseClientRef.current = client;
@@ -1014,17 +1016,17 @@ export default function ChatScreen() {
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
-        220,
-      ) + 8
+      mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
+      220,
+    ) + 8
     : 0;
   const showSkillSuggestions = Boolean(activeProject && activeSlash);
   const skillSuggestionCount = skillSuggestions?.length ?? 0;
   const skillSuggestionHeight = showSkillSuggestions
     ? Math.min(
-        skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
-        220,
-      ) + 8
+      skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
+      220,
+    ) + 8
     : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
@@ -1108,9 +1110,9 @@ export default function ChatScreen() {
         prompt: trimmedInput,
         model: activeModel
           ? {
-              providerId: activeModel.providerId,
-              modelId: activeModel.id,
-            }
+            providerId: activeModel.providerId,
+            modelId: activeModel.id,
+          }
           : undefined,
       });
     } catch (error) {
@@ -1372,6 +1374,33 @@ export default function ChatScreen() {
               { backgroundColor: borderColor },
             ]}
           />
+          {/* Message queue temporarily disabled
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open Queue drawer"
+            onPress={() => setShowQueueDrawer(true)}
+            style={[
+              styles.gitButton,
+              {
+                backgroundColor: theme.dark
+                  ? "rgba(17, 24, 39, 0.92)"
+                  : "rgba(255, 255, 255, 0.96)",
+              },
+            ]}
+          >
+            <MaterialCommunityIcons
+              name="playlist-play"
+              size={20}
+              color={theme.colors.onSurface}
+            />
+          </Pressable>
+          */}
+          <View
+            style={[
+              styles.buttonGroupDivider,
+              { backgroundColor: borderColor },
+            ]}
+          />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="New session"
@@ -1409,8 +1438,8 @@ export default function ChatScreen() {
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
-          activeSessionId &&
-          displayedMessages.length === 0 ? (
+            activeSessionId &&
+            displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
@@ -1909,12 +1938,14 @@ export default function ChatScreen() {
         backgroundColor={sheetBg}
       />
 
+      {/* Message queue temporarily disabled
       <QueueDrawer
         visible={showQueueDrawer}
         onClose={() => setShowQueueDrawer(false)}
         activeProject={activeProject}
         activeSessionId={activeSessionId}
       />
+      */}
     </SafeAreaView>
   );
 }

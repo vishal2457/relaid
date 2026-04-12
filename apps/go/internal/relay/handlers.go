@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"relaid/internal/agent"
+	gitservice "relaid/internal/git"
 )
 
 type Handler struct {
@@ -82,6 +83,56 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 		go h.handleGitFileDiff(args)
 	case EventGitDiscardFileRequest:
 		go h.handleGitDiscardFile(args)
+	case EventGitLogRequest:
+		go h.handleGitLog(args)
+	case EventGitGetCurrentBranchRequest:
+		go h.handleGitGetCurrentBranch(args)
+	case EventGitListBranchesRequest:
+		go h.handleGitListBranches(args)
+	case EventGitCreateBranchRequest:
+		go h.handleGitCreateBranch(args)
+	case EventGitDeleteBranchRequest:
+		go h.handleGitDeleteBranch(args)
+	case EventGitSwitchBranchRequest:
+		go h.handleGitSwitchBranch(args)
+	case EventGitCommitRequest:
+		go h.handleGitCommit(args)
+	case EventGitPushRequest:
+		go h.handleGitPush(args)
+	case EventGitPullRequest:
+		go h.handleGitPull(args)
+	case EventGitFetchRequest:
+		go h.handleGitFetch(args)
+	case EventGitGetRemotesRequest:
+		go h.handleGitGetRemotes(args)
+	case EventGitAddRemoteRequest:
+		go h.handleGitAddRemote(args)
+	case EventGitRemoveRemoteRequest:
+		go h.handleGitRemoveRemote(args)
+	case EventGitDiffStagedRequest:
+		go h.handleGitDiffStaged(args)
+	case EventGitDiffUnstagedRequest:
+		go h.handleGitDiffUnstaged(args)
+	case EventGitGetFileContentRequest:
+		go h.handleGitGetFileContent(args)
+	case EventGitStashRequest:
+		go h.handleGitStash(args)
+	case EventGitStashPopRequest:
+		go h.handleGitStashPop(args)
+	case EventGitMergeRequest:
+		go h.handleGitMerge(args)
+	case EventGitRebaseRequest:
+		go h.handleGitRebase(args)
+	case EventGitRebaseAbortRequest:
+		go h.handleGitRebaseAbort(args)
+	case EventGitCreateTagRequest:
+		go h.handleGitCreateTag(args)
+	case EventGitListTagsRequest:
+		go h.handleGitListTags(args)
+	case EventGitResetRequest:
+		go h.handleGitReset(args)
+	case EventGitAddAllRequest:
+		go h.handleGitAddAll(args)
 	case EventPermissionResponse:
 		go h.handlePermissionResponse(args)
 	case EventQuestionResponse:
@@ -119,6 +170,21 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 
 func (h *Handler) getProvider() (agent.AgentProvider, error) {
 	return h.registry.Get(agent.ProviderOpencode)
+}
+
+func (h *Handler) resolveWorktree(projectID string) (string, error) {
+	provider, err := h.getProvider()
+	if err != nil {
+		return "", fmt.Errorf("provider not found: %w", err)
+	}
+	project, err := provider.Projects().Get(context.Background(), projectID)
+	if err != nil {
+		return "", fmt.Errorf("project %q not found: %w", projectID, err)
+	}
+	if project == nil {
+		return "", fmt.Errorf("project %q not found", projectID)
+	}
+	return project.Worktree, nil
 }
 
 func (h *Handler) emit(event string, payload interface{}) {
@@ -272,7 +338,33 @@ func (h *Handler) handleProjectBranches(args []json.RawMessage) {
 		return
 	}
 
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "git branches not yet implemented")
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.ListBranches(false)
+	if !result.Success {
+		h.emitError(req.RequestID, "LIST_BRANCHES_ERROR", result.Error)
+		return
+	}
+
+	branches := make([]BranchInfo, 0, len(result.Data))
+	for _, b := range result.Data {
+		if !b.IsRemote {
+			branches = append(branches, BranchInfo{
+				Name:      b.Name,
+				IsCurrent: b.IsCurrent,
+			})
+		}
+	}
+
+	h.emit(EventProjectBranchesResponse, ProjectBranchesResponse{
+		RequestID: req.RequestID,
+		Branches:  branches,
+	})
 }
 
 func (h *Handler) handleProjectBranchSwitch(args []json.RawMessage) {
@@ -285,7 +377,23 @@ func (h *Handler) handleProjectBranchSwitch(args []json.RawMessage) {
 		return
 	}
 
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "git branch switch not yet implemented")
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.SwitchBranch(req.Branch)
+	if !result.Success {
+		h.emitError(req.RequestID, "SWITCH_BRANCH_ERROR", result.Error)
+		return
+	}
+
+	h.emit(EventProjectBranchSwitchResponse, ProjectBranchSwitchResponse{
+		RequestID: req.RequestID,
+		Success:   true,
+	})
 }
 
 func (h *Handler) handleSessionsList(args []json.RawMessage) {
@@ -655,7 +763,36 @@ func (h *Handler) handleGitStagedFiles(args []json.RawMessage) {
 		h.logger.Printf("relay: failed to parse git_staged_files_request: %v", err)
 		return
 	}
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "git operations not yet implemented")
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emit(EventGitStagedFilesResponse, GitStagedFilesResponse{
+			RequestID: req.RequestID,
+			Staged:    []GitFile{},
+			Unstaged:  []GitFile{},
+			Branch:    "HEAD",
+		})
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.GetFileStatusLists()
+
+	staged := make([]GitFile, 0, len(result.Data.Staged))
+	for _, f := range result.Data.Staged {
+		staged = append(staged, GitFile{Path: f.Path, Status: f.Status})
+	}
+	unstaged := make([]GitFile, 0, len(result.Data.Unstaged))
+	for _, f := range result.Data.Unstaged {
+		unstaged = append(unstaged, GitFile{Path: f.Path, Status: f.Status})
+	}
+
+	h.emit(EventGitStagedFilesResponse, GitStagedFilesResponse{
+		RequestID: req.RequestID,
+		Staged:    staged,
+		Unstaged:  unstaged,
+		Branch:    result.Data.Branch,
+	})
 }
 
 func (h *Handler) handleGitStageFiles(args []json.RawMessage) {
@@ -667,7 +804,23 @@ func (h *Handler) handleGitStageFiles(args []json.RawMessage) {
 		h.logger.Printf("relay: failed to parse git_stage_files_request: %v", err)
 		return
 	}
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "git operations not yet implemented")
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emit(EventGitStageFilesResponse, GitStageFilesResponse{
+			RequestID: req.RequestID,
+			Success:   false,
+		})
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.AddFiles(req.Files)
+
+	h.emit(EventGitStageFilesResponse, GitStageFilesResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+	})
 }
 
 func (h *Handler) handleGitUnstageFiles(args []json.RawMessage) {
@@ -679,7 +832,23 @@ func (h *Handler) handleGitUnstageFiles(args []json.RawMessage) {
 		h.logger.Printf("relay: failed to parse git_unstage_files_request: %v", err)
 		return
 	}
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "git operations not yet implemented")
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emit(EventGitUnstageFilesResponse, GitUnstageFilesResponse{
+			RequestID: req.RequestID,
+			Success:   false,
+		})
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.UnstageFiles(req.Files)
+
+	h.emit(EventGitUnstageFilesResponse, GitUnstageFilesResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+	})
 }
 
 func (h *Handler) handleGitFileDiff(args []json.RawMessage) {
@@ -691,7 +860,49 @@ func (h *Handler) handleGitFileDiff(args []json.RawMessage) {
 		h.logger.Printf("relay: failed to parse git_file_diff_request: %v", err)
 		return
 	}
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "git operations not yet implemented")
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emit(EventGitFileDiffResponse, GitFileDiffResponse{
+			RequestID: req.RequestID,
+			Files:     []GitDiff{},
+			Success:   false,
+			Error:     err.Error(),
+		})
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.DiffFile(req.FilePath)
+
+	files := make([]GitDiff, 0, len(result.Data))
+	for _, fd := range result.Data {
+		hunks := make([]GitDiffHunk, 0, len(fd.Hunks))
+		for _, hk := range fd.Hunks {
+			lines := make([]GitDiffLine, 0, len(hk.Lines))
+			for _, ln := range hk.Lines {
+				lines = append(lines, GitDiffLine{
+					Type:    ln.Type,
+					Content: ln.Content,
+				})
+			}
+			hunks = append(hunks, GitDiffHunk{
+				Header: hk.Header,
+				Lines:  lines,
+			})
+		}
+		files = append(files, GitDiff{
+			FileName: fd.FileName,
+			Hunks:    hunks,
+		})
+	}
+
+	h.emit(EventGitFileDiffResponse, GitFileDiffResponse{
+		RequestID: req.RequestID,
+		Files:     files,
+		Success:   result.Success,
+		Error:     result.Error,
+	})
 }
 
 func (h *Handler) handleGitDiscardFile(args []json.RawMessage) {
@@ -703,7 +914,738 @@ func (h *Handler) handleGitDiscardFile(args []json.RawMessage) {
 		h.logger.Printf("relay: failed to parse git_discard_file_request: %v", err)
 		return
 	}
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "git operations not yet implemented")
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emit(EventGitDiscardFileResponse, GitDiscardFileResponse{
+			RequestID: req.RequestID,
+			Success:   false,
+		})
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.DiscardChanges([]string{req.FilePath})
+
+	h.emit(EventGitDiscardFileResponse, GitDiscardFileResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+	})
+}
+
+func (h *Handler) handleGitLog(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitLogRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_log_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.Log(req.Count)
+	if !result.Success {
+		h.emitError(req.RequestID, "GIT_LOG_ERROR", result.Error)
+		return
+	}
+
+	commits := make([]GitCommitInfo, 0, len(result.Data))
+	for _, c := range result.Data {
+		commits = append(commits, GitCommitInfo{
+			Hash:      c.Hash,
+			ShortHash: c.ShortHash,
+			Author:    c.Author,
+			Date:      c.Date,
+			Message:   c.Message,
+		})
+	}
+
+	h.emit(EventGitLogResponse, GitLogResponse{
+		RequestID: req.RequestID,
+		Commits:   commits,
+	})
+}
+
+func (h *Handler) handleGitGetCurrentBranch(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitGetCurrentBranchRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_get_current_branch_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.GetCurrentBranch()
+
+	h.emit(EventGitGetCurrentBranchResponse, GitGetCurrentBranchResponse{
+		RequestID: req.RequestID,
+		Branch:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitListBranches(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitListBranchesRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_list_branches_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.ListBranches(req.IncludeRemote)
+	if !result.Success {
+		h.emitError(req.RequestID, "GIT_LIST_BRANCHES_ERROR", result.Error)
+		return
+	}
+
+	branches := make([]BranchInfo, 0, len(result.Data))
+	for _, b := range result.Data {
+		branches = append(branches, BranchInfo{
+			Name:      b.Name,
+			IsCurrent: b.IsCurrent,
+		})
+	}
+
+	h.emit(EventGitListBranchesResponse, GitListBranchesResponse{
+		RequestID: req.RequestID,
+		Branches:  branches,
+	})
+}
+
+func (h *Handler) handleGitCreateBranch(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitCreateBranchRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_create_branch_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.CreateBranch(req.Name, req.StartPoint)
+
+	h.emit(EventGitCreateBranchResponse, GitCreateBranchResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Branch:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitDeleteBranch(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitDeleteBranchRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_delete_branch_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.DeleteBranch(req.Name, req.Force)
+
+	h.emit(EventGitDeleteBranchResponse, GitDeleteBranchResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitSwitchBranch(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitSwitchBranchRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_switch_branch_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.SwitchBranch(req.Branch)
+
+	h.emit(EventGitSwitchBranchResponse, GitSwitchBranchResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Branch:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitCommit(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitCommitRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_commit_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.Commit(req.Message)
+
+	h.emit(EventGitCommitResponse, GitCommitResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Hash:      result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitPush(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitPushRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_push_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	remote := req.Remote
+	if remote == "" {
+		remote = "origin"
+	}
+	result := svc.Push(remote, req.Branch, req.SetUpstream)
+
+	h.emit(EventGitPushResponse, GitPushResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitPull(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitPullRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_pull_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	remote := req.Remote
+	if remote == "" {
+		remote = "origin"
+	}
+	result := svc.Pull(remote, req.Branch)
+
+	h.emit(EventGitPullResponse, GitPullResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitFetch(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitFetchRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_fetch_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	remote := req.Remote
+	if remote == "" {
+		remote = "origin"
+	}
+	result := svc.Fetch(remote)
+
+	h.emit(EventGitFetchResponse, GitFetchResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitGetRemotes(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitGetRemotesRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_get_remotes_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.GetRemotes()
+	if !result.Success {
+		h.emitError(req.RequestID, "GIT_GET_REMOTES_ERROR", result.Error)
+		return
+	}
+
+	remotes := make([]GitRemoteInfo, 0, len(result.Data))
+	for _, r := range result.Data {
+		remotes = append(remotes, GitRemoteInfo{
+			Name:     r.Name,
+			FetchURL: r.FetchURL,
+			PushURL:  r.PushURL,
+		})
+	}
+
+	h.emit(EventGitGetRemotesResponse, GitGetRemotesResponse{
+		RequestID: req.RequestID,
+		Remotes:   remotes,
+	})
+}
+
+func (h *Handler) handleGitAddRemote(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitAddRemoteRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_add_remote_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.AddRemote(req.Name, req.URL)
+
+	h.emit(EventGitAddRemoteResponse, GitAddRemoteResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitRemoveRemote(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitRemoveRemoteRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_remove_remote_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.RemoveRemote(req.Name)
+
+	h.emit(EventGitRemoveRemoteResponse, GitRemoveRemoteResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitDiffStaged(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitDiffStagedRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_diff_staged_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.DiffStaged()
+
+	h.emit(EventGitDiffStagedResponse, GitDiffStagedResponse{
+		RequestID: req.RequestID,
+		Diff:      result.Data,
+		Success:   result.Success,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitDiffUnstaged(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitDiffUnstagedRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_diff_unstaged_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.DiffUnstaged()
+
+	h.emit(EventGitDiffUnstagedResponse, GitDiffUnstagedResponse{
+		RequestID: req.RequestID,
+		Diff:      result.Data,
+		Success:   result.Success,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitGetFileContent(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitGetFileContentRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_get_file_content_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.GetFileContent(req.FilePath)
+
+	h.emit(EventGitGetFileContentResponse, GitGetFileContentResponse{
+		RequestID: req.RequestID,
+		Content:   result.Data,
+		Success:   result.Success,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitStash(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitStashRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_stash_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.Stash(req.Message)
+
+	h.emit(EventGitStashResponse, GitStashResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitStashPop(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitStashPopRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_stash_pop_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.StashPop()
+
+	h.emit(EventGitStashPopResponse, GitStashPopResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitMerge(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitMergeRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_merge_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.Merge(req.Branch, req.Message)
+
+	h.emit(EventGitMergeResponse, GitMergeResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitRebase(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitRebaseRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_rebase_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.Rebase(req.Branch)
+
+	h.emit(EventGitRebaseResponse, GitRebaseResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitRebaseAbort(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitRebaseAbortRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_rebase_abort_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.RebaseAbort()
+
+	h.emit(EventGitRebaseAbortResponse, GitRebaseAbortResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitCreateTag(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitCreateTagRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_create_tag_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.CreateTag(req.Name, req.Message)
+
+	h.emit(EventGitCreateTagResponse, GitCreateTagResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Name:      result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitListTags(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitListTagsRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_list_tags_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.ListTags()
+
+	h.emit(EventGitListTagsResponse, GitListTagsResponse{
+		RequestID: req.RequestID,
+		Tags:      result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitReset(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitResetRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_reset_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.Reset(req.Mode, req.Ref)
+
+	h.emit(EventGitResetResponse, GitResetResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
+}
+
+func (h *Handler) handleGitAddAll(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req GitAddAllRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse git_add_all_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	svc := gitservice.NewService(worktree)
+	result := svc.AddAll()
+
+	h.emit(EventGitAddAllResponse, GitAddAllResponse{
+		RequestID: req.RequestID,
+		Success:   result.Success,
+		Output:    result.Data,
+		Error:     result.Error,
+	})
 }
 
 func (h *Handler) handlePermissionResponse(args []json.RawMessage) {
