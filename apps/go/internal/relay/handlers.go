@@ -638,6 +638,12 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		Prompt:    req.Prompt,
 		SessionID: req.SessionID,
 	}
+	if req.Model != nil {
+		runInput.Model = &agent.ModelRef{
+			ProviderID: req.Model.ProviderID,
+			ModelID:    req.Model.ModelID,
+		}
+	}
 
 	result, err := provider.Sessions().RunStream(context.Background(), runInput, func(chunk agent.StreamChunk) {
 		h.emit(EventSessionStreamChunk, SessionStreamChunkPayload{

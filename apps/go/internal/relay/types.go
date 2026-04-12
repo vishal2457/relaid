@@ -282,11 +282,17 @@ type SessionUpdateResponse struct {
 }
 
 type SessionPromptRequest struct {
-	RequestID string `json:"requestId"`
-	ProjectID string `json:"projectId"`
-	SessionID string `json:"sessionId"`
-	Prompt    string `json:"prompt"`
-	UserID    string `json:"userId,omitempty"`
+	RequestID string          `json:"requestId"`
+	ProjectID string          `json:"projectId"`
+	SessionID string          `json:"sessionId"`
+	Prompt    string          `json:"prompt"`
+	UserID    string          `json:"userId,omitempty"`
+	Model     *agent.ModelRef `json:"model,omitempty"`
+}
+
+type ModelRef struct {
+	ProviderID string `json:"providerId"`
+	ModelID    string `json:"modelId"`
 }
 
 type SessionPromptStarted struct {
