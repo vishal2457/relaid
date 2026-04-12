@@ -50,6 +50,57 @@ const (
 	EventGitDiscardFileRequest   = "git_discard_file_request"
 	EventGitDiscardFileResponse  = "git_discard_file_response"
 
+	EventGitLogRequest               = "git_log_request"
+	EventGitLogResponse              = "git_log_response"
+	EventGitGetCurrentBranchRequest  = "git_get_current_branch_request"
+	EventGitGetCurrentBranchResponse = "git_get_current_branch_response"
+	EventGitListBranchesRequest      = "git_list_branches_request"
+	EventGitListBranchesResponse     = "git_list_branches_response"
+	EventGitCreateBranchRequest      = "git_create_branch_request"
+	EventGitCreateBranchResponse     = "git_create_branch_response"
+	EventGitDeleteBranchRequest      = "git_delete_branch_request"
+	EventGitDeleteBranchResponse     = "git_delete_branch_response"
+	EventGitSwitchBranchRequest      = "git_switch_branch_request"
+	EventGitSwitchBranchResponse     = "git_switch_branch_response"
+	EventGitCommitRequest            = "git_commit_request"
+	EventGitCommitResponse           = "git_commit_response"
+	EventGitPushRequest              = "git_push_request"
+	EventGitPushResponse             = "git_push_response"
+	EventGitPullRequest              = "git_pull_request"
+	EventGitPullResponse             = "git_pull_response"
+	EventGitFetchRequest             = "git_fetch_request"
+	EventGitFetchResponse            = "git_fetch_response"
+	EventGitGetRemotesRequest        = "git_get_remotes_request"
+	EventGitGetRemotesResponse       = "git_get_remotes_response"
+	EventGitAddRemoteRequest         = "git_add_remote_request"
+	EventGitAddRemoteResponse        = "git_add_remote_response"
+	EventGitRemoveRemoteRequest      = "git_remove_remote_request"
+	EventGitRemoveRemoteResponse     = "git_remove_remote_response"
+	EventGitDiffStagedRequest        = "git_diff_staged_request"
+	EventGitDiffStagedResponse       = "git_diff_staged_response"
+	EventGitDiffUnstagedRequest      = "git_diff_unstaged_request"
+	EventGitDiffUnstagedResponse     = "git_diff_unstaged_response"
+	EventGitGetFileContentRequest    = "git_get_file_content_request"
+	EventGitGetFileContentResponse   = "git_get_file_content_response"
+	EventGitStashRequest             = "git_stash_request"
+	EventGitStashResponse            = "git_stash_response"
+	EventGitStashPopRequest          = "git_stash_pop_request"
+	EventGitStashPopResponse         = "git_stash_pop_response"
+	EventGitMergeRequest             = "git_merge_request"
+	EventGitMergeResponse            = "git_merge_response"
+	EventGitRebaseRequest            = "git_rebase_request"
+	EventGitRebaseResponse           = "git_rebase_response"
+	EventGitRebaseAbortRequest       = "git_rebase_abort_request"
+	EventGitRebaseAbortResponse      = "git_rebase_abort_response"
+	EventGitCreateTagRequest         = "git_create_tag_request"
+	EventGitCreateTagResponse        = "git_create_tag_response"
+	EventGitListTagsRequest          = "git_list_tags_request"
+	EventGitListTagsResponse         = "git_list_tags_response"
+	EventGitResetRequest             = "git_reset_request"
+	EventGitResetResponse            = "git_reset_response"
+	EventGitAddAllRequest            = "git_add_all_request"
+	EventGitAddAllResponse           = "git_add_all_response"
+
 	EventPermissionRequest  = "permission_request"
 	EventPermissionResponse = "permission_response"
 	EventQuestionRequest    = "question_request"
@@ -108,10 +159,14 @@ type ProjectBranchesRequest struct {
 	ProjectID string `json:"projectId"`
 }
 
+type BranchInfo struct {
+	Name      string `json:"name"`
+	IsCurrent bool   `json:"isCurrent"`
+}
+
 type ProjectBranchesResponse struct {
-	RequestID string   `json:"requestId"`
-	Branches  []string `json:"branches"`
-	Current   string   `json:"current"`
+	RequestID string       `json:"requestId"`
+	Branches  []BranchInfo `json:"branches"`
 }
 
 type ProjectBranchSwitchRequest struct {
@@ -341,6 +396,7 @@ type GitStagedFilesResponse struct {
 	RequestID string    `json:"requestId"`
 	Staged    []GitFile `json:"staged"`
 	Unstaged  []GitFile `json:"unstaged"`
+	Branch    string    `json:"branch"`
 }
 
 type GitFile struct {
@@ -377,9 +433,25 @@ type GitFileDiffRequest struct {
 }
 
 type GitFileDiffResponse struct {
-	RequestID string `json:"requestId"`
-	FilePath  string `json:"filePath"`
-	Diff      string `json:"diff"`
+	RequestID string    `json:"requestId"`
+	Files     []GitDiff `json:"files"`
+	Success   bool      `json:"success"`
+	Error     string    `json:"error,omitempty"`
+}
+
+type GitDiff struct {
+	FileName string        `json:"fileName"`
+	Hunks    []GitDiffHunk `json:"hunks"`
+}
+
+type GitDiffHunk struct {
+	Header string        `json:"header"`
+	Lines  []GitDiffLine `json:"lines"`
+}
+
+type GitDiffLine struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
 }
 
 type GitDiscardFileRequest struct {
@@ -391,6 +463,338 @@ type GitDiscardFileRequest struct {
 type GitDiscardFileResponse struct {
 	RequestID string `json:"requestId"`
 	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitLogRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Count     int    `json:"count,omitempty"`
+}
+
+type GitLogResponse struct {
+	RequestID string          `json:"requestId"`
+	Commits   []GitCommitInfo `json:"commits"`
+	Error     string          `json:"error,omitempty"`
+}
+
+type GitCommitInfo struct {
+	Hash      string `json:"hash"`
+	ShortHash string `json:"shortHash"`
+	Author    string `json:"author"`
+	Date      string `json:"date"`
+	Message   string `json:"message"`
+}
+
+type GitGetCurrentBranchRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+}
+
+type GitGetCurrentBranchResponse struct {
+	RequestID string `json:"requestId"`
+	Branch    string `json:"branch"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitListBranchesRequest struct {
+	RequestID     string `json:"requestId"`
+	ProjectID     string `json:"projectId"`
+	IncludeRemote bool   `json:"includeRemote,omitempty"`
+}
+
+type GitListBranchesResponse struct {
+	RequestID string       `json:"requestId"`
+	Branches  []BranchInfo `json:"branches"`
+	Error     string       `json:"error,omitempty"`
+}
+
+type GitCreateBranchRequest struct {
+	RequestID  string `json:"requestId"`
+	ProjectID  string `json:"projectId"`
+	Name       string `json:"name"`
+	StartPoint string `json:"startPoint,omitempty"`
+}
+
+type GitCreateBranchResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Branch    string `json:"branch,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitDeleteBranchRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Name      string `json:"name"`
+	Force     bool   `json:"force,omitempty"`
+}
+
+type GitDeleteBranchResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitSwitchBranchRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Branch    string `json:"branch"`
+}
+
+type GitSwitchBranchResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Branch    string `json:"branch,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitCommitRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Message   string `json:"message"`
+}
+
+type GitCommitResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Hash      string `json:"hash,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitPushRequest struct {
+	RequestID   string `json:"requestId"`
+	ProjectID   string `json:"projectId"`
+	Remote      string `json:"remote,omitempty"`
+	Branch      string `json:"branch,omitempty"`
+	SetUpstream bool   `json:"setUpstream,omitempty"`
+}
+
+type GitPushResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitPullRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Remote    string `json:"remote,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+}
+
+type GitPullResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitFetchRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Remote    string `json:"remote,omitempty"`
+}
+
+type GitFetchResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitGetRemotesRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+}
+
+type GitGetRemotesResponse struct {
+	RequestID string          `json:"requestId"`
+	Remotes   []GitRemoteInfo `json:"remotes"`
+	Error     string          `json:"error,omitempty"`
+}
+
+type GitRemoteInfo struct {
+	Name     string `json:"name"`
+	FetchURL string `json:"fetchUrl"`
+	PushURL  string `json:"pushUrl"`
+}
+
+type GitAddRemoteRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+}
+
+type GitAddRemoteResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitRemoveRemoteRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Name      string `json:"name"`
+}
+
+type GitRemoveRemoteResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitDiffStagedRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+}
+
+type GitDiffStagedResponse struct {
+	RequestID string `json:"requestId"`
+	Diff      string `json:"diff"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitDiffUnstagedRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+}
+
+type GitDiffUnstagedResponse struct {
+	RequestID string `json:"requestId"`
+	Diff      string `json:"diff"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitGetFileContentRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	FilePath  string `json:"filePath"`
+}
+
+type GitGetFileContentResponse struct {
+	RequestID string `json:"requestId"`
+	Content   string `json:"content"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitStashRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Message   string `json:"message,omitempty"`
+}
+
+type GitStashResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitStashPopRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+}
+
+type GitStashPopResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitMergeRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Branch    string `json:"branch"`
+	Message   string `json:"message,omitempty"`
+}
+
+type GitMergeResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitRebaseRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Branch    string `json:"branch"`
+}
+
+type GitRebaseResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitRebaseAbortRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+}
+
+type GitRebaseAbortResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitCreateTagRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Name      string `json:"name"`
+	Message   string `json:"message,omitempty"`
+}
+
+type GitCreateTagResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Name      string `json:"name,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitListTagsRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+}
+
+type GitListTagsResponse struct {
+	RequestID string   `json:"requestId"`
+	Tags      []string `json:"tags"`
+	Error     string   `json:"error,omitempty"`
+}
+
+type GitResetRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Mode      string `json:"mode"`
+	Ref       string `json:"ref,omitempty"`
+}
+
+type GitResetResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type GitAddAllRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+}
+
+type GitAddAllResponse struct {
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	Output    string `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type PermissionRequestPayload struct {
