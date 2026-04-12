@@ -12,7 +12,9 @@ import (
 	"relaid/internal/config"
 	opencodeprovider "relaid/internal/providers/opencode"
 	agentsroute "relaid/internal/routes/agents"
+	gitroute "relaid/internal/routes/git"
 	healthroute "relaid/internal/routes/health"
+	projectsroute "relaid/internal/routes/projects"
 	custommiddleware "relaid/internal/shared/middleware"
 
 	"github.com/labstack/echo/v4"
@@ -62,6 +64,8 @@ func New(cfg config.Config) *Server {
 		})
 	})
 	agentsroute.Register(protected.Group("/agents"), s.registry)
+	gitroute.Register(protected.Group("/git"), s.registry)
+	projectsroute.Register(protected.Group("/projects"), s.registry)
 
 	return s
 }

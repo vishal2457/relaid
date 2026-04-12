@@ -85,7 +85,8 @@ import {
 import { AppState, type AppStateStatus } from "react-native";
 import { GitDrawer } from "@/components/GitDrawer";
 import { useGitFileStatus } from "@/lib/api/git";
-import { QueueDrawer } from "@/components/QueueDrawer";
+// Message queue temporarily disabled - will be re-enabled later
+// import { QueueDrawer } from "@/components/QueueDrawer";
 import { MessageRow, TypingIndicator } from "@/components/Message";
 import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
 import {
@@ -282,7 +283,8 @@ export default function ChatScreen() {
   );
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showGitDrawer, setShowGitDrawer] = React.useState(false);
-  const [showQueueDrawer, setShowQueueDrawer] = React.useState(false);
+  // Message queue temporarily disabled
+  // const [showQueueDrawer, setShowQueueDrawer] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
   const [isNearBottom, setIsNearBottom] = React.useState(true);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
@@ -1326,6 +1328,7 @@ export default function ChatScreen() {
               { backgroundColor: borderColor },
             ]}
           />
+          {/* Message queue temporarily disabled
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open Queue drawer"
@@ -1345,6 +1348,7 @@ export default function ChatScreen() {
               color={theme.colors.onSurface}
             />
           </Pressable>
+          */}
           <View
             style={[
               styles.buttonGroupDivider,
@@ -1884,12 +1888,14 @@ export default function ChatScreen() {
         backgroundColor={sheetBg}
       />
 
+      {/* Message queue temporarily disabled
       <QueueDrawer
         visible={showQueueDrawer}
         onClose={() => setShowQueueDrawer(false)}
         activeProject={activeProject}
         activeSessionId={activeSessionId}
       />
+      */}
     </SafeAreaView>
   );
 }
