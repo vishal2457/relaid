@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 
 	"relaid/internal/agent"
+
+	"github.com/sst/opencode-sdk-go"
 )
 
-type EnvelopePayload = agent.MessageEnvelope
+type EnvelopePayload = opencode.SessionMessagesResponse
 
 const (
 	EventProjectsListRequest         = "projects_list_request"
@@ -212,7 +214,7 @@ type ProjectFileMatch struct {
 
 type SessionsListRequest struct {
 	RequestID string `json:"requestId"`
-	ProjectID string `json:"projectId,omitempty"`
+	Cwd       string `json:"cwd,omitempty"`
 	Status    string `json:"status,omitempty"`
 	Limit     int    `json:"limit,omitempty"`
 }
@@ -337,7 +339,8 @@ type SessionAbortedPayload struct {
 
 type SessionPayload struct {
 	ID          string `json:"id"`
-	ProjectID   string `json:"projectID"`
+	ProjectID   string `json:"projectID,omitempty"`
+	Directory   string `json:"directory,omitempty"`
 	UserID      string `json:"userId,omitempty"`
 	Status      string `json:"status"`
 	Prompt      string `json:"prompt"`

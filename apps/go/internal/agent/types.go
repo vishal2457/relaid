@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/sst/opencode-sdk-go"
 )
 
 type ProviderID string
@@ -41,7 +43,7 @@ type SessionService interface {
 	List(context.Context, SessionFilters) ([]Session, string, error)
 	Get(context.Context, string) (*Session, error)
 	Create(context.Context, string) (*Session, error)
-	Messages(context.Context, string, int) ([]MessageEnvelope, error)
+	Messages(context.Context, string, int) ([]opencode.SessionMessagesResponse, error)
 	Diff(context.Context, string, string) ([]FileDiff, error)
 	Run(context.Context, RunInput) (*RunResult, error)
 	RunStream(context.Context, RunInput, func(StreamChunk)) (*RunResult, error)
@@ -82,10 +84,10 @@ type StreamChunk struct {
 }
 
 type SessionFilters struct {
-	ProjectID string
-	Status    string
-	Limit     int
-	Cursor    string
+	Cwd    string
+	Status string
+	Limit  int
+	Cursor string
 }
 
 type SessionState string

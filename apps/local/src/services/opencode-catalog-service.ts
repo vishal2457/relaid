@@ -281,7 +281,7 @@ class OpencodeCatalogService {
   }
 
   async listSessions(filters: {
-    projectId?: string;
+    cwd?: string;
     limit?: number;
     status?: string;
   }) {
@@ -291,7 +291,7 @@ class OpencodeCatalogService {
     }
     return sessions
       .filter((session) =>
-        filters.projectId ? session.projectID === filters.projectId : true,
+        filters.cwd ? session.directory === filters.cwd : true,
       )
       .filter((session) =>
         filters.status ? session.status === filters.status : true,
@@ -316,7 +316,10 @@ class OpencodeCatalogService {
     );
   }
 
-  async getSessionDiff(sessionId: string, messageId?: string): Promise<FileDiff[]> {
+  async getSessionDiff(
+    sessionId: string,
+    messageId?: string,
+  ): Promise<FileDiff[]> {
     return this.sdk.getSessionDiff(sessionId, messageId);
   }
 

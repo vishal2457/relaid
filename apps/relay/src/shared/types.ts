@@ -158,7 +158,8 @@ export const ProjectDirectoryNodeSchema: z.ZodType<ProjectDirectoryNode> =
 
 export const SessionPayloadSchema = z.object({
   id: z.string(),
-  projectId: z.string(),
+  projectId: z.string().optional(),
+  directory: z.string().optional(),
   userId: z.string().nullable().optional(),
   status: z.string(),
   prompt: z.string(),
@@ -256,7 +257,7 @@ export const ProjectDeleteResponseSchema = z.object({
 });
 
 export const SessionsListRequestSchema = z.object({
-  projectId: z.string().optional(),
+  cwd: z.string().optional(),
   userId: z.string().optional(),
   status: z.string().optional(),
   limit: z.number().optional(),

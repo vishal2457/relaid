@@ -23,8 +23,8 @@ func main() {
 	// Create application with options
 	err := wails.Run(&options.App{
 		Title:             "Derived",
-		Width:             2048,
-		Height:            1024,
+		Width:             960,
+		Height:            640,
 		MinWidth:          800,
 		MinHeight:         600,
 		DisableResize:     false,

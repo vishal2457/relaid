@@ -250,6 +250,9 @@ export default function ChatScreen() {
   const [pendingRequestIds, setPendingRequestIds] = React.useState<
     Map<string, string>
   >(new Map());
+  const [creatingSessionId, setCreatingSessionId] = React.useState<
+    string | null
+  >(null);
   const pendingRequestIdsRef = React.useRef<Map<string, string>>(new Map());
   const activeSessionIdRef = React.useRef<string | null>(null);
   const allowSessionChangeRecoveryRef = React.useRef(false);
@@ -447,7 +450,7 @@ export default function ChatScreen() {
     if (!hydrated) return;
     if (activeProject) {
       AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => { },
+        () => {},
       );
     }
   }, [activeProject, hydrated]);
@@ -458,7 +461,7 @@ export default function ChatScreen() {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
-      ).catch(() => { });
+      ).catch(() => {});
     }
   }, [activeModel, hydrated]);
 
@@ -479,7 +482,7 @@ export default function ChatScreen() {
             setActiveModel(savedModel);
           }
         }
-      } catch { }
+      } catch {}
     })();
   }, [hydrated, providers]);
 
@@ -514,18 +517,18 @@ export default function ChatScreen() {
 
     const filtered = normalizedQuery
       ? models
-        .map((model) => ({
-          model,
-          score: getModelSearchScore(model, normalizedQuery),
-        }))
-        .filter((entry) => entry.score >= 0)
-        .sort((a, b) => {
-          if (b.score !== a.score) {
-            return b.score - a.score;
-          }
-          return a.model.name.localeCompare(b.model.name);
-        })
-        .map((entry) => entry.model)
+          .map((model) => ({
+            model,
+            score: getModelSearchScore(model, normalizedQuery),
+          }))
+          .filter((entry) => entry.score >= 0)
+          .sort((a, b) => {
+            if (b.score !== a.score) {
+              return b.score - a.score;
+            }
+            return a.model.name.localeCompare(b.model.name);
+          })
+          .map((entry) => entry.model)
       : models;
 
     if (!activeModel) {
@@ -745,7 +748,7 @@ export default function ChatScreen() {
 
   const connectSse = React.useCallback(() => {
     if (!isMountedRef.current) {
-      return () => { };
+      return () => {};
     }
 
     setConnectionState("connecting");
@@ -817,7 +820,7 @@ export default function ChatScreen() {
       setConnectionState("disconnected");
       sseClientRef.current = null;
       unsubscribe();
-      return () => { };
+      return () => {};
     }
 
     sseClientRef.current = client;
@@ -1016,17 +1019,17 @@ export default function ChatScreen() {
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-      mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
-      220,
-    ) + 8
+        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
+        220,
+      ) + 8
     : 0;
   const showSkillSuggestions = Boolean(activeProject && activeSlash);
   const skillSuggestionCount = skillSuggestions?.length ?? 0;
   const skillSuggestionHeight = showSkillSuggestions
     ? Math.min(
-      skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
-      220,
-    ) + 8
+        skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
+        220,
+      ) + 8
     : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
@@ -1037,9 +1040,11 @@ export default function ChatScreen() {
     keyboardHeight +
     (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
   const trimmedInput = inputText.trim();
-  const isSessionSending = activeSessionId
-    ? pendingRequestIds.has(activeSessionId)
-    : false;
+  const isSessionSending = creatingSessionId
+    ? true
+    : activeSessionId
+      ? pendingRequestIds.has(activeSessionId)
+      : false;
 
   const handleSend = React.useCallback(async () => {
     if (!activeProject || !trimmedInput) {
@@ -1049,6 +1054,8 @@ export default function ChatScreen() {
     let sessionId = activeSessionId;
 
     if (!sessionId) {
+      const tempRequestId = `creating_${Date.now()}`;
+      setCreatingSessionId(tempRequestId);
       try {
         const session = await createSessionMutation.mutateAsync(
           activeProject.id,
@@ -1056,7 +1063,9 @@ export default function ChatScreen() {
         sessionId = session.id;
         allowSessionChangeRecoveryRef.current = false;
         setActiveSessionId(sessionId);
+        setCreatingSessionId(null);
       } catch (createError) {
+        setCreatingSessionId(null);
         console.error(createError);
         Alert.alert("Error", "Failed to create session");
         return;
@@ -1110,9 +1119,9 @@ export default function ChatScreen() {
         prompt: trimmedInput,
         model: activeModel
           ? {
-            providerId: activeModel.providerId,
-            modelId: activeModel.id,
-          }
+              providerId: activeModel.providerId,
+              modelId: activeModel.id,
+            }
           : undefined,
       });
     } catch (error) {
@@ -1438,8 +1447,8 @@ export default function ChatScreen() {
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
-            activeSessionId &&
-            displayedMessages.length === 0 ? (
+          activeSessionId &&
+          displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>

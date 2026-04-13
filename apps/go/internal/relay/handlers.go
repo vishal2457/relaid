@@ -413,9 +413,9 @@ func (h *Handler) handleSessionsList(args []json.RawMessage) {
 	}
 
 	filters := agent.SessionFilters{
-		ProjectID: req.ProjectID,
-		Status:    req.Status,
-		Limit:     req.Limit,
+		Cwd:    req.Cwd,
+		Status: req.Status,
+		Limit:  req.Limit,
 	}
 
 	sessions, _, err := provider.Sessions().List(context.Background(), filters)
@@ -493,8 +493,6 @@ func (h *Handler) handleSessionMessages(args []json.RawMessage) {
 		})
 		return
 	}
-
-	h.logger.Printf("relay: session envelopes: %v", len(envelopes))
 
 	h.emit(EventSessionMessagesResponse, SessionMessagesResponse{
 		RequestID: req.RequestID,
@@ -739,6 +737,13 @@ func (h *Handler) handleProvidersList(args []json.RawMessage) {
 			Providers: []ProviderPayload{},
 		})
 		return
+	}
+
+	h.logger.Printf("relay: providers fetched: %d providers", len(providers))
+	for _, p := range providers {
+		for _, m := range p.Models {
+			h.logger.Printf("relay: provider=%s model=%s (%s)", p.ID, m.ID, m.Name)
+		}
 	}
 
 	payload := ProvidersListResponse{
@@ -1748,6 +1753,7 @@ func convertSession(s agent.Session) SessionPayload {
 	sp := SessionPayload{
 		ID:        s.ID,
 		ProjectID: s.ProjectID,
+		Directory: s.Directory,
 		Prompt:    s.Title,
 		Status:    string(s.Status),
 		CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05.000Z"),

@@ -2,7 +2,6 @@ package sdk
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"sort"
@@ -105,7 +104,7 @@ func (a *Adapter) GetSession(ctx context.Context, sessionID string) (*agent.Sess
 	return &value, nil
 }
 
-func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limit int) ([]agent.MessageEnvelope, error) {
+func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limit int) ([]opencode.SessionMessagesResponse, error) {
 	if err := a.ensureClient(); err != nil {
 		return nil, err
 	}
@@ -118,7 +117,7 @@ func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limi
 		return nil, err
 	}
 	if session == nil {
-		return []agent.MessageEnvelope{}, nil
+		return []opencode.SessionMessagesResponse{}, nil
 	}
 
 	messages, err := a.client.Session.Messages(ctx, sessionID, opencode.SessionMessagesParams{
@@ -127,34 +126,10 @@ func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limi
 	if err != nil {
 		return nil, err
 	}
-
-	items := *messages
-	if limit > 0 && len(items) > limit {
-		items = items[:limit]
+	if messages == nil {
+		return []opencode.SessionMessagesResponse{}, nil
 	}
-
-	result := make([]agent.MessageEnvelope, 0, len(items))
-	for _, item := range items {
-		infoJSON, err := json.Marshal(item.Info)
-		if err != nil {
-			return nil, err
-		}
-
-		parts := make([]json.RawMessage, 0, len(item.Parts))
-		for _, part := range item.Parts {
-			partJSON, err := json.Marshal(part)
-			if err != nil {
-				return nil, err
-			}
-			parts = append(parts, partJSON)
-		}
-
-		result = append(result, agent.MessageEnvelope{
-			Info:  infoJSON,
-			Parts: parts,
-		})
-	}
-	return result, nil
+	return *messages, nil
 }
 
 func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID string) ([]agent.FileDiff, error) {

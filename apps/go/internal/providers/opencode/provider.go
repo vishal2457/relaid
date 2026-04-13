@@ -14,6 +14,8 @@ import (
 	"relaid/internal/config"
 	acpclient "relaid/internal/providers/opencode/acp"
 	sdkclient "relaid/internal/providers/opencode/sdk"
+
+	"github.com/sst/opencode-sdk-go"
 )
 
 type Provider struct {
@@ -130,29 +132,35 @@ type activeRunStore struct {
 }
 
 func (s *sessionService) List(ctx context.Context, filters agent.SessionFilters) ([]agent.Session, string, error) {
-	directory := ""
-	if filters.ProjectID != "" {
-		dir, err := s.sdk.EnsureProjectDirectory(ctx, filters.ProjectID, "")
-		if err != nil {
-			return nil, "", err
+	if filters.Cwd != "" {
+		if _, err := os.Stat(filters.Cwd); err != nil {
+			return nil, "", fmt.Errorf("invalid cwd: %w", err)
 		}
-		directory = dir
 	}
 
-	sessions, err := s.sdk.ListSessions(ctx, directory)
+	result, err := s.acp.ListSessions(ctx, s.clientInfo, filters.Cwd, "")
 	if err != nil {
 		return nil, "", err
 	}
 
-	filtered := make([]agent.Session, 0, len(sessions))
-	for _, session := range sessions {
+	sessions := make([]agent.Session, 0, len(result.Sessions))
+	for _, info := range result.Sessions {
+		session := agent.Session{
+			ID:        info.SessionID,
+			Directory: info.Cwd,
+			Title:     info.Title,
+			Status:    agent.SessionCompleted,
+			CreatedAt: parseTime(info.UpdatedAt),
+			UpdatedAt: parseTime(info.UpdatedAt),
+		}
 		if s.active.Has(session.ID) {
 			session.Status = agent.SessionRunning
 		}
+		sessions = append(sessions, session)
+	}
 
-		if filters.ProjectID != "" && session.ProjectID != filters.ProjectID {
-			continue
-		}
+	filtered := make([]agent.Session, 0, len(sessions))
+	for _, session := range sessions {
 		if filters.Status != "" && string(session.Status) != filters.Status {
 			continue
 		}
@@ -179,7 +187,7 @@ func (s *sessionService) Get(ctx context.Context, id string) (*agent.Session, er
 	return session, nil
 }
 
-func (s *sessionService) Messages(ctx context.Context, id string, limit int) ([]agent.MessageEnvelope, error) {
+func (s *sessionService) Messages(ctx context.Context, id string, limit int) ([]opencode.SessionMessagesResponse, error) {
 	return s.sdk.GetSessionMessages(ctx, id, limit)
 }
 
@@ -315,6 +323,7 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 	modelID := ""
 	if input.Model != nil {
 		modelID = strings.TrimSpace(input.Model.ProviderID + "/" + input.Model.ModelID)
+		s.logger.Printf("ACP model override: %s", modelID)
 	}
 
 	result, err := conn.Prompt(runCtx, sessionID, effectivePrompt, modelID)

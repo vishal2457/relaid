@@ -187,7 +187,8 @@ export interface ProjectFileMatchPayload {
 
 export interface SessionPayload {
   id: string;
-  projectId: string;
+  projectId?: string;
+  directory?: string;
   userId?: string | null;
   status: string;
   prompt: string;
@@ -270,7 +271,7 @@ export type ProjectBranchSwitchRequestPayload = {
 export type ProjectBranchSwitchResponsePayload = { branch: string };
 
 export type SessionsListRequestPayload = {
-  projectId?: string;
+  cwd?: string;
   userId?: string;
   status?: string;
   limit?: number;

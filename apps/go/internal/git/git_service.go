@@ -82,19 +82,11 @@ func (s *Service) IsGitRepository() bool {
 }
 
 func (s *Service) IsClean() bool {
-	repo, err := git.PlainOpen(s.cwd)
+	out, err := runGit(s.cwd, "status", "--porcelain")
 	if err != nil {
 		return false
 	}
-	w, err := repo.Worktree()
-	if err != nil {
-		return false
-	}
-	status, err := w.Status()
-	if err != nil {
-		return false
-	}
-	return status.IsClean()
+	return strings.TrimSpace(out) == ""
 }
 
 func (s *Service) Init() Result[string] {
@@ -208,17 +200,8 @@ func (s *Service) DeleteBranch(name string, force bool) Result[string] {
 // =====================
 
 func (s *Service) GetFileStatusLists() Result[StatusLists] {
+	// Get current branch using go-git (this is fast and reliable)
 	repo, err := git.PlainOpen(s.cwd)
-	if err != nil {
-		s.handleError("getFileStatusLists", err)
-		return fail[StatusLists](err.Error())
-	}
-	w, err := repo.Worktree()
-	if err != nil {
-		s.handleError("getFileStatusLists", err)
-		return fail[StatusLists](err.Error())
-	}
-	status, err := w.Status()
 	if err != nil {
 		s.handleError("getFileStatusLists", err)
 		return fail[StatusLists](err.Error())
@@ -230,43 +213,64 @@ func (s *Service) GetFileStatusLists() Result[StatusLists] {
 		branchName = head.Name().Short()
 	}
 
+	// Use native git status --porcelain instead of go-git's Status()
+	// go-git's Status() can hang indefinitely in certain scenarios
+	out, err := runGit(s.cwd, "status", "--porcelain", "-u")
+	if err != nil {
+		s.handleError("getFileStatusLists", err)
+		return fail[StatusLists](err.Error())
+	}
+
 	var staged, unstaged []FileWithStatus
-	stagedSet := make(map[string]bool)
 
-	for path, s2 := range status {
-		code := string(s2.Staging)
-		wCode := string(s2.Worktree)
-
-		switch code {
-		case "A":
-			staged = append(staged, FileWithStatus{Path: path, Status: "added"})
-			stagedSet[path] = true
-		case "M":
-			staged = append(staged, FileWithStatus{Path: path, Status: "modified"})
-			stagedSet[path] = true
-		case "D":
-			staged = append(staged, FileWithStatus{Path: path, Status: "deleted"})
-			stagedSet[path] = true
-		case "R":
-			staged = append(staged, FileWithStatus{Path: path, Status: "renamed"})
-			stagedSet[path] = true
-		case "C":
-			staged = append(staged, FileWithStatus{Path: path, Status: "copied"})
-			stagedSet[path] = true
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		if len(line) < 3 {
+			continue
 		}
 
-		switch wCode {
-		case "M":
-			if !stagedSet[path] {
-				unstaged = append(unstaged, FileWithStatus{Path: path, Status: "modified"})
+		// Porcelain format: XY PATH or XY ORIG_PATH -> PATH for renames
+		// X = index/staging status, Y = worktree/unstaged status
+		indexStatus := line[0]    // Staging status (column 1)
+		worktreeStatus := line[1] // Worktree status (column 2)
+		path := strings.TrimSpace(line[2:])
+
+		// Handle rename/copy format: XY ORIG_PATH -> PATH
+		if indexStatus == 'R' || indexStatus == 'C' {
+			parts := strings.Split(path, " -> ")
+			if len(parts) == 2 {
+				path = strings.TrimSpace(parts[1])
 			}
-		case "D":
-			if !stagedSet[path] {
-				unstaged = append(unstaged, FileWithStatus{Path: path, Status: "deleted"})
-			}
-		case "?":
+		}
+
+		// Map index status codes (staged changes) - only if not a space (unmodified)
+		// Note: A file can have BOTH staged and unstaged changes (e.g., "MM")
+		switch indexStatus {
+		case 'A':
+			staged = append(staged, FileWithStatus{Path: path, Status: "added"})
+		case 'M':
+			staged = append(staged, FileWithStatus{Path: path, Status: "modified"})
+		case 'D':
+			staged = append(staged, FileWithStatus{Path: path, Status: "deleted"})
+		case 'R':
+			staged = append(staged, FileWithStatus{Path: path, Status: "renamed"})
+		case 'C':
+			staged = append(staged, FileWithStatus{Path: path, Status: "copied"})
+		}
+
+		// Map worktree status codes (unstaged changes)
+		// These are independent of staged status - a file can be in both lists
+		switch worktreeStatus {
+		case 'M':
+			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "modified"})
+		case 'D':
+			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "deleted"})
+		case '?':
 			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "untracked"})
-		case "!":
+		case '!':
 			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "ignored"})
 		}
 	}

@@ -182,7 +182,7 @@ func (c *Client) Start(ctx context.Context, info ClientInfo, updateHandler func(
 	return conn, nil
 }
 
-func (c *Client) ListSessions(ctx context.Context, info ClientInfo, cursor string) (*SessionListResult, error) {
+func (c *Client) ListSessions(ctx context.Context, info ClientInfo, cwd string, cursor string) (*SessionListResult, error) {
 	conn, err := c.Start(ctx, info, nil)
 	if err != nil {
 		return nil, err
@@ -193,12 +193,22 @@ func (c *Client) ListSessions(ctx context.Context, info ClientInfo, cursor strin
 		return nil, errors.New("ACP session/list is not supported")
 	}
 
-	var result SessionListResult
+	effectiveCwd := cwd
+	if effectiveCwd == "" {
+		effectiveCwd = c.cwd
+	}
+
+	var raw json.RawMessage
 	if err := conn.call("session/list", map[string]any{
-		"cwd":    c.cwd,
+		"cwd":    effectiveCwd,
 		"cursor": cursor,
-	}, &result); err != nil {
+	}, &raw); err != nil {
 		return nil, err
+	}
+
+	var result SessionListResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("decode session/list response: %w", err)
 	}
 	if result.Sessions == nil {
 		result.Sessions = []SessionInfo{}
@@ -215,6 +225,9 @@ func (c *Connection) NewSession(ctx context.Context, cwd string) (*SessionCreate
 		return nil, err
 	}
 	c.configOptions = result.ConfigOptions
+	for _, opt := range c.configOptions {
+		c.logf("ACP new session config: id=%q currentValue=%v", opt.ID, opt.CurrentValue)
+	}
 	return &result, nil
 }
 
@@ -228,6 +241,9 @@ func (c *Connection) LoadSession(ctx context.Context, sessionID, cwd string) (*S
 		return nil, err
 	}
 	c.configOptions = result.ConfigOptions
+	for _, opt := range c.configOptions {
+		c.logf("ACP load session config: id=%q currentValue=%v", opt.ID, opt.CurrentValue)
+	}
 	return &result, nil
 }
 
@@ -242,8 +258,31 @@ func (c *Connection) Prompt(ctx context.Context, sessionID string, prompt string
 		},
 	}
 
+	if modelID != "" {
+		params["model"] = map[string]any{
+			"modelID":    modelID,
+			"providerID": "",
+		}
+		if strings.Contains(modelID, "/") {
+			parts := strings.SplitN(modelID, "/", 2)
+			params["model"] = map[string]any{
+				"modelID":    parts[1],
+				"providerID": parts[0],
+			}
+		}
+		c.logf("ACP prompt: setting model=%v", params["model"])
+	}
+
 	if len(c.configOptions) > 0 {
-		params["configOptions"] = withModelOverride(c.configOptions, modelID)
+		overridden := withModelOverride(c.configOptions, modelID)
+		for _, opt := range overridden {
+			if isModelConfigOption(opt["id"].(string)) {
+				c.logf("ACP prompt: config id=%q value=%v", opt["id"], opt["currentValue"])
+			}
+		}
+		params["configOptions"] = overridden
+	} else if modelID != "" {
+		c.logf("ACP prompt: modelID=%q but configOptions is empty, model override NOT applied", modelID)
 	}
 
 	var result PromptResult
@@ -548,8 +587,17 @@ func withModelOverride(options []ConfigOption, modelID string) []map[string]any 
 	result := make([]map[string]any, 0, len(options))
 	for _, option := range options {
 		current := option.CurrentValue
-		if modelID != "" && option.ID == "model" {
-			current = modelID
+		if modelID != "" && isModelConfigOption(option.ID) {
+			if !strings.Contains(modelID, "/") {
+				if s, ok := current.(string); ok && strings.Contains(s, "/") {
+					prefix := s[:strings.LastIndex(s, "/")+1]
+					current = prefix + modelID
+				} else {
+					current = modelID
+				}
+			} else {
+				current = modelID
+			}
 		}
 		result = append(result, map[string]any{
 			"id":           option.ID,
@@ -557,4 +605,12 @@ func withModelOverride(options []ConfigOption, modelID string) []map[string]any 
 		})
 	}
 	return result
+}
+
+func isModelConfigOption(id string) bool {
+	switch id {
+	case "model", "model_id", "modelId":
+		return true
+	}
+	return false
 }

@@ -114,10 +114,7 @@ const DiffFileRow = ({
   metaColor: string;
   textColor: string;
 }) => {
-  const fileName = diff.file.split("/").pop() ?? diff.file;
-  const directory = diff.file.includes("/")
-    ? diff.file.slice(0, diff.file.lastIndexOf("/"))
-    : "";
+  const directory = diff.file
   const hasDiffContent = diff?.patch;
 
   return (
@@ -133,13 +130,6 @@ const DiffFileRow = ({
         }}
       >
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text
-            variant="bodyMedium"
-            style={{ color: textColor, fontWeight: "600" }}
-            numberOfLines={1}
-          >
-            {fileName}
-          </Text>
           {directory ? (
             <Text
               variant="labelSmall"
@@ -187,7 +177,7 @@ const DiffFileRow = ({
             <View style={{ padding: 12 }}>
               <Text variant="bodySmall" style={{ color: metaColor }}>
                 {diff.additions === 0 && diff.deletions === 0
-                  ? fileName
+                  ? directory
                   : "No preview available"}
               </Text>
             </View>

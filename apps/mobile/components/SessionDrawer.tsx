@@ -38,7 +38,7 @@ export function SessionDrawer({
     data: sessions,
     isLoading: sessionsLoading,
     error: sessionsError,
-  } = useSessions(activeProject?.id ?? "");
+  } = useSessions(activeProject?.folder ?? "");
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
   const metaColor = theme.dark ? "#B8C2D1" : "#526277";

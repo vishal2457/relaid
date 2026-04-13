@@ -74,15 +74,14 @@ function handleRouteError(
 router.get("/", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const cwd = typeof req.query.cwd === "string" ? req.query.cwd : undefined;
+
     const results = await requestAllConnectedServers<SessionsListResponse>(
       userId,
       "sessions_list_request",
       "sessions_list_response",
       {
-        projectId:
-          typeof req.query.projectId === "string"
-            ? req.query.projectId
-            : undefined,
+        cwd,
         status:
           typeof req.query.status === "string" ? req.query.status : undefined,
         limit:
@@ -95,19 +94,10 @@ router.get("/", async (req: Request, res: Response) => {
     const sessions = results.flatMap(
       (result) => result.response.sessions || [],
     );
-    const projectId =
-      typeof req.query.projectId === "string" ? req.query.projectId : undefined;
     const status =
       typeof req.query.status === "string" ? req.query.status : undefined;
 
-    // Handle both OpenCode format (projectID, time.created) and legacy format (projectId, createdAt)
     const filteredSessions = sessions
-      .filter((session) => {
-        const sessionProjectId =
-          (session as Record<string, unknown>).projectID ??
-          (session as Record<string, unknown>).projectId;
-        return projectId ? sessionProjectId === projectId : true;
-      })
       .filter((session) => {
         const sessionStatus = (session as Record<string, unknown>).status;
         return status ? sessionStatus === status : true;

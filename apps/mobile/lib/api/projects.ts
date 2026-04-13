@@ -82,6 +82,19 @@ export function useProjects() {
   });
 }
 
+export function useProject(projectId: string) {
+  return useQuery<Project | null>({
+    queryKey: projectsKeys.detail(projectId),
+    enabled: Boolean(projectId),
+    queryFn: async () => {
+      const response = await baseApi.get<{ project: OpenCodeProject | null }>(
+        `/projects/${projectId}`,
+      );
+      return response.data.project ? adaptProject(response.data.project) : null;
+    },
+  });
+}
+
 export function useProjectDirectory(projectId: string, enabled = true) {
   return useQuery<ProjectDirectoryNode[]>({
     queryKey: projectsKeys.directory(projectId),

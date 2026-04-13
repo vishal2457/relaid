@@ -11,21 +11,13 @@ export function createSessionsRouter(): Router {
   const router = Router();
 
   router.get("/", async (req: ExpressRequest, res: ExpressResponse) => {
-    const projectId = req.query.projectId as string | undefined;
+    const cwd = req.query.cwd as string | undefined;
     const status = req.query.status as string | undefined;
     const limit = parseInt(req.query.limit as string, 10) || 50;
 
     try {
-      if (!projectId) {
-        return error(
-          res,
-          "projectId is required",
-          StatusCodes.BAD_REQUEST,
-        );
-      }
-
       const sessions = await opencodeCatalogService.listSessions({
-        projectId,
+        cwd,
         limit,
         status,
       });
@@ -75,11 +67,7 @@ export function createSessionsRouter(): Router {
           limit,
         );
 
-        success(
-          res,
-          { messages },
-          "Session messages fetched successfully",
-        );
+        success(res, { messages }, "Session messages fetched successfully");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.error("Failed to get session messages", {
@@ -129,7 +117,8 @@ export function createSessionsRouter(): Router {
         return;
       }
 
-      const createdSession = await opencodeCatalogService.createSession(projectId);
+      const createdSession =
+        await opencodeCatalogService.createSession(projectId);
 
       if (!createdSession) {
         error(

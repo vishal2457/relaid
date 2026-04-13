@@ -746,7 +746,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
     "sessions_list_request",
     async (data: {
       requestId: string;
-      projectId?: string;
+      cwd?: string;
       status?: string;
       limit?: number;
     }) => {
@@ -756,7 +756,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
           "sessions_list_request",
           "sessions_list_response",
           {
-            projectId: data.projectId,
+            cwd: data.cwd,
             status: data.status,
             limit: data.limit,
           },
@@ -764,12 +764,6 @@ function handleMobileConnection(socket: Socket, userId: string): void {
 
         const sessions = results
           .flatMap((result) => result.response.sessions || [])
-          .filter((session) => {
-            const sessionProjectId =
-              (session as Record<string, unknown>).projectID ??
-              (session as Record<string, unknown>).projectId;
-            return data.projectId ? sessionProjectId === data.projectId : true;
-          })
           .filter((session) => {
             const sessionStatus = (session as Record<string, unknown>).status;
             return data.status ? sessionStatus === data.status : true;

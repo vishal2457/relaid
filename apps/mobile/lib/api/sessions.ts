@@ -127,15 +127,15 @@ export const sessionsKeys = {
   detail: (id: string) => [...sessionsKeys.details(), id] as const,
 };
 
-export function useSessions(projectId: string) {
+export function useSessions(cwd: string) {
   return useQuery<Session[]>({
-    queryKey: sessionsKeys.list({ projectId }),
-    enabled: Boolean(projectId),
+    queryKey: sessionsKeys.list({ cwd }),
+    enabled: Boolean(cwd),
     queryFn: async () => {
       const response = await baseApi.get<{ sessions: OpenCodeSession[] }>(
         "/sessions",
         {
-          params: { projectId },
+          params: { cwd },
         },
       );
       return (response.data.sessions ?? []).map(adaptSession);

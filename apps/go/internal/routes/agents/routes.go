@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -69,10 +68,10 @@ func Register(api *echo.Group, registry RegistryProvider) {
 			}
 		}
 		sessions, _, err := provider.Sessions().List(c.Request().Context(), agent.SessionFilters{
-			ProjectID: c.QueryParam("projectId"),
-			Status:    c.QueryParam("status"),
-			Limit:     limit,
-			Cursor:    c.QueryParam("cursor"),
+			Cwd:    c.QueryParam("cwd"),
+			Status: c.QueryParam("status"),
+			Limit:  limit,
+			Cursor: c.QueryParam("cursor"),
 		})
 		if err != nil {
 			return err
@@ -100,46 +99,6 @@ func Register(api *echo.Group, registry RegistryProvider) {
 			return httpresponse.Success(c, map[string]any{"session": nil}, "Session fetched successfully")
 		}
 		return httpresponse.Success(c, map[string]any{"session": agent.SerializeSession(*session)}, "Session fetched successfully")
-	})
-
-	api.GET("/:provider/sessions/:id/messages", func(c echo.Context) error {
-		provider, err := resolveProvider(c, registry)
-		if err != nil {
-			return err
-		}
-		if !provider.Capabilities().SessionsMsgs {
-			return unsupported(provider, "sessions.messages")
-		}
-		limit := 100
-		if raw := c.QueryParam("limit"); raw != "" {
-			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-				limit = parsed
-			}
-		}
-		messages, err := provider.Sessions().Messages(c.Request().Context(), c.Param("id"), limit)
-		if err != nil {
-			return err
-		}
-		payload := make([]map[string]any, 0, len(messages))
-		for _, message := range messages {
-			item := map[string]any{}
-			var info any
-			if err := json.Unmarshal(message.Info, &info); err != nil {
-				return err
-			}
-			item["info"] = info
-			parts := make([]any, 0, len(message.Parts))
-			for _, part := range message.Parts {
-				var decoded any
-				if err := json.Unmarshal(part, &decoded); err != nil {
-					return err
-				}
-				parts = append(parts, decoded)
-			}
-			item["parts"] = parts
-			payload = append(payload, item)
-		}
-		return httpresponse.Success(c, map[string]any{"messages": payload}, "Session messages fetched successfully")
 	})
 
 	api.GET("/:provider/sessions/:id/diff", func(c echo.Context) error {

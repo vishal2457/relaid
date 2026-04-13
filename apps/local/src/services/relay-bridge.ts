@@ -818,7 +818,7 @@ export class ChatServerClient {
   ): Promise<void> {
     try {
       const sessions = await opencodeCatalogService.listSessions({
-        projectId: payload.projectId,
+        cwd: payload.cwd,
         limit: payload.limit,
         status: payload.status,
       });

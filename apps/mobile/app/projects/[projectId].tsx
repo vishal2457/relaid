@@ -26,6 +26,7 @@ import {
   useCreateSession,
   type Session,
 } from "@/lib/api/sessions";
+import { useProject } from "@/lib/api/projects";
 
 const HEADER_HEIGHT = 44;
 const HEADER_TOP_MARGIN = 12;
@@ -61,13 +62,15 @@ export default function ProjectSessionsScreen() {
     projectName?: string;
   }>();
 
+  const { data: project } = useProject(projectId ?? "");
+
   const {
     data: sessions,
     isLoading,
     error,
     refetch,
     isRefetching,
-  } = useSessions(projectId ?? "");
+  } = useSessions(project?.folder ?? "");
   const createSessionMutation = useCreateSession();
 
   const title = projectName || "Sessions";
