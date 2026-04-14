@@ -5,7 +5,7 @@ import {
   type SseErrorCallback,
 } from "./client";
 import { getCurrentAccessToken } from "@/lib/pairing/session";
-import baseApi from "@/lib/axios/base";
+import baseApi, { chatServerApiUrl } from "@/lib/axios/base";
 
 let sseClient: SseClient | null = null;
 let listenerIdCounter = 0;
@@ -110,10 +110,26 @@ export async function sendAbortRequest(params: {
   requestId?: string;
   projectId?: string;
 }): Promise<void> {
-  await baseApi.post(`/mobile/sessions/${params.sessionId}/abort`, {
+  const url = `/mobile/sessions/${params.sessionId}/abort`;
+  const data = {
     requestId: params.requestId,
     projectId: params.projectId,
-  });
+  };
+
+  console.log("[SSE Manager] sendAbortRequest called");
+  console.log("[SSE Manager] Params:", JSON.stringify(params));
+  console.log("[SSE Manager] URL:", url);
+  console.log("[SSE Manager] Data:", JSON.stringify(data));
+  console.log("[SSE Manager] Base URL:", chatServerApiUrl);
+
+  try {
+    const response = await baseApi.post(url, data);
+    console.log("[SSE Manager] sendAbortRequest success:", response.status, JSON.stringify(response.data));
+  } catch (error: any) {
+    console.error("[SSE Manager] sendAbortRequest FAILED:", error?.message);
+    console.error("[SSE Manager] Full URL would be:", `${chatServerApiUrl}/api${url}`);
+    throw error;
+  }
 }
 
 export async function sendPermissionResponse(params: {

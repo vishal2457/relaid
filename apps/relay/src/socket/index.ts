@@ -39,9 +39,11 @@ import {
   emitRequestToServer,
   refreshPendingRequest,
   registerLocalServerSocket,
+  registerMobileSocket,
   rejectPendingRequest,
   resolvePendingRequest,
   unregisterLocalServerSocket,
+  unregisterMobileSocket,
 } from "./request-broker";
 import { broadcastToUser } from "../services/sse-bus";
 import {
@@ -227,6 +229,8 @@ async function handleConnection(io: Server, socket: Socket): Promise<void> {
         "local_server_disconnected",
         localServerDisconnectedPayload,
       );
+    } else if (type === "mobile") {
+      unregisterMobileSocket(socket.id);
     }
   });
 }
@@ -404,7 +408,13 @@ async function handleLocalServerConnection(
 }
 
 function handleMobileConnection(socket: Socket, userId: string): void {
-  logger.info("Mobile client registered", { userId });
+  const socketData = socket.data as SocketData;
+  registerMobileSocket(socket.id, socket, userId, socketData.deviceId);
+  logger.info("Mobile client registered", {
+    userId,
+    socketId: socket.id,
+    deviceId: socketData.deviceId,
+  });
   deliverBufferedInteractions(userId, (event, payload) =>
     socket.emit(event, payload),
   );

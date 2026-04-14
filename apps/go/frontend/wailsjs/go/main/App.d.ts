@@ -4,6 +4,8 @@ import {relay} from '../models';
 
 export function CreatePairingSession():Promise<relay.PairingSessionResponse>;
 
+export function GetConnectedClients():Promise<Array<relay.MobileClient>>;
+
 export function GetDeviceCredentials():Promise<relay.DeviceCredentials>;
 
 export function GetStoredRelayURL():Promise<string>;

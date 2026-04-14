@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,7 +13,29 @@ import (
 	"sync/atomic"
 )
 
-const protocolVersion = 1
+type Protocol interface {
+	Name() string
+
+	ListMethod() string
+	NewSessionMethod() string
+	LoadSessionMethod() string
+	PromptMethod() string
+	CancelMethod() string
+
+	BuildInitializeParams(info ClientInfo) map[string]any
+	BuildListParams(cwd, cursor string) map[string]any
+	BuildNewSessionParams(cwd string) map[string]any
+	BuildLoadSessionParams(sessionID, cwd string) map[string]any
+	BuildPromptParams(sessionID, prompt string) map[string]any
+	BuildCancelParams(sessionID string) map[string]any
+
+	ParseSessionList(raw json.RawMessage) (*SessionListResult, error)
+	ParseSessionCreate(raw json.RawMessage) (*SessionCreateResult, error)
+	ParseSessionLoad(raw json.RawMessage) (*SessionLoadResult, error)
+	ParsePrompt(raw json.RawMessage) (*PromptResult, error)
+
+	HandleNotification(rawMethod json.RawMessage, rawParams json.RawMessage, handler func(SessionUpdate))
+}
 
 type Client struct {
 	command string
@@ -24,116 +45,37 @@ type Client struct {
 
 type Connection struct {
 	cmd                 *exec.Cmd
-	cwd                 string
 	stdin               io.WriteCloser
 	pendingMu           sync.Mutex
 	pending             map[int64]chan responseEnvelope
 	nextID              int64
 	logger              *log.Logger
-	capabilities        AgentCapabilities
+	protocol            Protocol
 	configOptions       []ConfigOption
-	serverRequestMu     sync.Mutex
+	serverReqMu         sync.Mutex
 	serverRequestActive map[int64]struct{}
-}
-
-type ClientInfo struct {
-	Name    string `json:"name,omitempty"`
-	Title   string `json:"title,omitempty"`
-	Version string `json:"version,omitempty"`
-}
-
-type AgentCapabilities struct {
-	LoadSession         bool `json:"loadSession"`
-	SessionCapabilities struct {
-		List any `json:"list"`
-	} `json:"sessionCapabilities"`
-}
-
-type ConfigOption struct {
-	ID           string `json:"id"`
-	CurrentValue any    `json:"currentValue,omitempty"`
-}
-
-type SessionInfo struct {
-	SessionID string `json:"sessionId"`
-	Cwd       string `json:"cwd"`
-	Title     string `json:"title,omitempty"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
-}
-
-type SessionListResult struct {
-	Sessions   []SessionInfo `json:"sessions"`
-	NextCursor string        `json:"nextCursor,omitempty"`
-}
-
-type SessionCreateResult struct {
-	SessionID     string         `json:"sessionId"`
-	ConfigOptions []ConfigOption `json:"configOptions"`
-}
-
-type SessionLoadResult struct {
-	SessionID     string         `json:"sessionId"`
-	ConfigOptions []ConfigOption `json:"configOptions"`
-}
-
-type PromptResult struct {
-	StopReason string `json:"stopReason"`
-}
-
-type SessionUpdate struct {
-	SessionID  string
-	Update     string
-	MessageID  string
-	Text       string
-	Status     string
-	ToolCallID string
-}
-
-type responseEnvelope struct {
-	result json.RawMessage
-	err    error
-}
-
-type rpcRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int64  `json:"id,omitempty"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
-}
-
-type rpcResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *rpcError       `json:"error,omitempty"`
-}
-
-type rpcError struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 func NewClient(command, cwd string, logger *log.Logger) *Client {
 	return &Client{command: command, cwd: cwd, logger: logger}
 }
 
-func (c *Client) Start(ctx context.Context, info ClientInfo, updateHandler func(SessionUpdate)) (*Connection, error) {
-	cmd := exec.CommandContext(ctx, c.command, "acp", "--cwd", c.cwd)
+func (c *Client) Start(ctx context.Context, info ClientInfo, protocol Protocol, updateHandler func(SessionUpdate)) (*Connection, error) {
+	cmd := exec.CommandContext(ctx, c.command, append([]string{}, c.commandArgs(protocol)...)...)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, fmt.Errorf("create ACP stdin pipe: %w", err)
+		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("create ACP stdout pipe: %w", err)
+		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, fmt.Errorf("create ACP stderr pipe: %w", err)
+		return nil, fmt.Errorf("create stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -142,10 +84,10 @@ func (c *Client) Start(ctx context.Context, info ClientInfo, updateHandler func(
 
 	conn := &Connection{
 		cmd:                 cmd,
-		cwd:                 c.cwd,
 		stdin:               stdin,
 		pending:             make(map[int64]chan responseEnvelope),
 		logger:              c.logger,
+		protocol:            protocol,
 		serverRequestActive: make(map[int64]struct{}),
 	}
 
@@ -158,92 +100,71 @@ func (c *Client) Start(ctx context.Context, info ClientInfo, updateHandler func(
 		AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
 	}
 
-	if err := conn.call("initialize", map[string]any{
-		"protocolVersion": protocolVersion,
-		"clientInfo":      info,
-		"clientCapabilities": map[string]any{
-			"fs": map[string]bool{
-				"readTextFile":  false,
-				"writeTextFile": false,
-			},
-			"terminal": false,
-		},
-	}, &initResult); err != nil {
+	if err := conn.call("initialize", protocol.BuildInitializeParams(info), &initResult); err != nil {
 		conn.Close()
 		return nil, err
 	}
 
-	if initResult.ProtocolVersion != protocolVersion {
+	if initResult.ProtocolVersion != ProtocolVersion {
 		conn.Close()
 		return nil, fmt.Errorf("unsupported ACP protocol version %d", initResult.ProtocolVersion)
 	}
 
-	conn.capabilities = initResult.AgentCapabilities
 	return conn, nil
 }
 
-func (c *Client) ListSessions(ctx context.Context, info ClientInfo, cwd string, cursor string) (*SessionListResult, error) {
-	conn, err := c.Start(ctx, info, nil)
-	if err != nil {
-		return nil, err
+func (c *Client) commandArgs(protocol Protocol) []string {
+	switch protocol.Name() {
+	case "codex":
+		return []string{"app-server"}
+	case "opencode":
+		return []string{"acp", "--cwd", c.cwd}
+	default:
+		return []string{"acp"}
 	}
-	defer conn.Close()
+}
 
-	if conn.capabilities.SessionCapabilities.List == nil {
-		return nil, errors.New("ACP session/list is not supported")
-	}
-
-	effectiveCwd := cwd
-	if effectiveCwd == "" {
-		effectiveCwd = c.cwd
-	}
+func (c *Connection) ListSessions(ctx context.Context, cwd, cursor string) (*SessionListResult, error) {
+	params := c.protocol.BuildListParams(cwd, cursor)
 
 	var raw json.RawMessage
-	if err := conn.call("session/list", map[string]any{
-		"cwd":    effectiveCwd,
-		"cursor": cursor,
-	}, &raw); err != nil {
+	if err := c.call(c.protocol.ListMethod(), params, &raw); err != nil {
 		return nil, err
 	}
 
-	var result SessionListResult
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("decode session/list response: %w", err)
+	result, err := c.protocol.ParseSessionList(raw)
+	if err != nil {
+		return nil, err
 	}
 	if result.Sessions == nil {
 		result.Sessions = []SessionInfo{}
 	}
-	return &result, nil
+	return result, nil
 }
 
 func (c *Connection) NewSession(ctx context.Context, cwd string) (*SessionCreateResult, error) {
+	params := c.protocol.BuildNewSessionParams(cwd)
+
 	var result SessionCreateResult
-	if err := c.call("session/new", map[string]any{
-		"cwd":        cwd,
-		"mcpServers": []any{},
-	}, &result); err != nil {
+	if err := c.call(c.protocol.NewSessionMethod(), params, &result); err != nil {
 		return nil, err
 	}
+
 	c.configOptions = result.ConfigOptions
-	for _, opt := range c.configOptions {
-		c.logf("ACP new session config: id=%q currentValue=%v", opt.ID, opt.CurrentValue)
-	}
+	c.logf("ACP new session config: %+v", result.ConfigOptions)
 	return &result, nil
 }
 
 func (c *Connection) LoadSession(ctx context.Context, sessionID, cwd string) (*SessionLoadResult, error) {
+	params := c.protocol.BuildLoadSessionParams(sessionID, cwd)
+
 	var result SessionLoadResult
-	if err := c.call("session/load", map[string]any{
-		"sessionId":  sessionID,
-		"cwd":        cwd,
-		"mcpServers": []any{},
-	}, &result); err != nil {
+	if err := c.call(c.protocol.LoadSessionMethod(), params, &result); err != nil {
 		return nil, err
 	}
+
 	c.configOptions = result.ConfigOptions
-	for _, opt := range c.configOptions {
-		c.logf("ACP load session config: id=%q currentValue=%v", opt.ID, opt.CurrentValue)
-	}
+	c.logf("ACP load session config: %+v", result.ConfigOptions)
 	return &result, nil
 }
 
@@ -262,7 +183,7 @@ func (c *Connection) SetConfigOption(sessionID, configID, value string) error {
 	return nil
 }
 
-func (c *Connection) Prompt(ctx context.Context, sessionID string, prompt string, modelID string) (*PromptResult, error) {
+func (c *Connection) Prompt(ctx context.Context, sessionID, prompt, modelID string) (*PromptResult, error) {
 	if modelID != "" {
 		for _, opt := range c.configOptions {
 			if isModelConfigOption(opt.ID) {
@@ -275,26 +196,19 @@ func (c *Connection) Prompt(ctx context.Context, sessionID string, prompt string
 		}
 	}
 
+	params := c.protocol.BuildPromptParams(sessionID, prompt)
+
 	var result PromptResult
-	if err := c.call("session/prompt", map[string]any{
-		"sessionId": sessionID,
-		"prompt": []map[string]any{
-			{"type": "text", "text": prompt},
-		},
-	}, &result); err != nil {
+	if err := c.call(c.protocol.PromptMethod(), params, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *Connection) Cancel(sessionID string) error {
-	return c.notify("session/cancel", map[string]any{
+func (c *Connection) Cancel(ctx context.Context, sessionID string) error {
+	return c.notify(c.protocol.CancelMethod(), map[string]any{
 		"sessionId": sessionID,
 	})
-}
-
-func (c *Connection) Capabilities() AgentCapabilities {
-	return c.capabilities
 }
 
 func (c *Connection) Close() {
@@ -463,7 +377,7 @@ func (c *Connection) handleServerRequest(rawID json.RawMessage, rawMethod json.R
 	var errResp *rpcError
 
 	switch method {
-	case "session/request_permission":
+	case "session/request_permission", "agent/request_permission":
 		result, errResp = autoApprovePermission(rawParams)
 	default:
 		errResp = &rpcError{
@@ -530,7 +444,7 @@ func autoApprovePermission(rawParams json.RawMessage) (map[string]any, *rpcError
 func (c *Connection) readStderr(stderr io.Reader) {
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
-		c.logf("opencode acp stderr: %s", scanner.Text())
+		c.logf("ACP stderr: %s", scanner.Text())
 	}
 }
 
@@ -570,13 +484,6 @@ func (c *Connection) deletePending(id int64) {
 	c.pendingMu.Lock()
 	delete(c.pending, id)
 	c.pendingMu.Unlock()
-}
-
-func (e *rpcError) Error() string {
-	if e == nil {
-		return ""
-	}
-	return fmt.Sprintf("code=%d message=%s", e.Code, e.Message)
 }
 
 func (c *Connection) logf(format string, args ...any) {

@@ -146,6 +146,7 @@ func Register(api *echo.Group, registry RegistryProvider) {
 		var body struct {
 			Prompt       string          `json:"prompt"`
 			WorkingDir   string          `json:"workingDir"`
+			ProjectID    string          `json:"projectId"`
 			SessionID    string          `json:"sessionId"`
 			SystemPrompt string          `json:"systemPrompt"`
 			Model        *agent.ModelRef `json:"model"`
@@ -156,6 +157,7 @@ func Register(api *echo.Group, registry RegistryProvider) {
 		result, err := provider.Sessions().Run(c.Request().Context(), agent.RunInput{
 			Prompt:       body.Prompt,
 			WorkingDir:   body.WorkingDir,
+			ProjectID:    body.ProjectID,
 			SessionID:    body.SessionID,
 			SystemPrompt: body.SystemPrompt,
 			Model:        body.Model,

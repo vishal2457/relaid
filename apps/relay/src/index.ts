@@ -6,6 +6,7 @@ import morgan from "morgan";
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { createSocketServer } from "./socket";
+import { getSseClientsForUser } from "./services/sse-bus";
 import { localServersRouter } from "./routes/local-servers";
 import { pairingRouter } from "./routes/pairing";
 import { usersRouter } from "./routes/users";
@@ -87,6 +88,28 @@ app.get("/api/debug/servers", async (req, res) => {
         name: s.name,
         isConnected: s.isConnected,
         lastConnected: s.lastConnected,
+      })),
+    });
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: errMsg });
+  }
+});
+
+app.get("/api/debug/connections", async (req, res) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    const mobileClients = getSseClientsForUser(userId);
+
+    res.json({
+      userId,
+      mobileClients: mobileClients.map((client) => ({
+        connectionId: client.connectionId,
       })),
     });
   } catch (error) {

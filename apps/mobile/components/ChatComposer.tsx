@@ -21,6 +21,38 @@ export const COMPOSER_TOP_PADDING = 12;
 export const COMPOSER_BOTTOM_PADDING = 12;
 export const KEYBOARD_ADDITIONAL_PADDING = 16;
 
+const SendButton = ({
+  isSending,
+  disabled,
+  onPress,
+}: {
+  isSending: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) => {
+  const theme = useTheme();
+
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={onPress}
+      style={[
+        styles.sendButton,
+        {
+          backgroundColor: isSending ? "#EF4444" : theme.colors.primary,
+          opacity: disabled ? 0.5 : 1,
+        },
+      ]}
+    >
+      <MaterialCommunityIcons
+        name={isSending ? "stop" : "arrow-up"}
+        size={20}
+        color={theme.colors.onPrimary}
+      />
+    </Pressable>
+  );
+};
+
 type ComposerSelection = {
   start: number;
   end: number;
@@ -47,6 +79,7 @@ type ChatComposerProps = {
   ) => void;
   onSelectFileSuggestion: (match: ProjectFileMatch) => void;
   onSend: () => void;
+  onAbort?: () => void;
   onPressModel: () => void;
   onPressProject: () => void;
   selectedModelName: string;
@@ -77,6 +110,7 @@ export function ChatComposer({
   onSelectionChange,
   onSelectFileSuggestion,
   onSend,
+  onAbort,
   onPressModel,
   onPressProject,
   selectedModelName,
@@ -376,27 +410,11 @@ export function ChatComposer({
               </Text>
             </Pressable>
           </View>
-          <Pressable
-            disabled={!trimmedInput || isSending || !activeProject}
-            onPress={onSend}
-            style={[
-              styles.sendButton,
-              {
-                backgroundColor: theme.colors.primary,
-                opacity: !trimmedInput || isSending || !activeProject ? 0.7 : 1,
-              },
-            ]}
-          >
-            {isSending ? (
-              <ActivityIndicator size={18} color={theme.colors.onPrimary} />
-            ) : (
-              <MaterialCommunityIcons
-                name="arrow-up"
-                size={20}
-                color={theme.colors.onPrimary}
-              />
-            )}
-          </Pressable>
+          <SendButton
+            isSending={isSending}
+            disabled={!trimmedInput && !isSending}
+            onPress={isSending ? (onAbort ?? onSend) : onSend}
+          />
         </View>
       </View>
       <Pressable

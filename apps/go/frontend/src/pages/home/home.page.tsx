@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { Eye, EyeOff, Link2, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Link2,
+  RefreshCw,
+  Smartphone,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import { Button } from "../../shared/components/ui/button";
 import { Input } from "../../shared/components/ui/input";
@@ -11,7 +19,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../shared/components/ui/dialog";
-import { useRelayHooks } from "../../shared/api/features/relay.api";
+import {
+  useRelayHooks,
+  useConnectedClients,
+} from "../../shared/api/features/relay.api";
 
 export const HomePage = () => {
   const [relayUrl, setRelayUrl] = useState("");
@@ -32,6 +43,12 @@ export const HomePage = () => {
     isCreating,
     isPinging,
   } = useRelayHooks();
+
+  const {
+    clients,
+    isLoading: isLoadingClients,
+    refresh: refreshClients,
+  } = useConnectedClients();
 
   return (
     <div className="container mx-auto max-w-2xl py-8">
@@ -147,6 +164,56 @@ export const HomePage = () => {
             </div>
           </div>
         </div>
+
+        {isConnected && (
+          <div className="rounded-lg border p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+                  <Smartphone className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold">Connected Clients</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Mobile apps connected to relay
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshClients}
+                disabled={isLoadingClients}
+              >
+                <RefreshCw
+                  className={`mr-1.5 h-3.5 w-3.5 ${isLoadingClients ? "animate-spin" : ""}`}
+                />
+                Refresh
+              </Button>
+            </div>
+
+            {clients.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No mobile clients connected
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {clients.map((client) => (
+                  <li
+                    key={client.connectionId}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <span>Mobile Client</span>
+                    <span className="text-muted-foreground">
+                      ({client.connectionId})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
 
       <Dialog open={showQrDialog} onOpenChange={setShowQrDialog}>

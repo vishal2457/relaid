@@ -155,6 +155,49 @@ func PingRelayHealth(relayURL string) error {
 	return nil
 }
 
+type MobileClient struct {
+	ConnectionID string `json:"connectionId"`
+}
+
+type ConnectedClientsResponse struct {
+	UserID        string         `json:"userId"`
+	MobileClients []MobileClient `json:"mobileClients"`
+}
+
+func GetConnectedClients(relayURL string, creds DeviceCredentials) (*ConnectedClientsResponse, error) {
+	url, err := buildRelayEndpointURL(relayURL, "/api/debug/connections")
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve connections URL: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("x-server-id", creds.ServerID)
+	req.Header.Set("x-server-secret", creds.ServerSecret)
+	req.Header.Set("x-user-id", creds.ServerID)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to relay: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("relay returned status %d", resp.StatusCode)
+	}
+
+	var result ConnectedClientsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
 func generateUUID() string {
 	return uuid.New().String()
 }

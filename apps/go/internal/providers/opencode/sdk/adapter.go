@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -16,6 +18,7 @@ import (
 
 type Adapter struct {
 	client    *opencode.Client
+	http      *httpClient
 	cwd       string
 	lazySetup func() (string, error)
 	initOnce  sync.Once
@@ -30,6 +33,7 @@ func New(baseURL, cwd string) *Adapter {
 
 	return &Adapter{
 		client: opencode.NewClient(opts...),
+		http:   newHTTPClient(baseURL),
 		cwd:    cwd,
 	}
 }
@@ -56,6 +60,7 @@ func (a *Adapter) ensureClient() error {
 		}
 		opts := []option.RequestOption{option.WithBaseURL(baseURL)}
 		a.client = opencode.NewClient(opts...)
+		a.http = newHTTPClient(baseURL)
 	})
 	return a.initErr
 }
@@ -104,7 +109,7 @@ func (a *Adapter) GetSession(ctx context.Context, sessionID string) (*agent.Sess
 	return &value, nil
 }
 
-func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limit int) ([]opencode.SessionMessagesResponse, error) {
+func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limit int) ([]agent.SessionMessagesResponse, error) {
 	if err := a.ensureClient(); err != nil {
 		return nil, err
 	}
@@ -117,19 +122,21 @@ func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limi
 		return nil, err
 	}
 	if session == nil {
-		return []opencode.SessionMessagesResponse{}, nil
+		return []agent.SessionMessagesResponse{}, nil
 	}
 
-	messages, err := a.client.Session.Messages(ctx, sessionID, opencode.SessionMessagesParams{
-		Directory: opencode.F(session.Directory),
-	})
+	messages, err := a.http.GetSessionMessages(ctx, sessionID, session.Directory, limit)
 	if err != nil {
 		return nil, err
 	}
-	if messages == nil {
-		return []opencode.SessionMessagesResponse{}, nil
+	result := make([]agent.SessionMessagesResponse, len(messages))
+	for i, m := range messages {
+		result[i] = agent.SessionMessagesResponse{
+			Info:  m.Info,
+			Parts: m.Parts,
+		}
 	}
-	return *messages, nil
+	return result, nil
 }
 
 func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID string) ([]agent.FileDiff, error) {
@@ -322,4 +329,50 @@ func (a *Adapter) EnsureProjectDirectory(ctx context.Context, projectID, working
 		return "", fmt.Errorf("project %q not found", projectID)
 	}
 	return project.Worktree, nil
+}
+
+func (a *Adapter) SearchFiles(ctx context.Context, projectID string, query string, limit int) ([]agent.FileMatch, error) {
+	if err := a.ensureClient(); err != nil {
+		return nil, err
+	}
+
+	worktree, err := a.EnsureProjectDirectory(ctx, projectID, "")
+	if err != nil {
+		return nil, err
+	}
+
+	params := opencode.FindFilesParams{
+		Query:     opencode.F(query),
+		Directory: opencode.F(worktree),
+	}
+
+	paths, err := a.client.Find.Files(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]agent.FileMatch, 0, len(*paths))
+	for _, p := range *paths {
+		if limit > 0 && len(results) >= limit {
+			break
+		}
+
+		absPath := p
+		if !filepath.IsAbs(p) {
+			absPath = filepath.Join(worktree, p)
+		}
+
+		fileType := "file"
+		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+			fileType = "directory"
+		}
+
+		results = append(results, agent.FileMatch{
+			Name: filepath.Base(p),
+			Path: p,
+			Type: fileType,
+		})
+	}
+
+	return results, nil
 }

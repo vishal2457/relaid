@@ -133,6 +133,13 @@ export function getSseClientCount(userId: string): number {
   return getConnections(userId).length;
 }
 
+export function getSseClientsForUser(
+  userId: string,
+): Array<{ connectionId: string }> {
+  const connections = getConnections(userId);
+  return connections.map((c) => ({ connectionId: c.connectionId }));
+}
+
 export function replayMissedEvents(
   userId: string,
   lastEventId: string | null,
@@ -144,7 +151,10 @@ export function replayMissedEvents(
 
   const lastSeen = Number.parseInt(lastEventId, 10);
   if (!Number.isFinite(lastSeen)) {
-    logger.warn("Ignoring invalid Last-Event-ID header", { userId, lastEventId });
+    logger.warn("Ignoring invalid Last-Event-ID header", {
+      userId,
+      lastEventId,
+    });
     return;
   }
 
@@ -162,6 +172,10 @@ export function replayMissedEvents(
   }
 
   if (replayed > 0) {
-    logger.info("Replayed missed SSE events", { userId, replayed, lastEventId });
+    logger.info("Replayed missed SSE events", {
+      userId,
+      replayed,
+      lastEventId,
+    });
   }
 }

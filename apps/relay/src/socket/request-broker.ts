@@ -12,6 +12,10 @@ type PendingRequest = {
 };
 
 const localServerSockets = new Map<string, Socket>();
+const mobileSockets = new Map<
+  string,
+  { socket: Socket; userId: string; deviceId?: string }
+>();
 const pendingRequests = new Map<string, PendingRequest>();
 
 function getPendingRequestKey(
@@ -46,6 +50,31 @@ export function unregisterLocalServerSocket(
 
 export function getLocalServerSocket(serverId: string): Socket | undefined {
   return localServerSockets.get(serverId);
+}
+
+export function registerMobileSocket(
+  socketId: string,
+  socket: Socket,
+  userId: string,
+  deviceId?: string,
+): void {
+  mobileSockets.set(socketId, { socket, userId, deviceId });
+}
+
+export function unregisterMobileSocket(socketId: string): void {
+  mobileSockets.delete(socketId);
+}
+
+export function getMobileSocketsForUser(
+  userId: string,
+): Array<{ socketId: string; deviceId?: string }> {
+  const result: Array<{ socketId: string; deviceId?: string }> = [];
+  for (const [socketId, data] of mobileSockets.entries()) {
+    if (data.userId === userId) {
+      result.push({ socketId, deviceId: data.deviceId });
+    }
+  }
+  return result;
 }
 
 export async function emitRequestToServer<TResponse>(

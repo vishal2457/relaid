@@ -325,7 +325,34 @@ func (h *Handler) handleProjectFileSearch(args []json.RawMessage) {
 		return
 	}
 
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "project file search not yet implemented")
+	provider, err := h.getProvider()
+	if err != nil {
+		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
+		return
+	}
+
+	matches, err := provider.Projects().FileSearch(context.Background(), req.ProjectID, req.Query, req.Limit)
+	if err != nil {
+		h.emit(EventProjectFileSearchResponse, ProjectFileSearchResponse{
+			RequestID: req.RequestID,
+			Results:   []ProjectFileMatch{},
+		})
+		return
+	}
+
+	results := make([]ProjectFileMatch, 0, len(matches))
+	for _, m := range matches {
+		results = append(results, ProjectFileMatch{
+			Name: m.Name,
+			Path: m.Path,
+			Type: m.Type,
+		})
+	}
+
+	h.emit(EventProjectFileSearchResponse, ProjectFileSearchResponse{
+		RequestID: req.RequestID,
+		Results:   results,
+	})
 }
 
 func (h *Handler) handleProjectBranches(args []json.RawMessage) {
@@ -635,6 +662,7 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 	runInput := agent.RunInput{
 		Prompt:    req.Prompt,
 		SessionID: req.SessionID,
+		ProjectID: req.ProjectID,
 	}
 	if req.Model != nil {
 		runInput.Model = &agent.ModelRef{

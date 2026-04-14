@@ -17,6 +17,8 @@ type Config struct {
 	OpencodeCwd             string
 	OpencodeBaseURL         string
 	OpencodeMaxPromptLength int
+	CodexBin                string
+	CodexCwd                string
 	MissingConfig           []string
 }
 
@@ -32,10 +34,16 @@ func Load() Config {
 		OpencodeCwd:             getWorkingDir(),
 		OpencodeBaseURL:         getEnv("OPENCODE_BASE_URL", ""),
 		OpencodeMaxPromptLength: getIntEnv("OPENCODE_MAX_PROMPT_LENGTH", 8000),
+		CodexBin:                getEnv("CODEX_BIN", "codex"),
+		CodexCwd:                getWorkingDir(),
 	}
 
 	if value := os.Getenv("OPENCODE_CWD"); value != "" {
 		cfg.OpencodeCwd = value
+	}
+
+	if value := os.Getenv("CODEX_CWD"); value != "" {
+		cfg.CodexCwd = value
 	}
 
 	for _, key := range []string{"GOOSE_DBSTRING", "JWT_SECRET"} {

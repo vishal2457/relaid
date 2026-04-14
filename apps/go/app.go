@@ -201,6 +201,28 @@ func (a *App) PingRelay() (bool, error) {
 	return client.WaitUntilConnected(2 * time.Second), nil
 }
 
+func (a *App) GetConnectedClients() ([]relay.MobileClient, error) {
+	url, err := a.keychain.Get(RELAY_URL_KEY)
+	if err != nil || url == "" {
+		return nil, fmt.Errorf("relay URL not configured")
+	}
+
+	creds, err := relay.LoadOrCreateDeviceCredentials(
+		os.Getenv("LOCAL_SERVER_ID"),
+		os.Getenv("LOCAL_SERVER_SECRET"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := relay.GetConnectedClients(url, creds)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.MobileClients, nil
+}
+
 func (a *App) configureRelayClient(relayURL string, creds relay.DeviceCredentials) error {
 	normalizedURL := relay.NormalizeRelayURL(relayURL)
 	if normalizedURL == "" {

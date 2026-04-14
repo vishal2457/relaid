@@ -6,6 +6,10 @@ export function CreatePairingSession() {
   return window['go']['main']['App']['CreatePairingSession']();
 }
 
+export function GetConnectedClients() {
+  return window['go']['main']['App']['GetConnectedClients']();
+}
+
 export function GetDeviceCredentials() {
   return window['go']['main']['App']['GetDeviceCredentials']();
 }

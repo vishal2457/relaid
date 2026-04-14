@@ -1,11 +1,10 @@
-package opencode
+package codex
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,43 +12,28 @@ import (
 	"relaid/internal/agent"
 	"relaid/internal/config"
 	"relaid/internal/providers/acp"
-	sdkclient "relaid/internal/providers/opencode/sdk"
 )
 
 type Provider struct {
 	id           agent.ProviderID
 	capabilities agent.CapabilitySet
 	sessions     *sessionService
-	projects     *projectService
-	providers    *providerService
 }
 
 func New(cfg config.Config, logger *log.Logger) *Provider {
-	var sdk *sdkclient.Adapter
-	var serverMgr *ServerManager
-
-	if cfg.OpencodeBaseURL != "" {
-		sdk = sdkclient.New(cfg.OpencodeBaseURL, cfg.OpencodeCwd)
-	} else {
-		serverMgr = NewServerManager(cfg.OpencodeBin, cfg.OpencodeCwd, logger)
-		sdk = sdkclient.NewLazy(cfg.OpencodeCwd, func() (string, error) {
-			return serverMgr.Start(context.Background())
-		})
-	}
-
-	acpClient := acp.NewClient(cfg.OpencodeBin, cfg.OpencodeCwd, logger)
-	protocol := NewOpenCodeProtocol()
+	acpClient := acp.NewClient(cfg.CodexBin, cfg.CodexCwd, logger)
+	protocol := NewCodexProtocol()
 	activeRuns := &activeRunStore{runs: map[string]context.CancelFunc{}}
 
 	return &Provider{
-		id: agent.ProviderOpencode,
+		id: agent.ProviderCodex,
 		capabilities: agent.CapabilitySet{
-			ProjectsList:   true,
-			ProjectsGet:    true,
+			ProjectsList:   false,
+			ProjectsGet:    false,
 			SessionsList:   true,
 			SessionsGet:    true,
-			SessionsMsgs:   true,
-			SessionsDiff:   true,
+			SessionsMsgs:   false,
+			SessionsDiff:   false,
 			SessionsAbort:  true,
 			SessionsRun:    true,
 			SessionsStream: true,
@@ -60,7 +44,6 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			logger:    logger,
 			acpClient: acpClient,
 			protocol:  protocol,
-			sdk:       sdk,
 			active:    activeRuns,
 			clientInfo: acp.ClientInfo{
 				Name:    "relaid-go",
@@ -68,8 +51,6 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 				Version: "0.0.1",
 			},
 		},
-		projects:  &projectService{sdk: sdk},
-		providers: &providerService{sdk: sdk},
 	}
 }
 
@@ -82,7 +63,7 @@ func (p *Provider) Capabilities() agent.CapabilitySet {
 }
 
 func (p *Provider) Projects() agent.ProjectService {
-	return p.projects
+	return nil
 }
 
 func (p *Provider) Sessions() agent.SessionService {
@@ -90,43 +71,18 @@ func (p *Provider) Sessions() agent.SessionService {
 }
 
 func (p *Provider) Providers() agent.ProviderService {
-	return p.providers
+	return nil
 }
 
 func (p *Provider) Shutdown(context.Context) error {
 	return nil
 }
 
-type projectService struct {
-	sdk *sdkclient.Adapter
-}
-
-func (s *projectService) List(ctx context.Context) ([]agent.Project, error) {
-	return s.sdk.ListProjects(ctx)
-}
-
-func (s *projectService) Get(ctx context.Context, id string) (*agent.Project, error) {
-	return s.sdk.GetProject(ctx, id)
-}
-
-func (s *projectService) FileSearch(ctx context.Context, projectID string, query string, limit int) ([]agent.FileMatch, error) {
-	return s.sdk.SearchFiles(ctx, projectID, query, limit)
-}
-
-type providerService struct {
-	sdk *sdkclient.Adapter
-}
-
-func (s *providerService) List(ctx context.Context) ([]agent.Provider, error) {
-	return s.sdk.ListProviders(ctx)
-}
-
 type sessionService struct {
 	cfg        config.Config
 	logger     *log.Logger
 	acpClient  *acp.Client
-	protocol   *OpenCodeProtocol
-	sdk        *sdkclient.Adapter
+	protocol   *CodexProtocol
 	active     *activeRunStore
 	clientInfo acp.ClientInfo
 }
@@ -138,9 +94,7 @@ type activeRunStore struct {
 
 func (s *sessionService) List(ctx context.Context, filters agent.SessionFilters) ([]agent.Session, string, error) {
 	if filters.Cwd != "" {
-		if _, err := os.Stat(filters.Cwd); err != nil {
-			return nil, "", fmt.Errorf("invalid cwd: %w", err)
-		}
+		// Cwd filtering is handled by the protocol
 	}
 
 	conn, err := s.acpClient.Start(ctx, s.clientInfo, s.protocol, nil)
@@ -149,7 +103,7 @@ func (s *sessionService) List(ctx context.Context, filters agent.SessionFilters)
 	}
 	defer conn.Close()
 
-	result, err := conn.ListSessions(ctx, filters.Cwd, "")
+	result, err := conn.ListSessions(ctx, filters.Cwd, filters.Cursor)
 	if err != nil {
 		return nil, "", err
 	}
@@ -181,16 +135,21 @@ func (s *sessionService) List(ctx context.Context, filters agent.SessionFilters)
 	if filters.Limit > 0 && len(filtered) > filters.Limit {
 		filtered = filtered[:filters.Limit]
 	}
-	return filtered, "", nil
+	return filtered, result.NextCursor, nil
 }
 
 func (s *sessionService) Get(ctx context.Context, id string) (*agent.Session, error) {
-	session, err := s.sdk.GetSession(ctx, id)
+	conn, err := s.acpClient.Start(ctx, s.clientInfo, s.protocol, nil)
 	if err != nil {
 		return nil, err
 	}
-	if session == nil {
-		return nil, nil
+	defer conn.Close()
+
+	// For Codex, we need to use thread/read to get session details
+	// This is not yet implemented in the protocol, so return minimal info
+	session := &agent.Session{
+		ID:     id,
+		Status: agent.SessionCompleted,
 	}
 	if s.active.Has(id) {
 		session.Status = agent.SessionRunning
@@ -198,27 +157,14 @@ func (s *sessionService) Get(ctx context.Context, id string) (*agent.Session, er
 	return session, nil
 }
 
-func (s *sessionService) Messages(ctx context.Context, id string, limit int) ([]agent.SessionMessagesResponse, error) {
-	return s.sdk.GetSessionMessages(ctx, id, limit)
-}
-
-func (s *sessionService) Diff(ctx context.Context, id string, messageID string) ([]agent.FileDiff, error) {
-	return s.sdk.GetSessionDiff(ctx, id, messageID)
-}
-
 func (s *sessionService) Create(ctx context.Context, projectID string) (*agent.Session, error) {
-	workingDir, err := s.sdk.EnsureProjectDirectory(ctx, projectID, "")
-	if err != nil {
-		return nil, fmt.Errorf("resolve project directory: %w", err)
-	}
-
 	conn, err := s.acpClient.Start(ctx, s.clientInfo, s.protocol, nil)
 	if err != nil {
 		return nil, fmt.Errorf("start acp connection: %w", err)
 	}
 	defer conn.Close()
 
-	result, err := conn.NewSession(ctx, workingDir)
+	result, err := conn.NewSession(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
@@ -227,11 +173,19 @@ func (s *sessionService) Create(ctx context.Context, projectID string) (*agent.S
 	return &agent.Session{
 		ID:        result.SessionID,
 		ProjectID: projectID,
-		Directory: workingDir,
+		Directory: "",
 		Status:    agent.SessionCompleted,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}, nil
+}
+
+func (s *sessionService) Messages(ctx context.Context, id string, limit int) ([]agent.SessionMessagesResponse, error) {
+	return nil, fmt.Errorf("not implemented: Codex does not support message retrieval via ACP")
+}
+
+func (s *sessionService) Diff(ctx context.Context, id string, messageID string) ([]agent.FileDiff, error) {
+	return nil, fmt.Errorf("not implemented: Codex does not support diff retrieval via ACP")
 }
 
 func (s *sessionService) Run(ctx context.Context, input agent.RunInput) (*agent.RunResult, error) {
@@ -252,25 +206,6 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 	prompt := strings.TrimSpace(input.Prompt)
 	if prompt == "" {
 		return &agent.RunResult{Success: false, Error: "Prompt is empty.", ExitCode: -1}, nil
-	}
-	maxPromptLength := s.cfg.OpencodeMaxPromptLength
-	if maxPromptLength <= 0 {
-		maxPromptLength = 8000
-	}
-	if len(prompt) > maxPromptLength {
-		return &agent.RunResult{
-			Success:  false,
-			Error:    fmt.Sprintf("Prompt exceeds max length of %d characters.", maxPromptLength),
-			ExitCode: -1,
-		}, nil
-	}
-
-	workingDir, err := s.sdk.EnsureProjectDirectory(ctx, input.ProjectID, input.WorkingDir)
-	if err != nil {
-		return &agent.RunResult{Success: false, Error: err.Error(), ExitCode: -1}, nil
-	}
-	if _, err := os.Stat(workingDir); err != nil {
-		return &agent.RunResult{Success: false, Error: fmt.Sprintf("Working directory is invalid: %s", workingDir), ExitCode: -1}, nil
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -293,8 +228,10 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 				label = "tool update"
 			}
 			onChunk(agent.StreamChunk{Type: "tool", Content: label, MessageID: update.MessageID})
-		case "user_message_chunk":
-			// ignore
+		case "turn_completed", "item_completed":
+			onChunk(agent.StreamChunk{Type: "status", Content: update.Update, MessageID: update.MessageID})
+		case "thread_started":
+			onChunk(agent.StreamChunk{Type: "status", Content: "Thread started", MessageID: update.MessageID})
 		default:
 			onChunk(agent.StreamChunk{Type: "status", Content: update.Update, MessageID: update.MessageID})
 		}
@@ -304,55 +241,49 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 	}
 	defer conn.Close()
 
-	var sessionID string
+	var threadID string
 	if input.SessionID != "" {
-		result, err := conn.LoadSession(runCtx, input.SessionID, workingDir)
+		result, err := conn.LoadSession(runCtx, input.SessionID, "")
 		if err != nil {
 			return nil, err
 		}
-		sessionID = result.SessionID
+		threadID = result.SessionID
 	} else {
-		result, err := conn.NewSession(runCtx, workingDir)
+		result, err := conn.NewSession(runCtx, input.WorkingDir)
 		if err != nil {
 			return nil, err
 		}
-		sessionID = result.SessionID
+		threadID = result.SessionID
 	}
 
-	s.active.Set(sessionID, cancel)
-	defer s.active.Delete(sessionID)
+	s.active.Set(threadID, cancel)
+	defer s.active.Delete(threadID)
 
 	if onChunk != nil {
-		onChunk(agent.StreamChunk{Type: "status", Content: "Session initialized", MessageID: ""})
-	}
-
-	effectivePrompt := prompt
-	if strings.TrimSpace(input.SystemPrompt) != "" {
-		effectivePrompt = strings.TrimSpace(input.SystemPrompt) + "\n\n" + prompt
+		onChunk(agent.StreamChunk{Type: "status", Content: "Thread initialized", MessageID: ""})
 	}
 
 	modelID := ""
 	if input.Model != nil {
-		modelID = strings.TrimSpace(input.Model.ProviderID + "/" + input.Model.ModelID)
-		s.logger.Printf("ACP model override: %s", modelID)
+		modelID = input.Model.ModelID
 	}
 
-	result, err := conn.Prompt(runCtx, sessionID, effectivePrompt, modelID)
+	promptResult, err := conn.Prompt(runCtx, threadID, prompt, modelID)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(runCtx.Err(), context.Canceled) {
 			return &agent.RunResult{
 				Success:   false,
-				Error:     "OpenCode run aborted.",
+				Error:     "Codex run aborted.",
 				ExitCode:  -1,
 				Duration:  time.Since(start),
-				SessionID: sessionID,
+				SessionID: threadID,
 			}, nil
 		}
 		return nil, err
 	}
 
 	if onChunk != nil {
-		onChunk(agent.StreamChunk{Type: "complete", Content: result.StopReason, IsComplete: true})
+		onChunk(agent.StreamChunk{Type: "complete", Content: promptResult.StopReason, IsComplete: true})
 	}
 
 	return &agent.RunResult{
@@ -360,7 +291,7 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 		Output:    "",
 		ExitCode:  0,
 		Duration:  time.Since(start),
-		SessionID: sessionID,
+		SessionID: threadID,
 	}, nil
 }
 

@@ -11,6 +11,7 @@ import (
 type ProviderID string
 
 const ProviderOpencode ProviderID = "opencode"
+const ProviderCodex ProviderID = "codex"
 
 type CapabilitySet struct {
 	ProjectsList   bool `json:"projectsList"`
@@ -34,16 +35,29 @@ type AgentProvider interface {
 	Shutdown(context.Context) error
 }
 
+type FileMatch struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Type string `json:"type"` // "file" | "directory"
+}
+
 type ProjectService interface {
 	List(context.Context) ([]Project, error)
 	Get(context.Context, string) (*Project, error)
+	FileSearch(ctx context.Context, projectID string, query string, limit int) ([]FileMatch, error)
+}
+
+// SessionMessagesResponse preserves the full message response including patch field in summary diffs
+type SessionMessagesResponse struct {
+	Info  json.RawMessage `json:"info"`
+	Parts []opencode.Part `json:"parts"`
 }
 
 type SessionService interface {
 	List(context.Context, SessionFilters) ([]Session, string, error)
 	Get(context.Context, string) (*Session, error)
 	Create(context.Context, string) (*Session, error)
-	Messages(context.Context, string, int) ([]opencode.SessionMessagesResponse, error)
+	Messages(context.Context, string, int) ([]SessionMessagesResponse, error)
 	Diff(context.Context, string, string) ([]FileDiff, error)
 	Run(context.Context, RunInput) (*RunResult, error)
 	RunStream(context.Context, RunInput, func(StreamChunk)) (*RunResult, error)
@@ -62,6 +76,7 @@ type ModelRef struct {
 type RunInput struct {
 	Prompt       string
 	WorkingDir   string
+	ProjectID    string
 	SessionID    string
 	SystemPrompt string
 	Model        *ModelRef

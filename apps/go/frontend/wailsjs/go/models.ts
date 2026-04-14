@@ -14,6 +14,18 @@ export namespace relay {
 	        this.serverSecret = source["serverSecret"];
 	    }
 	}
+	export class MobileClient {
+	    connectionId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MobileClient(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connectionId = source["connectionId"];
+	    }
+	}
 	export class PairingSessionResponse {
 	    pairingId: string;
 	    pairingSecret: string;

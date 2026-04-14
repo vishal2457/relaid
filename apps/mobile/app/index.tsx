@@ -74,6 +74,7 @@ import {
   getSseClient,
   disconnectSseClient,
   sendPromptRequest,
+  sendAbortRequest,
   sendPermissionResponse,
   sendQuestionResponse,
   subscribeToSse,
@@ -763,6 +764,8 @@ export default function ChatScreen() {
             );
             break;
           case "session_stream_chunk":
+            console.log("handle stream");
+
             handleStreamChunkRef.current(
               data as unknown as SessionStreamChunkEvent,
             );
@@ -1142,6 +1145,31 @@ export default function ChatScreen() {
     activeModel,
     resetStreamingContent,
   ]);
+
+  const handleAbort = React.useCallback(async () => {
+    const sessionId = activeSessionIdRef.current;
+    if (!sessionId) {
+      return;
+    }
+
+    const requestId = pendingRequestIdsRef.current.get(sessionId);
+    if (!requestId || !activeProject) {
+      return;
+    }
+
+    // Clear state immediately to update UI
+    clearPendingStreamState(sessionId, requestId);
+
+    try {
+      await sendAbortRequest({
+        sessionId,
+        requestId,
+        projectId: activeProject.id,
+      });
+    } catch (error) {
+      console.error("[Chat] Failed to abort:", error);
+    }
+  }, [activeProject, clearPendingStreamState]);
 
   const handlePermissionResponse = React.useCallback(
     async (reply: "once" | "always" | "reject") => {
@@ -1556,6 +1584,7 @@ export default function ChatScreen() {
           onSelectionChange={handleInputSelectionChange}
           onSelectFileSuggestion={handleSelectFileSuggestion}
           onSend={() => void handleSend()}
+          onAbort={handleAbort}
           selectedModelName={activeModel?.name ?? "No model"}
           showMentionSuggestions={showMentionSuggestions}
           showSkillSuggestions={showSkillSuggestions}

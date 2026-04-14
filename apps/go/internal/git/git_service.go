@@ -259,6 +259,8 @@ func (s *Service) GetFileStatusLists() Result[StatusLists] {
 			staged = append(staged, FileWithStatus{Path: path, Status: "renamed"})
 		case 'C':
 			staged = append(staged, FileWithStatus{Path: path, Status: "copied"})
+		case 'U':
+			staged = append(staged, FileWithStatus{Path: path, Status: "unmerged"})
 		}
 
 		// Map worktree status codes (unstaged changes)
@@ -268,6 +270,10 @@ func (s *Service) GetFileStatusLists() Result[StatusLists] {
 			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "modified"})
 		case 'D':
 			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "deleted"})
+		case 'A':
+			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "added"})
+		case 'U':
+			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "unmerged"})
 		case '?':
 			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "untracked"})
 		case '!':

@@ -10,6 +10,7 @@ import (
 
 	"relaid/internal/agent"
 	"relaid/internal/config"
+	codexprovider "relaid/internal/providers/codex"
 	opencodeprovider "relaid/internal/providers/opencode"
 	agentsroute "relaid/internal/routes/agents"
 	gitroute "relaid/internal/routes/git"
@@ -44,9 +45,12 @@ func New(cfg config.Config) *Server {
 	e.HTTPErrorHandler = custommiddleware.ErrorHandler
 
 	s := &Server{
-		cfg:      cfg,
-		registry: agent.NewRegistry(opencodeprovider.New(cfg, log.Default())),
-		echo:     e,
+		cfg: cfg,
+		registry: agent.NewRegistry(
+			opencodeprovider.New(cfg, log.Default()),
+			codexprovider.New(cfg, log.Default()),
+		),
+		echo: e,
 		httpServer: &http.Server{
 			Addr:    cfg.ServerAddr,
 			Handler: e,

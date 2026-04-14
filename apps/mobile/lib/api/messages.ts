@@ -63,7 +63,7 @@ export interface FileDiff {
   after: string;
   additions: number;
   deletions: number;
-  patch?: string
+  patch?: string;
 }
 
 export interface MessageSummary {
@@ -522,9 +522,10 @@ function getAssistantActivities(
   return activities;
 }
 
+
 // Convert OpenCode MessageResponse to mobile SessionMessage
 export function adaptMessage(
-  messageResponse: SessionMessageResponse,
+  messageResponse: SessionMessageResponse
 ): SessionMessage {
   const message = messageResponse.info;
   const parts = messageResponse.parts ?? [];
@@ -596,13 +597,7 @@ export function adaptMessage(
   // Extract summary from user message
   const userMessage =
     message.role === "user" ? (message as UserMessage) : undefined;
-  const summary = userMessage?.summary
-    ? {
-        title: userMessage.summary.title,
-        body: userMessage.summary.body,
-        diffs: userMessage.summary.diffs ?? [],
-      }
-    : undefined;
+      
 
   return {
     id: message.id,
@@ -618,7 +613,7 @@ export function adaptMessage(
     tokens,
     cost: assistantMessage?.cost,
     assistant,
-    summary,
+    summary: userMessage?.summary,
   };
 }
 
@@ -642,7 +637,7 @@ export function useSessionMessages(sessionId: string, limit = 100) {
         params: { limit },
       });
 
-      return (response.data.messages ?? []).map(adaptMessage);
+return (response.data.messages ?? []).map(adaptMessage);
     },
   });
 }

@@ -8,6 +8,10 @@ const getApp = () => {
   return app;
 };
 
+export interface MobileClient {
+  connectionId: string;
+}
+
 export const useRelayHooks = () => {
   const [storedUrl, setStoredUrl] = useState<string>("");
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -94,5 +98,39 @@ export const useRelayHooks = () => {
     saveUrl,
     pingRelay,
     createPairing,
+  };
+};
+
+export const useConnectedClients = () => {
+  const [clients, setClients] = useState<MobileClient[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchClients = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const App = getApp();
+      const result = await App.GetConnectedClients();
+      setClients(result || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch clients");
+      setClients([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchClients();
+    const interval = setInterval(fetchClients, 10000);
+    return () => clearInterval(interval);
+  }, [fetchClients]);
+
+  return {
+    clients,
+    isLoading,
+    error,
+    refresh: fetchClients,
   };
 };

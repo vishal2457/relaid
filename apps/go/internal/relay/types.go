@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 
 	"relaid/internal/agent"
-
-	"github.com/sst/opencode-sdk-go"
 )
 
-type EnvelopePayload = opencode.SessionMessagesResponse
+type EnvelopePayload = agent.SessionMessagesResponse
 
 const (
 	EventProjectsListRequest         = "projects_list_request"
