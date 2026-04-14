@@ -2,6 +2,7 @@ import React from "react";
 import {
   Alert,
   Dimensions,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -95,6 +96,10 @@ export function SessionDrawer({
 
         <View style={[styles.header, { borderBottomColor: borderColor }]}>
           <View style={styles.headerTop}>
+            <Image
+              source={require("@/assets/images/relaid.png")}
+              style={styles.logoImage}
+            />
             <Text variant="titleLarge" style={styles.title}>
               {activeProject?.name}
             </Text>
@@ -310,6 +315,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  logoImage: {
+    width: 25,
+    height: 25,
+    borderRadius: 8,
+    marginRight: 12,
+    marginTop: 2
   },
   title: {
     fontWeight: "700",

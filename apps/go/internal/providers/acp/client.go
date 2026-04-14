@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Protocol interface {
@@ -38,19 +39,24 @@ type Protocol interface {
 }
 
 type Client struct {
-	command string
-	cwd     string
-	logger  *log.Logger
+	command            string
+	cwd                string
+	logger             *log.Logger
+	InteractionHandler InteractionHandler
 }
 
 type Connection struct {
 	cmd                 *exec.Cmd
+	ctx                 context.Context
+	cancel              context.CancelFunc
 	stdin               io.WriteCloser
+	writeMu             sync.Mutex
 	pendingMu           sync.Mutex
 	pending             map[int64]chan responseEnvelope
 	nextID              int64
 	logger              *log.Logger
 	protocol            Protocol
+	handler             InteractionHandler
 	configOptions       []ConfigOption
 	serverReqMu         sync.Mutex
 	serverRequestActive map[int64]struct{}
@@ -58,6 +64,10 @@ type Connection struct {
 
 func NewClient(command, cwd string, logger *log.Logger) *Client {
 	return &Client{command: command, cwd: cwd, logger: logger}
+}
+
+func (c *Client) SetInteractionHandler(h InteractionHandler) {
+	c.InteractionHandler = h
 }
 
 func (c *Client) Start(ctx context.Context, info ClientInfo, protocol Protocol, updateHandler func(SessionUpdate)) (*Connection, error) {
@@ -82,12 +92,18 @@ func (c *Client) Start(ctx context.Context, info ClientInfo, protocol Protocol, 
 		return nil, fmt.Errorf("start ACP server: %w", err)
 	}
 
+	connCtx, connCancel := context.WithCancel(ctx)
+
 	conn := &Connection{
 		cmd:                 cmd,
+		ctx:                 connCtx,
+		cancel:              connCancel,
 		stdin:               stdin,
 		pending:             make(map[int64]chan responseEnvelope),
 		logger:              c.logger,
 		protocol:            protocol,
+		handler:             c.InteractionHandler,
+		configOptions:       nil,
 		serverRequestActive: make(map[int64]struct{}),
 	}
 
@@ -212,9 +228,12 @@ func (c *Connection) Cancel(ctx context.Context, sessionID string) error {
 }
 
 func (c *Connection) Close() {
+	c.cancel()
+	c.writeMu.Lock()
 	if c.stdin != nil {
 		_ = c.stdin.Close()
 	}
+	c.writeMu.Unlock()
 	if c.cmd != nil && c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
 	}
@@ -241,7 +260,7 @@ func (c *Connection) call(method string, params any, out any) error {
 		return err
 	}
 
-	if _, err := c.stdin.Write(append(payload, '\n')); err != nil {
+	if err := c.writeMessage(payload); err != nil {
 		c.deletePending(id)
 		return err
 	}
@@ -265,7 +284,13 @@ func (c *Connection) notify(method string, params any) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.stdin.Write(append(payload, '\n'))
+	return c.writeMessage(payload)
+}
+
+func (c *Connection) writeMessage(payload []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_, err := c.stdin.Write(append(payload, '\n'))
 	return err
 }
 
@@ -373,72 +398,193 @@ func (c *Connection) handleServerRequest(rawID json.RawMessage, rawMethod json.R
 		return
 	}
 
-	var result any
-	var errResp *rpcError
-
 	switch method {
 	case "session/request_permission", "agent/request_permission":
-		result, errResp = autoApprovePermission(rawParams)
+		handler := c.handler
+		if handler == nil {
+			handler = &DenyHandler{}
+		}
+		go c.handlePermissionRequest(id, rawParams, handler)
+
+	case "session/request_question", "agent/request_question":
+		handler := c.handler
+		if handler == nil {
+			handler = &DenyHandler{}
+		}
+		go c.handleQuestionRequest(id, rawParams, handler)
+
 	default:
-		errResp = &rpcError{
+		c.sendServerError(id, &rpcError{
 			Code:    -32601,
 			Message: "method not supported by client",
-		}
+		})
+	}
+}
+
+func (c *Connection) handlePermissionRequest(id int64, rawParams json.RawMessage, handler InteractionHandler) {
+	var req struct {
+		SessionID string `json:"sessionId"`
+		Options   []struct {
+			OptionID string `json:"optionId"`
+			Kind     string `json:"kind"`
+			Name     string `json:"name"`
+		} `json:"options"`
+		ToolCall *struct {
+			ToolCallID string `json:"toolCallId"`
+			Title      string `json:"title"`
+			Kind       string `json:"kind"`
+			Locations  []struct {
+				Path string `json:"path"`
+			} `json:"locations"`
+		} `json:"toolCall"`
+	}
+	if err := json.Unmarshal(rawParams, &req); err != nil {
+		c.logf("ACP: failed to parse permission request: %v", err)
+		c.sendServerError(id, &rpcError{Code: -32602, Message: "invalid permission request"})
+		return
 	}
 
+	options := make([]PermissionOption, 0, len(req.Options))
+	for _, opt := range req.Options {
+		options = append(options, PermissionOption{
+			OptionID: opt.OptionID,
+			Kind:     opt.Kind,
+			Name:     opt.Name,
+		})
+	}
+
+	var toolCall *ToolCallUpdate
+	if req.ToolCall != nil {
+		tc := &ToolCallUpdate{
+			ToolCallID: req.ToolCall.ToolCallID,
+			Title:      req.ToolCall.Title,
+			Kind:       req.ToolCall.Kind,
+		}
+		for _, loc := range req.ToolCall.Locations {
+			tc.Locations = append(tc.Locations, ToolCallLocation{Path: loc.Path})
+		}
+		toolCall = tc
+	}
+
+	permReq := ACPPermissionRequest{
+		SessionID: req.SessionID,
+		Method:    "session/request_permission",
+		Options:   options,
+		ToolCall:  toolCall,
+		RawParams: rawParams,
+	}
+
+	ctx, cancel := context.WithTimeout(c.ctx, 120*time.Second)
+	defer cancel()
+
+	resp, err := handler.HandlePermission(ctx, permReq)
+	if err != nil {
+		c.logf("ACP: permission handler error: %v", err)
+		denyResp, _ := (&DenyHandler{}).HandlePermission(ctx, permReq)
+		resp = denyResp
+	}
+
+	result := map[string]any{
+		"outcome": map[string]any{
+			"outcome": resp.Outcome,
+		},
+	}
+	if resp.OptionID != "" {
+		result["outcome"].(map[string]any)["optionId"] = resp.OptionID
+	}
+
+	c.sendServerResult(id, result)
+}
+
+func (c *Connection) handleQuestionRequest(id int64, rawParams json.RawMessage, handler InteractionHandler) {
+	var req struct {
+		SessionID string `json:"sessionId"`
+		Questions []struct {
+			Question string `json:"question"`
+			Header   string `json:"header"`
+			Options  []struct {
+				Label       string `json:"label"`
+				Description string `json:"description"`
+			} `json:"options"`
+			Multiple bool `json:"multiple,omitempty"`
+			Custom   bool `json:"custom,omitempty"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(rawParams, &req); err != nil {
+		c.logf("ACP: failed to parse question request: %v", err)
+		c.sendServerError(id, &rpcError{Code: -32602, Message: "invalid question request"})
+		return
+	}
+
+	questions := make([]ACPQuestion, 0, len(req.Questions))
+	for _, q := range req.Questions {
+		opts := make([]ACPQuestionOption, 0, len(q.Options))
+		for _, o := range q.Options {
+			opts = append(opts, ACPQuestionOption{
+				Label:       o.Label,
+				Description: o.Description,
+			})
+		}
+		questions = append(questions, ACPQuestion{
+			Question: q.Question,
+			Header:   q.Header,
+			Options:  opts,
+			Multiple: q.Multiple,
+			Custom:   q.Custom,
+		})
+	}
+
+	questionReq := ACPQuestionRequest{
+		SessionID: req.SessionID,
+		Method:    "session/request_question",
+		Questions: questions,
+		RawParams: rawParams,
+	}
+
+	ctx, cancel := context.WithTimeout(c.ctx, 120*time.Second)
+	defer cancel()
+
+	resp, err := handler.HandleQuestion(ctx, questionReq)
+	if err != nil {
+		c.logf("ACP: question handler error: %v", err)
+		resp = ACPQuestionResponse{}
+	}
+
+	c.sendServerResult(id, map[string]any{
+		"answers": resp.Answers,
+	})
+}
+
+func (c *Connection) sendServerResult(id int64, result any) {
 	response := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
+		"result":  result,
 	}
-	if errResp != nil {
-		response["error"] = errResp
-	} else {
-		response["result"] = result
-	}
-
 	payload, err := json.Marshal(response)
 	if err != nil {
+		c.logf("ACP: failed to marshal server response: %v", err)
 		return
 	}
-	_, _ = c.stdin.Write(append(payload, '\n'))
+	if err := c.writeMessage(payload); err != nil {
+		c.logf("ACP: failed to write server response: %v", err)
+	}
 }
 
-func autoApprovePermission(rawParams json.RawMessage) (map[string]any, *rpcError) {
-	var request struct {
-		Options []struct {
-			OptionID string `json:"optionId"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
+func (c *Connection) sendServerError(id int64, rpcErr *rpcError) {
+	response := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error":   rpcErr,
 	}
-	if err := json.Unmarshal(rawParams, &request); err != nil {
-		return nil, &rpcError{Code: -32602, Message: "invalid permission request"}
+	payload, err := json.Marshal(response)
+	if err != nil {
+		c.logf("ACP: failed to marshal server error: %v", err)
+		return
 	}
-
-	for _, option := range request.Options {
-		if strings.HasPrefix(option.Kind, "allow") {
-			return map[string]any{
-				"outcome": map[string]any{
-					"outcome":  "selected",
-					"optionId": option.OptionID,
-				},
-			}, nil
-		}
+	if err := c.writeMessage(payload); err != nil {
+		c.logf("ACP: failed to write server error: %v", err)
 	}
-
-	if len(request.Options) == 0 {
-		return map[string]any{
-			"outcome": map[string]any{
-				"outcome": "cancelled",
-			},
-		}, nil
-	}
-
-	return map[string]any{
-		"outcome": map[string]any{
-			"outcome":  "selected",
-			"optionId": request.Options[0].OptionID,
-		},
-	}, nil
 }
 
 func (c *Connection) readStderr(stderr io.Reader) {
@@ -471,6 +617,7 @@ func (c *Connection) resolve(id int64, response responseEnvelope) {
 }
 
 func (c *Connection) failAll(err error) {
+	c.cancel()
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	for id, ch := range c.pending {

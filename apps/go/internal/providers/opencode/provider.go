@@ -93,6 +93,10 @@ func (p *Provider) Providers() agent.ProviderService {
 	return p.providers
 }
 
+func (p *Provider) SetInteractionHandler(handler acp.InteractionHandler) {
+	p.sessions.acpClient.SetInteractionHandler(handler)
+}
+
 func (p *Provider) Shutdown(context.Context) error {
 	return nil
 }

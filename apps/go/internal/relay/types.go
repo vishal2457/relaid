@@ -330,6 +330,7 @@ type SessionAbortPayload struct {
 }
 
 type SessionAbortedPayload struct {
+	RequestID string `json:"requestId"`
 	SessionID string `json:"sessionId"`
 	Success   bool   `json:"success"`
 	Error     string `json:"error,omitempty"`

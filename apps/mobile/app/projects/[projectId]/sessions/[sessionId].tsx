@@ -38,6 +38,8 @@ import {
   shouldScheduleSessionRefresh,
 } from "@/lib/active-session-stream";
 import { queryClient } from "@/lib/query-client";
+import { showPermissionNotification } from "@/lib/permission-notifications";
+import { isAppInForeground } from "@/lib/notifications";
 import { useBufferedStreamingText } from "@/lib/streaming-text";
 import {
   connectSseClient,
@@ -518,6 +520,22 @@ export default function SessionMessagesScreen() {
 
       setPendingPermission(payload);
       setPendingQuestion(null);
+
+      if (!isAppInForeground()) {
+        showPermissionNotification({
+          requestId: payload.requestId,
+          sessionId: payload.sessionId,
+          jobId: payload.jobId,
+          permission: payload.permission,
+          patterns: payload.patterns,
+          title:
+            typeof payload.metadata?.title === "string"
+              ? (payload.metadata.title as string)
+              : undefined,
+        }).catch((err) => {
+          console.error("Failed to show permission notification:", err);
+        });
+      }
     };
 
     const handleQuestionRequest = (payload: QuestionRequestEvent) => {

@@ -719,6 +719,7 @@ func (h *Handler) handleSessionAbort(args []json.RawMessage) {
 	provider, err := h.getProvider()
 	if err != nil {
 		h.emit(EventSessionAborted, SessionAbortedPayload{
+			RequestID: req.RequestID,
 			SessionID: req.SessionID,
 			Success:   false,
 			Error:     err.Error(),
@@ -729,6 +730,7 @@ func (h *Handler) handleSessionAbort(args []json.RawMessage) {
 	aborted, err := provider.Sessions().Abort(context.Background(), req.SessionID, "")
 	if err != nil {
 		h.emit(EventSessionAborted, SessionAbortedPayload{
+			RequestID: req.RequestID,
 			SessionID: req.SessionID,
 			Success:   false,
 			Error:     err.Error(),
@@ -737,6 +739,7 @@ func (h *Handler) handleSessionAbort(args []json.RawMessage) {
 	}
 
 	h.emit(EventSessionAborted, SessionAbortedPayload{
+		RequestID: req.RequestID,
 		SessionID: req.SessionID,
 		Success:   aborted,
 	})

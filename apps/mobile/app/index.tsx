@@ -69,6 +69,8 @@ import {
 } from "@/lib/api/providers";
 import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
 import { queryClient } from "@/lib/query-client";
+import { showPermissionNotification } from "@/lib/permission-notifications";
+import { isAppInForeground } from "@/lib/notifications";
 import {
   connectSseClient,
   getSseClient,
@@ -80,10 +82,7 @@ import {
   subscribeToSse,
   type SseClient,
 } from "@/lib/sse";
-import {
-  showNewMessageNotification,
-  isAppInForeground,
-} from "@/lib/notifications";
+import { showNewMessageNotification } from "@/lib/notifications";
 import { AppState, type AppStateStatus } from "react-native";
 import { GitDrawer } from "@/components/GitDrawer";
 import { useGitFileStatus } from "@/lib/api/git";
@@ -944,6 +943,22 @@ export default function ChatScreen() {
 
       setPendingPermission(payload);
       setPendingQuestion(null);
+
+      if (!isAppInForeground()) {
+        showPermissionNotification({
+          requestId: payload.requestId,
+          sessionId: payload.sessionId,
+          jobId: payload.jobId,
+          permission: payload.permission,
+          patterns: payload.patterns,
+          title:
+            typeof payload.metadata?.title === "string"
+              ? (payload.metadata.title as string)
+              : undefined,
+        }).catch((err) => {
+          console.error("Failed to show permission notification:", err);
+        });
+      }
     },
   );
 
@@ -1157,19 +1172,26 @@ export default function ChatScreen() {
       return;
     }
 
-    // Clear state immediately to update UI
-    clearPendingStreamState(sessionId, requestId);
+    // Only clear streaming state, keep optimistic message (user's message)
+    resetStreamingContent();
+    clearRequestRecoveryTimeout();
+    void clearActiveSessionStream(requestId);
 
-    try {
-      await sendAbortRequest({
-        sessionId,
-        requestId,
-        projectId: activeProject.id,
-      });
-    } catch (error) {
+    // Remove only this session from pending request IDs
+    const newPending = new Map(pendingRequestIdsRef.current);
+    newPending.delete(sessionId);
+    pendingRequestIdsRef.current = newPending;
+    setPendingRequestIds(new Map(newPending));
+
+    // Fire abort request in background (don't block UI)
+    sendAbortRequest({
+      sessionId,
+      requestId,
+      projectId: activeProject.id,
+    }).catch((error) => {
       console.error("[Chat] Failed to abort:", error);
-    }
-  }, [activeProject, clearPendingStreamState]);
+    });
+  }, [activeProject, clearRequestRecoveryTimeout, resetStreamingContent]);
 
   const handlePermissionResponse = React.useCallback(
     async (reply: "once" | "always" | "reject") => {

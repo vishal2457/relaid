@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"relaid/internal/agent"
 	"relaid/internal/config"
+	opencodeprovider "relaid/internal/providers/opencode"
 	"relaid/internal/relay"
 	"relaid/internal/secrets"
 	"relaid/internal/server"
@@ -263,6 +265,14 @@ func (a *App) configureRelayClient(relayURL string, creds relay.DeviceCredential
 	})
 
 	handler := relay.NewHandler(client, a.server.Registry(), log.Default())
+
+	bridge := relay.NewRelayPermissionBridge(handler)
+	if p, err := a.server.Registry().Get(agent.ProviderOpencode); err == nil {
+		if op, ok := p.(*opencodeprovider.Provider); ok {
+			op.SetInteractionHandler(bridge)
+		}
+	}
+
 	client.SetEventHandler(handler.OnEvent)
 
 	if err := client.Connect(); err != nil {

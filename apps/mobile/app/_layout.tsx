@@ -16,9 +16,17 @@ import { ServerUrlProvider, useServerUrl } from "@/components/ServerUrlContext";
 import { defaultTheme, THEMES } from "@/constants/themes";
 import { queryClient } from "@/lib/query-client";
 import {
+  initializeNotifications,
   requestNotificationPermissions,
   registerPushTokenWithServer,
 } from "@/lib/notifications";
+
+function StartupInit() {
+  useEffect(() => {
+    initializeNotifications();
+  }, []);
+  return null;
+}
 
 function PushTokenRegistration() {
   const { session } = usePairingSession();
@@ -127,6 +135,7 @@ export default function RootLayout() {
       <ServerUrlProvider>
         <PairingSessionProvider>
           <AppThemeProvider>
+            <StartupInit />
             <PushTokenRegistration />
             <RootLayoutInner />
           </AppThemeProvider>

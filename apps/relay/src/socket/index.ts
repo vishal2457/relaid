@@ -279,16 +279,18 @@ async function handleLocalServerConnection(
 
       if (eventName === "session_prompt_response") {
         const responsePayload = payload as SessionPromptResponseEvent;
-        if (responsePayload.success && responsePayload.messages?.length) {
-          const lastMessage =
-            responsePayload.messages[responsePayload.messages.length - 1];
-          const preview = lastMessage.content.slice(0, 100);
-          void sendPushNotification(userId, "Request Completed", preview, {
-            type: "request_completed",
-            sessionId: responsePayload.sessionId,
-            projectId: responsePayload.projectId,
-            success: responsePayload.success,
-          });
+        if (responsePayload.success) {
+          void sendPushNotification(
+            userId,
+            "Request Completed",
+            responsePayload.output || "Response ready",
+            {
+              type: "request_completed",
+              sessionId: responsePayload.sessionId,
+              projectId: responsePayload.projectId,
+              success: responsePayload.success,
+            },
+          );
         } else if (!responsePayload.success) {
           void sendPushNotification(
             userId,

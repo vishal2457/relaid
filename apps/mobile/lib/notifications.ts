@@ -5,6 +5,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { registerPushToken } from "./sse/manager";
 import { getCurrentAccessToken } from "./pairing/session";
+import {
+  registerPermissionNotificationCategories,
+  showPermissionNotification,
+} from "./permission-notifications";
 
 const EXPO_PUSH_TOKEN_KEY = "expo_push_token";
 const EXPO_PUSH_TOKEN_REGISTERED_KEY = "expo_push_token_registered";
@@ -16,7 +20,7 @@ const isNotificationsEnabled =
 let isAppForeground = true;
 let initialized = false;
 
-function initializeNotifications(): void {
+export function initializeNotifications(): void {
   if (initialized || !isNotificationsEnabled) {
     return;
   }
@@ -30,6 +34,13 @@ function initializeNotifications(): void {
       shouldShowBanner: true,
       shouldShowList: true,
     }),
+  });
+
+  registerPermissionNotificationCategories().catch((err) => {
+    console.error(
+      "Failed to register permission notification categories:",
+      err,
+    );
   });
 
   AppState.addEventListener("change", (state: AppStateStatus) => {

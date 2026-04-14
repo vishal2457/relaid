@@ -42,14 +42,52 @@ type QuestionCardProps = {
   isResponding?: boolean;
 };
 
-function formatPermissionType(permission: string): string {
+export function formatPermissionType(permission: string): string {
   const permissionLabels: Record<string, string> = {
     bash: "Run Command",
     edit: "Edit File",
+    read: "Read File",
+    delete: "Delete File",
+    move: "Move File",
+    search: "Search Files",
+    glob: "Search Files",
+    execute: "Run Command",
     webfetch: "Fetch URL",
+    websearch: "Web Search",
+    codesearch: "Code Search",
     external_directory: "Access Directory",
+    think: "Run Command",
+    list: "List Files",
+    task: "Run Task",
+    todowrite: "Write Todo",
+    question: "Answer Question",
+    lsp: "Language Server",
+    skill: "Run Skill",
   };
   return permissionLabels[permission] || permission;
+}
+
+function getPermissionIcon(permission: string): string {
+  const iconMap: Record<string, string> = {
+    bash: "console",
+    execute: "console",
+    think: "console",
+    task: "console",
+    edit: "file-edit-outline",
+    delete: "file-remove-outline",
+    move: "file-move-outline",
+    read: "file-eye-outline",
+    glob: "file-search-outline",
+    search: "file-search-outline",
+    grep: "file-search-outline",
+    list: "file-tree-outline",
+    webfetch: "web",
+    websearch: "web",
+    codesearch: "code-search",
+    external_directory: "folder-open-outline",
+    skill: "lightning-bolt-outline",
+  };
+  return iconMap[permission] || "shield-lock-outline";
 }
 
 export function PermissionCard({
@@ -60,7 +98,9 @@ export function PermissionCard({
   const theme = useTheme();
 
   const isDark = theme.dark;
-  const borderColor = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)";
+  const borderColor = isDark
+    ? "rgba(255, 255, 255, 0.1)"
+    : "rgba(0, 0, 0, 0.05)";
   const warningColor = "#F59E0B";
   const surfaceColor = isDark ? "#1E293B" : "#F8FAFC";
 
@@ -83,7 +123,11 @@ export function PermissionCard({
         <View
           style={[
             styles.iconWrapper,
-            { backgroundColor: isDark ? "rgba(245, 158, 11, 0.15)" : "rgba(245, 158, 11, 0.1)" },
+            {
+              backgroundColor: isDark
+                ? "rgba(245, 158, 11, 0.15)"
+                : "rgba(245, 158, 11, 0.1)",
+            },
           ]}
         >
           <MaterialCommunityIcons
@@ -115,6 +159,12 @@ export function PermissionCard({
 
       <View style={styles.content}>
         <View style={styles.permissionTypeRow}>
+          <MaterialCommunityIcons
+            name={getPermissionIcon(request.permission) as any}
+            size={18}
+            color={theme.colors.primary}
+            style={{ marginRight: 6 }}
+          />
           <Text
             variant="bodyLarge"
             style={{ fontWeight: "700", color: theme.colors.primary }}
@@ -123,29 +173,75 @@ export function PermissionCard({
           </Text>
         </View>
 
+        {(() => {
+          const title =
+            request.metadata &&
+            typeof request.metadata.title === "string" &&
+            request.metadata.title
+              ? (request.metadata.title as string)
+              : null;
+          if (!title) return null;
+          return (
+            <Text
+              variant="bodyMedium"
+              style={{
+                color: theme.colors.onSurface,
+                fontWeight: "500",
+              }}
+              numberOfLines={3}
+            >
+              {title}
+            </Text>
+          );
+        })()}
+
         {request.patterns.length > 0 && (
           <View style={styles.patternsWrapper}>
-            {request.patterns.map((pattern, idx) => (
-              <View
-                key={idx}
-                style={[
-                  styles.patternItem,
-                  { backgroundColor: isDark ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.03)" },
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name="file-code-outline"
-                  size={14}
-                  color={theme.colors.onSurfaceVariant}
-                />
-                <Text
-                  variant="bodySmall"
-                  style={{ color: theme.colors.onSurfaceVariant, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}
+            {request.patterns.map((pattern, idx) => {
+              const patternIcon: any =
+                request.permission === "bash" ||
+                request.permission === "execute" ||
+                request.permission === "think"
+                  ? "console-line"
+                  : request.permission === "webfetch" ||
+                      request.permission === "websearch"
+                    ? "web"
+                    : "file-document-outline";
+              const displayPattern =
+                pattern.length > 60
+                  ? "..." + pattern.slice(pattern.length - 57)
+                  : pattern;
+              return (
+                <View
+                  key={idx}
+                  style={[
+                    styles.patternItem,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(0,0,0,0.2)"
+                        : "rgba(0,0,0,0.03)",
+                    },
+                  ]}
                 >
-                  {pattern}
-                </Text>
-              </View>
-            ))}
+                  <MaterialCommunityIcons
+                    name={patternIcon}
+                    size={14}
+                    color={theme.colors.onSurfaceVariant}
+                  />
+                  <Text
+                    variant="bodySmall"
+                    style={{
+                      color: theme.colors.onSurfaceVariant,
+                      fontFamily:
+                        Platform.OS === "ios" ? "Courier" : "monospace",
+                    }}
+                    numberOfLines={2}
+                  >
+                    {displayPattern}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
         )}
       </View>
@@ -200,7 +296,9 @@ export function QuestionCard({
     Record<number, string>
   >({});
 
-  const borderColor = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)";
+  const borderColor = isDark
+    ? "rgba(255, 255, 255, 0.1)"
+    : "rgba(0, 0, 0, 0.05)";
   const accentColor = "#3B82F6";
   const surfaceColor = isDark ? "#1E293B" : "#F8FAFC";
 
@@ -263,7 +361,11 @@ export function QuestionCard({
         <View
           style={[
             styles.iconWrapper,
-            { backgroundColor: isDark ? "rgba(59, 130, 246, 0.15)" : "rgba(59, 130, 246, 0.1)" },
+            {
+              backgroundColor: isDark
+                ? "rgba(59, 130, 246, 0.15)"
+                : "rgba(59, 130, 246, 0.1)",
+            },
           ]}
         >
           <MaterialCommunityIcons
@@ -304,7 +406,11 @@ export function QuestionCard({
             </Text>
             <Text
               variant="bodyMedium"
-              style={{ color: theme.colors.onSurface, fontWeight: "500", marginTop: 2 }}
+              style={{
+                color: theme.colors.onSurface,
+                fontWeight: "500",
+                marginTop: 2,
+              }}
             >
               {question.question}
             </Text>
@@ -328,19 +434,32 @@ export function QuestionCard({
                         ? theme.colors.primary
                         : borderColor,
                       backgroundColor: isSelected
-                        ? isDark ? "rgba(59, 130, 246, 0.1)" : "rgba(59, 130, 246, 0.05)"
-                        : isDark ? "rgba(0,0,0,0.1)" : "#FFFFFF",
+                        ? isDark
+                          ? "rgba(59, 130, 246, 0.1)"
+                          : "rgba(59, 130, 246, 0.05)"
+                        : isDark
+                          ? "rgba(0,0,0,0.1)"
+                          : "#FFFFFF",
                     },
                   ]}
                 >
                   <View style={styles.optionContent}>
                     <MaterialCommunityIcons
-                      name={isSelected
-                        ? (question.multiple ? "checkbox-marked" : "radiobox-marked")
-                        : (question.multiple ? "checkbox-blank-outline" : "radiobox-blank")
+                      name={
+                        isSelected
+                          ? question.multiple
+                            ? "checkbox-marked"
+                            : "radiobox-marked"
+                          : question.multiple
+                            ? "checkbox-blank-outline"
+                            : "radiobox-blank"
                       }
                       size={20}
-                      color={isSelected ? theme.colors.primary : theme.colors.onSurfaceVariant}
+                      color={
+                        isSelected
+                          ? theme.colors.primary
+                          : theme.colors.onSurfaceVariant
+                      }
                     />
                     <View style={{ flex: 1 }}>
                       <Text
@@ -357,7 +476,10 @@ export function QuestionCard({
                       {option.description && (
                         <Text
                           variant="labelSmall"
-                          style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}
+                          style={{
+                            color: theme.colors.onSurfaceVariant,
+                            marginTop: 2,
+                          }}
                         >
                           {option.description}
                         </Text>
