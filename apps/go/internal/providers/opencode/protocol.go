@@ -72,8 +72,8 @@ func (p *OpenCodeProtocol) BuildLoadSessionParams(sessionID, cwd string) map[str
 	}
 }
 
-func (p *OpenCodeProtocol) BuildPromptParams(sessionID, prompt string) map[string]any {
-	return map[string]any{
+func (p *OpenCodeProtocol) BuildPromptParams(sessionID, prompt, agent string) map[string]any {
+	params := map[string]any{
 		"sessionId": sessionID,
 		"prompt": []map[string]any{
 			{
@@ -82,6 +82,10 @@ func (p *OpenCodeProtocol) BuildPromptParams(sessionID, prompt string) map[strin
 			},
 		},
 	}
+	if agent != "" {
+		params["agent"] = agent
+	}
+	return params
 }
 
 func (p *OpenCodeProtocol) BuildCancelParams(sessionID string) map[string]any {

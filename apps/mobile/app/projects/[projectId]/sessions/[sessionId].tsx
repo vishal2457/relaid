@@ -675,26 +675,27 @@ export default function SessionMessagesScreen() {
       return;
     }
 
+    const prompt = trimmedInput;
     const requestId = `mobile_${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 9)}`;
 
-    setPendingRequestId(requestId);
-    pendingRequestIdRef.current = requestId;
     setOptimisticMessage({
       id: `optimistic_${requestId}`,
       sessionID: sessionId,
       role: "user",
-      content: trimmedInput,
-      visibleContent: trimmedInput,
+      content: prompt,
+      visibleContent: prompt,
       thinkingContent: null,
       thinkingDurationSeconds: null,
-      parts: [{ type: "text", content: trimmedInput, durationSeconds: null }],
+      parts: [{ type: "text", content: prompt, durationSeconds: null }],
       createdAt: Date.now(),
     });
     setInputText("");
     setInputHeight(MIN_INPUT_HEIGHT);
     resetStreamingContent();
+    setPendingRequestId(requestId);
+    pendingRequestIdRef.current = requestId;
     void saveActiveSessionStream({
       requestId,
       projectId,
@@ -707,7 +708,7 @@ export default function SessionMessagesScreen() {
         sessionId,
         requestId,
         projectId,
-        prompt: trimmedInput,
+        prompt,
       });
     } catch (error) {
       console.error("[Session] Failed to send prompt:", error);
@@ -1023,7 +1024,7 @@ export default function SessionMessagesScreen() {
               ref={flatListRef}
               data={displayedMessages}
               renderItem={renderMessage}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => `${item.id}-${item.createdAt}`}
               contentContainerStyle={[
                 styles.listContent,
                 {
@@ -1055,7 +1056,9 @@ export default function SessionMessagesScreen() {
                   tintColor={theme.colors.primary}
                 />
               }
-              ListFooterComponent={isSending ? <TypingIndicator /> : null}
+              ListFooterComponent={
+                isSending ? <TypingIndicator key={pendingRequestId ?? "typing"} /> : null
+              }
             />
           )}
         </View>

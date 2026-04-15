@@ -184,6 +184,7 @@ export async function runOpenCodeStream(
   sessionId?: string,
   interactionHandler?: OpenCodeInteractionHandler,
   abortSignal?: AbortSignal,
+  agent?: string,
   model?: { providerId: string; modelId: string },
 ): Promise<OpenCodeResult> {
   const options: CodingSdkOptions = {
@@ -204,6 +205,7 @@ export async function runOpenCodeStream(
         sessionId,
         interactionHandler,
         abortSignal,
+        agent,
         model,
       });
 

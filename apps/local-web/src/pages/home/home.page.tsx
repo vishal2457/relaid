@@ -1,4 +1,4 @@
-import { useAgent, useTelemetry } from "@/lib/api";
+import { useTelemetry } from "@/lib/api";
 import { Cpu, HardDrive, Server, Clock } from "lucide-react";
 
 function formatBytes(bytes: number): string {
@@ -19,17 +19,7 @@ function formatUptime(seconds: number): string {
 }
 
 export const HomePage = () => {
-  const { data: agentData } = useAgent();
   const { data: telemetry } = useTelemetry();
-
-  const activeAgent = agentData?.activeAgent ?? "opencode";
-
-  const agentDisplay =
-    activeAgent === "opencode"
-      ? "OpenCode"
-      : activeAgent === "codex"
-        ? "Codex"
-        : activeAgent;
 
   const cpuUsage = telemetry?.cpu?.usage ?? 0;
   const processMemUsed = telemetry?.processMemory?.rss ?? 0;
@@ -79,15 +69,6 @@ export const HomePage = () => {
 
   return (
     <div className="space-y-6 p-4 md:p-8">
-      <div className="border-b border-[#333] pb-4 mb-6">
-        <h1 className="text-4xl font-bold uppercase tracking-wider text-white">
-          System Telemetry
-        </h1>
-        <p className="text-[#777] font-mono text-sm mt-1">
-          NODE: LOCALHOST:3000 // AGENT: {agentDisplay.toUpperCase()}
-        </p>
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         {stats.map((stat, index) => {
           const Icon = stat.icon;

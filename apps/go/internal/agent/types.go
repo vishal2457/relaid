@@ -24,6 +24,7 @@ type CapabilitySet struct {
 	SessionsRun    bool `json:"sessionsRun"`
 	SessionsStream bool `json:"sessionsStream"`
 	ProvidersList  bool `json:"providersList"`
+	AgentsList     bool `json:"agentsList"`
 }
 
 type AgentProvider interface {
@@ -32,6 +33,7 @@ type AgentProvider interface {
 	Projects() ProjectService
 	Sessions() SessionService
 	Providers() ProviderService
+	Agents() AgentService
 	Shutdown(context.Context) error
 }
 
@@ -68,6 +70,18 @@ type ProviderService interface {
 	List(context.Context) ([]Provider, error)
 }
 
+type AgentConfig struct {
+	Name        string
+	Description string
+	Mode        string
+	BuiltIn     bool
+	Model       *ModelRef
+}
+
+type AgentService interface {
+	List(context.Context, string) ([]AgentConfig, error)
+}
+
 type ModelRef struct {
 	ProviderID string `json:"providerId"`
 	ModelID    string `json:"modelId"`
@@ -78,6 +92,7 @@ type RunInput struct {
 	WorkingDir   string
 	ProjectID    string
 	SessionID    string
+	Agent        string
 	SystemPrompt string
 	Model        *ModelRef
 }

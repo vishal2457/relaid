@@ -404,6 +404,7 @@ class OpencodeSdk extends BaseCodingSdk {
           timeoutMs,
           options?.abortSignal,
           options?.systemPrompt,
+          options?.agent,
           options?.model,
           onChunk,
         ),
@@ -423,6 +424,7 @@ class OpencodeSdk extends BaseCodingSdk {
     timeoutMs: number,
     abortSignal: AbortSignal | undefined,
     systemPrompt: string | undefined,
+    agent: string | undefined,
     model: { providerId: string; modelId: string } | undefined,
     onChunk: StreamCallback,
   ): Promise<CodingSdkResult> {
@@ -478,6 +480,7 @@ class OpencodeSdk extends BaseCodingSdk {
         directory: string;
         parts: Array<{ type: "text"; text: string }>;
         system?: string;
+        agent?: string;
         model?: {
           providerID: string;
           modelID: string;
@@ -490,6 +493,10 @@ class OpencodeSdk extends BaseCodingSdk {
 
       if (systemPrompt) {
         promptBody.system = systemPrompt;
+      }
+
+      if (agent) {
+        promptBody.agent = agent;
       }
 
       if (model) {
@@ -1940,6 +1947,36 @@ class OpencodeSdk extends BaseCodingSdk {
     } catch (error) {
       const errMsg = this.formatUnknownError(error);
       logger.error("Failed to list OpenCode providers", { error: errMsg });
+      throw error;
+    }
+  }
+
+  async listAgents(directory?: string) {
+    try {
+      const runtime = await this.getRuntime();
+      const url = new URL(`${runtime.server.url}/agent`);
+      if (directory) {
+        url.searchParams.set("directory", directory);
+      }
+
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`Failed to list agents: ${response.status}`);
+      }
+
+      return (await response.json()) as Array<{
+        name: string;
+        description?: string;
+        mode: "subagent" | "primary" | "all";
+        builtIn: boolean;
+        model?: {
+          providerID: string;
+          modelID: string;
+        };
+      }>;
+    } catch (error) {
+      const errMsg = this.formatUnknownError(error);
+      logger.error("Failed to list OpenCode agents", { error: errMsg });
       throw error;
     }
   }

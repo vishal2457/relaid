@@ -6,8 +6,8 @@ import Constants from "expo-constants";
 import { registerPushToken } from "./sse/manager";
 import { getCurrentAccessToken } from "./pairing/session";
 import {
+  processLastPermissionNotificationResponse,
   registerPermissionNotificationCategories,
-  showPermissionNotification,
 } from "./permission-notifications";
 
 const EXPO_PUSH_TOKEN_KEY = "expo_push_token";
@@ -41,6 +41,10 @@ export function initializeNotifications(): void {
       "Failed to register permission notification categories:",
       err,
     );
+  });
+
+  processLastPermissionNotificationResponse().catch((err) => {
+    console.error("Failed to process last permission notification response:", err);
   });
 
   AppState.addEventListener("change", (state: AppStateStatus) => {

@@ -221,6 +221,51 @@ func (a *Adapter) ListProviders(ctx context.Context) ([]agent.Provider, error) {
 	return providers, nil
 }
 
+func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.AgentConfig, error) {
+	if err := a.ensureClient(); err != nil {
+		return nil, err
+	}
+
+	query := url.Values{}
+	if directory != "" {
+		query.Set("directory", directory)
+	}
+
+	var response []struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Mode        string `json:"mode"`
+		BuiltIn     bool   `json:"builtIn"`
+		Model       *struct {
+			ProviderID string `json:"providerID"`
+			ModelID    string `json:"modelID"`
+		} `json:"model"`
+	}
+	if err := a.http.get(ctx, "agent", query, &response); err != nil {
+		return nil, err
+	}
+
+	result := make([]agent.AgentConfig, 0, len(response))
+	for _, item := range response {
+		var model *agent.ModelRef
+		if item.Model != nil {
+			model = &agent.ModelRef{
+				ProviderID: item.Model.ProviderID,
+				ModelID:    item.Model.ModelID,
+			}
+		}
+		result = append(result, agent.AgentConfig{
+			Name:        item.Name,
+			Description: item.Description,
+			Mode:        item.Mode,
+			BuiltIn:     item.BuiltIn,
+			Model:       model,
+		})
+	}
+
+	return result, nil
+}
+
 func mapProject(project opencode.Project) agent.Project {
 	created := agent.MillisToTime(int64(project.Time.Created))
 	var initialized *time.Time

@@ -9,6 +9,7 @@ interface ExpoPushMessage {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  categoryId?: string;
 }
 
 interface ExpoPushTicket {
@@ -63,6 +64,9 @@ export async function sendPushNotification(
   title: string,
   body: string,
   data?: Record<string, unknown>,
+  options?: {
+    categoryId?: string;
+  },
 ): Promise<void> {
   const db = getDb();
 
@@ -82,6 +86,7 @@ export async function sendPushNotification(
     title,
     body,
     data,
+    categoryId: options?.categoryId,
   }));
 
   try {

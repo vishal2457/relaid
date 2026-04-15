@@ -68,6 +68,7 @@ export const SessionPromptRequestEventSchema = z.object({
   projectId: z.string(),
   sessionId: z.string(),
   prompt: z.string(),
+  agent: z.string().optional(),
   userId: z.string().optional(),
 });
 

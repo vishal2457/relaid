@@ -27,6 +27,7 @@ export default function BaseLayout({
             to={ROUTES_PATH.Home}
             className="mr-6 flex items-center space-x-2"
           >
+            <img src="/relaid.png" alt="Relaid" className="h-6 w-6 rounded" />
             <span className="text-sm font-bold">Relaid</span>
           </Link>
           <NavigationMenu>

@@ -9,6 +9,68 @@ const ACTION_ONCE = "once";
 const ACTION_ALWAYS = "always";
 
 let categoriesRegistered = false;
+const handledResponseKeys = new Set<string>();
+
+function getResponseKey(
+  response: Notifications.NotificationResponse,
+  reply: "once" | "always" | "reject",
+): string {
+  return `${response.notification.request.identifier}:${reply}`;
+}
+
+async function processPermissionNotificationResponse(
+  response: Notifications.NotificationResponse,
+): Promise<void> {
+  const category = response.notification.request.content.categoryIdentifier;
+
+  if (category !== PERMISSION_CATEGORY) {
+    return;
+  }
+
+  const actionId = response.actionIdentifier as string;
+  const data = response.notification.request.content.data;
+
+  if (
+    actionId === Notifications.DEFAULT_ACTION_IDENTIFIER ||
+    !data?.requestId ||
+    !data?.sessionId
+  ) {
+    return;
+  }
+
+  const reply =
+    actionId === ACTION_REJECT
+      ? "reject"
+      : actionId === ACTION_ALWAYS
+        ? "always"
+        : actionId === ACTION_ONCE
+          ? "once"
+          : null;
+
+  if (!reply) {
+    return;
+  }
+
+  const responseKey = getResponseKey(response, reply);
+
+  if (handledResponseKeys.has(responseKey)) {
+    return;
+  }
+
+  handledResponseKeys.add(responseKey);
+
+  try {
+    await sendPermissionResponse({
+      requestId: data.requestId as string,
+      sessionId: data.sessionId as string,
+      jobId: (data.jobId as string) || "",
+      reply,
+    });
+  } catch (error) {
+    handledResponseKeys.delete(responseKey);
+    console.error("[PermissionNotification] Failed to send response:", error);
+  }
+}
 
 export async function registerPermissionNotificationCategories(): Promise<void> {
   if (categoriesRegistered) {
@@ -19,63 +81,44 @@ export async function registerPermissionNotificationCategories(): Promise<void> 
   await Notifications.setNotificationCategoryAsync(PERMISSION_CATEGORY, [
     {
       identifier: ACTION_REJECT,
-      buttonTitle: "Deny",
+      buttonTitle: "Reject",
       options: {
-        destructive: true,
+        isDestructive: true,
+        opensAppToForeground: false,
       },
     },
     {
       identifier: ACTION_ONCE,
-      buttonTitle: "Once",
+      buttonTitle: "Allow Once",
       options: {
-        foreground: true,
+        opensAppToForeground: false,
       },
     },
     {
       identifier: ACTION_ALWAYS,
-      buttonTitle: "Always",
+      buttonTitle: "Allow Always",
       options: {
-        foreground: true,
+        opensAppToForeground: false,
       },
     },
   ]);
 
   Notifications.addNotificationResponseReceivedListener(
-    handleNotificationResponse,
+    (response) => {
+      void processPermissionNotificationResponse(response);
+    },
   );
 }
 
-function handleNotificationResponse(
-  response: Notifications.NotificationResponse,
-): void {
-  const category = response.notification.request.content.categoryIdentifier;
+export async function processLastPermissionNotificationResponse(): Promise<void> {
+  const response = Notifications.getLastNotificationResponse();
 
-  if (category !== PERMISSION_CATEGORY) {
+  if (!response) {
     return;
   }
 
-  const actionId = response.actionIdentifier as "reject" | "once" | "always";
-  const data = response.notification.request.content.data;
-
-  if (!actionId || !data?.requestId || !data?.sessionId) {
-    return;
-  }
-
-  const reply: "once" | "always" | "reject" =
-    actionId === "reject"
-      ? "reject"
-      : actionId === "always"
-        ? "always"
-        : "once";
-
-  sendPermissionResponse({
-    requestId: data.requestId as string,
-    sessionId: data.sessionId as string,
-    jobId: (data.jobId as string) || "",
-    reply,
-  }).catch((error) => {
-    console.error("[PermissionNotification] Failed to send response:", error);
-  });
+  await processPermissionNotificationResponse(response);
+  Notifications.clearLastNotificationResponse();
 }
 
 export async function showPermissionNotification(params: {

@@ -64,6 +64,8 @@ export type ChatServerEventType =
   | "session_update_response"
   | "providers_list_request"
   | "providers_list_response"
+  | "agents_list_request"
+  | "agents_list_response"
   | "ping"
   | "pong"
   | "error_response";
@@ -113,6 +115,7 @@ export interface SessionPromptRequestPayload {
   sessionId: string;
   prompt: string;
   userId?: string;
+  agent?: string;
   model?: {
     providerId: string;
     modelId: string;
@@ -328,6 +331,24 @@ export interface ProviderPayload {
 
 export type ProvidersListRequestPayload = Record<string, never>;
 export type ProvidersListResponsePayload = { providers: ProviderPayload[] };
+
+export interface AgentPayload {
+  name: string;
+  description?: string;
+  mode: "subagent" | "primary" | "all";
+  builtIn: boolean;
+  model?: {
+    providerID: string;
+    modelID: string;
+  };
+}
+
+export interface AgentsListRequestPayload {
+  projectId?: string;
+  directory?: string;
+}
+
+export type AgentsListResponsePayload = { agents: AgentPayload[] };
 
 export type PermissionReply = "once" | "always" | "reject";
 

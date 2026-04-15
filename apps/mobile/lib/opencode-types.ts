@@ -154,6 +154,19 @@ export interface AssistantMessage {
 
 export type Message = UserMessage | AssistantMessage;
 
+export interface Agent {
+  name: string;
+  description?: string;
+  mode: "subagent" | "primary" | "all";
+  builtIn: boolean;
+  model?: {
+    providerID: string;
+    modelID: string;
+  };
+  prompt?: string;
+  maxSteps?: number;
+}
+
 // ===== Part Types =====
 
 export interface TextPart {

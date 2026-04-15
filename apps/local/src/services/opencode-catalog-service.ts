@@ -5,6 +5,7 @@ import type {
   Session,
   Message,
   Provider,
+  Agent,
 } from "@opencode-ai/sdk/v2" with {
   "resolution-mode": "import",
 };
@@ -15,7 +16,7 @@ import path from "path";
 import ignore from "ignore";
 import { compareAsc } from "date-fns";
 
-export type { Project, Session, Message, Provider };
+export type { Project, Session, Message, Provider, Agent };
 
 export type OpencodeProjectDirectoryNode = {
   name: string;
@@ -326,6 +327,11 @@ class OpencodeCatalogService {
   async listProviders() {
     const providers = await this.sdk.listProviders();
     return providers;
+  }
+
+  async listAgents(directory?: string) {
+    const agents = await this.sdk.listAgents(directory);
+    return agents;
   }
 }
 

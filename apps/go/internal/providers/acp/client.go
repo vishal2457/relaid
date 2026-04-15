@@ -27,7 +27,7 @@ type Protocol interface {
 	BuildListParams(cwd, cursor string) map[string]any
 	BuildNewSessionParams(cwd string) map[string]any
 	BuildLoadSessionParams(sessionID, cwd string) map[string]any
-	BuildPromptParams(sessionID, prompt string) map[string]any
+	BuildPromptParams(sessionID, prompt, agent string) map[string]any
 	BuildCancelParams(sessionID string) map[string]any
 
 	ParseSessionList(raw json.RawMessage) (*SessionListResult, error)
@@ -199,7 +199,24 @@ func (c *Connection) SetConfigOption(sessionID, configID, value string) error {
 	return nil
 }
 
-func (c *Connection) Prompt(ctx context.Context, sessionID, prompt, modelID string) (*PromptResult, error) {
+func (c *Connection) Prompt(ctx context.Context, sessionID, prompt, agentName, modelID string) (*PromptResult, error) {
+	if agentName != "" {
+		updated := false
+		for _, opt := range c.configOptions {
+			if isAgentConfigOption(opt) {
+				if err := c.SetConfigOption(sessionID, opt.ID, agentName); err != nil {
+					c.logf("ACP: failed to set agent config option: %v", err)
+				} else {
+					updated = true
+				}
+				break
+			}
+		}
+		if !updated {
+			c.logf("ACP: no agent config option found; falling back to prompt param for agent=%s", agentName)
+		}
+	}
+
 	if modelID != "" {
 		for _, opt := range c.configOptions {
 			if isModelConfigOption(opt.ID) {
@@ -212,7 +229,7 @@ func (c *Connection) Prompt(ctx context.Context, sessionID, prompt, modelID stri
 		}
 	}
 
-	params := c.protocol.BuildPromptParams(sessionID, prompt)
+	params := c.protocol.BuildPromptParams(sessionID, prompt, agentName)
 
 	var result PromptResult
 	if err := c.call(c.protocol.PromptMethod(), params, &result); err != nil {
@@ -645,6 +662,20 @@ func isModelConfigOption(id string) bool {
 		return true
 	}
 	return false
+}
+
+func isAgentConfigOption(opt ConfigOption) bool {
+	switch opt.ID {
+	case "agent", "agent_id", "agentId", "mode":
+		return true
+	}
+
+	current, ok := opt.CurrentValue.(string)
+	if !ok {
+		return false
+	}
+
+	return current != "" && !strings.Contains(current, "/")
 }
 
 func resolveModelValue(opt ConfigOption, modelID string) string {

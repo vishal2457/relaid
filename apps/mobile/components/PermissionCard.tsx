@@ -21,13 +21,13 @@ export type QuestionRequest = {
   sessionId: string;
   jobId: string;
   threadId: string;
-  questions: Array<{
+  questions: {
     header: string;
     question: string;
-    options: Array<{ label: string; description: string }>;
+    options: { label: string; description: string }[];
     multiple?: boolean;
     custom?: boolean;
-  }>;
+  }[];
 };
 
 type PermissionCardProps = {
@@ -67,29 +67,6 @@ export function formatPermissionType(permission: string): string {
   return permissionLabels[permission] || permission;
 }
 
-function getPermissionIcon(permission: string): string {
-  const iconMap: Record<string, string> = {
-    bash: "console",
-    execute: "console",
-    think: "console",
-    task: "console",
-    edit: "file-edit-outline",
-    delete: "file-remove-outline",
-    move: "file-move-outline",
-    read: "file-eye-outline",
-    glob: "file-search-outline",
-    search: "file-search-outline",
-    grep: "file-search-outline",
-    list: "file-tree-outline",
-    webfetch: "web",
-    websearch: "web",
-    codesearch: "code-search",
-    external_directory: "folder-open-outline",
-    skill: "lightning-bolt-outline",
-  };
-  return iconMap[permission] || "shield-lock-outline";
-}
-
 export function PermissionCard({
   request,
   onRespond,
@@ -101,8 +78,16 @@ export function PermissionCard({
   const borderColor = isDark
     ? "rgba(255, 255, 255, 0.1)"
     : "rgba(0, 0, 0, 0.05)";
-  const warningColor = "#F59E0B";
-  const surfaceColor = isDark ? "#1E293B" : "#F8FAFC";
+  const surfaceColor = isDark ? "#111827" : "#FFFFFF";
+  const mutedSurface = isDark ? "rgba(255, 255, 255, 0.04)" : "#F8FAFC";
+  const title =
+    request.metadata &&
+    typeof request.metadata.title === "string" &&
+    request.metadata.title
+      ? (request.metadata.title as string)
+      : null;
+  const displayPatterns = request.patterns.slice(0, 3);
+  const remainingPatternCount = request.patterns.length - displayPatterns.length;
 
   return (
     <View
@@ -119,94 +104,48 @@ export function PermissionCard({
         },
       ]}
     >
-      <View style={styles.header}>
-        <View
-          style={[
-            styles.iconWrapper,
-            {
-              backgroundColor: isDark
-                ? "rgba(245, 158, 11, 0.15)"
-                : "rgba(245, 158, 11, 0.1)",
-            },
-          ]}
+      <View style={styles.permissionHeader}>
+        <Text
+          variant="titleMedium"
+          style={{ color: theme.colors.onSurface, fontWeight: "700" }}
         >
-          <MaterialCommunityIcons
-            name="shield-lock"
-            size={22}
-            color={warningColor}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text
-            variant="labelSmall"
-            style={{
-              color: warningColor,
-              fontWeight: "700",
-              textTransform: "uppercase",
-              letterSpacing: 1,
-            }}
-          >
-            Permission
-          </Text>
-          <Text
-            variant="titleSmall"
-            style={{ color: theme.colors.onSurface, fontWeight: "600" }}
-          >
-            The agent requests permission
-          </Text>
-        </View>
+          Allow {formatPermissionType(request.permission).toLowerCase()}?
+        </Text>
+        <Text
+          variant="bodyMedium"
+          style={{ color: theme.colors.onSurfaceVariant, lineHeight: 20 }}
+        >
+          {title || "Review the request before continuing."}
+        </Text>
       </View>
 
       <View style={styles.content}>
-        <View style={styles.permissionTypeRow}>
-          <MaterialCommunityIcons
-            name={getPermissionIcon(request.permission) as any}
-            size={18}
-            color={theme.colors.primary}
-            style={{ marginRight: 6 }}
-          />
+        <View
+          style={[
+            styles.permissionTypePill,
+            {
+              backgroundColor: mutedSurface,
+              borderColor,
+            },
+          ]}
+        >
           <Text
-            variant="bodyLarge"
-            style={{ fontWeight: "700", color: theme.colors.primary }}
+            variant="labelLarge"
+            style={{ fontWeight: "600", color: theme.colors.onSurface }}
           >
             {formatPermissionType(request.permission)}
           </Text>
         </View>
 
-        {(() => {
-          const title =
-            request.metadata &&
-            typeof request.metadata.title === "string" &&
-            request.metadata.title
-              ? (request.metadata.title as string)
-              : null;
-          if (!title) return null;
-          return (
-            <Text
-              variant="bodyMedium"
-              style={{
-                color: theme.colors.onSurface,
-                fontWeight: "500",
-              }}
-              numberOfLines={3}
-            >
-              {title}
-            </Text>
-          );
-        })()}
-
         {request.patterns.length > 0 && (
           <View style={styles.patternsWrapper}>
-            {request.patterns.map((pattern, idx) => {
-              const patternIcon: any =
-                request.permission === "bash" ||
-                request.permission === "execute" ||
-                request.permission === "think"
-                  ? "console-line"
-                  : request.permission === "webfetch" ||
-                      request.permission === "websearch"
-                    ? "web"
-                    : "file-document-outline";
+            <Text
+              variant="labelMedium"
+              style={{ color: theme.colors.onSurfaceVariant, fontWeight: "600" }}
+            >
+              Requested items
+            </Text>
+            {displayPatterns.map((pattern, idx) => {
               const displayPattern =
                 pattern.length > 60
                   ? "..." + pattern.slice(pattern.length - 57)
@@ -217,31 +156,33 @@ export function PermissionCard({
                   style={[
                     styles.patternItem,
                     {
-                      backgroundColor: isDark
-                        ? "rgba(0,0,0,0.2)"
-                        : "rgba(0,0,0,0.03)",
+                      backgroundColor: mutedSurface,
+                      borderColor,
                     },
                   ]}
                 >
-                  <MaterialCommunityIcons
-                    name={patternIcon}
-                    size={14}
-                    color={theme.colors.onSurfaceVariant}
-                  />
                   <Text
                     variant="bodySmall"
                     style={{
-                      color: theme.colors.onSurfaceVariant,
+                      color: theme.colors.onSurface,
                       fontFamily:
                         Platform.OS === "ios" ? "Courier" : "monospace",
                     }}
-                    numberOfLines={2}
+                    numberOfLines={1}
                   >
                     {displayPattern}
                   </Text>
                 </View>
               );
             })}
+            {remainingPatternCount > 0 && (
+              <Text
+                variant="bodySmall"
+                style={{ color: theme.colors.onSurfaceVariant }}
+              >
+                +{remainingPatternCount} more
+              </Text>
+            )}
           </View>
         )}
       </View>
@@ -265,7 +206,7 @@ export function PermissionCard({
             style={[styles.actionButton, { borderColor: theme.colors.outline }]}
             labelStyle={{ fontWeight: "600" }}
           >
-            Once
+            Allow once
           </Button>
           <Button
             mode="contained"
@@ -274,7 +215,7 @@ export function PermissionCard({
             style={styles.actionButton}
             labelStyle={{ fontWeight: "700" }}
           >
-            Always
+            Always allow
           </Button>
         </View>
       </View>
@@ -292,9 +233,7 @@ export function QuestionCard({
   const [selectedOptions, setSelectedOptions] = React.useState<
     Record<number, string[]>
   >({});
-  const [customAnswers, setCustomAnswers] = React.useState<
-    Record<number, string>
-  >({});
+  const [customAnswers] = React.useState<Record<number, string>>({});
 
   const borderColor = isDark
     ? "rgba(255, 255, 255, 0.1)"
@@ -531,6 +470,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
+  permissionHeader: {
+    gap: 6,
+  },
   iconWrapper: {
     width: 40,
     height: 40,
@@ -545,18 +487,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
+  permissionTypePill: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
   patternsWrapper: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
+    gap: 8,
   },
   patternItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
   },
   actionRow: {
     flexDirection: "row",

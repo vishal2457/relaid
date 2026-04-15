@@ -11,6 +11,8 @@ import type {
   ProjectGetRequestPayload,
   ProjectUpdateRequestPayload,
   ProjectsListRequestPayload,
+  AgentsListRequestPayload,
+  AgentsListResponsePayload,
   ProvidersListRequestPayload,
   SessionAbortPayload,
   SessionAbortedPayload,
@@ -323,6 +325,13 @@ export class ChatServerClient {
       "session_prompt_request",
       (payload: SessionPromptRequestPayload) => {
         void this.handleSessionPromptRequest(payload);
+      },
+    );
+
+    this.socket.on(
+      "agents_list_request",
+      (payload: { requestId: string } & AgentsListRequestPayload) => {
+        void this.handleAgentsListRequest(payload);
       },
     );
 
@@ -650,6 +659,30 @@ export class ChatServerClient {
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.sendError(payload.requestId, "PROJECTS_LIST_ERROR", errMsg);
+    }
+  }
+
+  private async handleAgentsListRequest(
+    payload: { requestId: string } & AgentsListRequestPayload,
+  ): Promise<void> {
+    try {
+      let directory = payload.directory;
+
+      if (!directory && payload.projectId) {
+        const project = await opencodeCatalogService.getProject(
+          payload.projectId,
+        );
+        directory = project?.worktree;
+      }
+
+      const agents = await opencodeCatalogService.listAgents(directory);
+      this.emit("agents_list_response", {
+        requestId: payload.requestId,
+        agents,
+      } satisfies { requestId: string } & AgentsListResponsePayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.sendError(payload.requestId, "AGENTS_LIST_ERROR", errMsg);
     }
   }
 

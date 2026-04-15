@@ -22,6 +22,7 @@ type Provider struct {
 	sessions     *sessionService
 	projects     *projectService
 	providers    *providerService
+	agents       *agentService
 }
 
 func New(cfg config.Config, logger *log.Logger) *Provider {
@@ -54,6 +55,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			SessionsRun:    true,
 			SessionsStream: true,
 			ProvidersList:  true,
+			AgentsList:     true,
 		},
 		sessions: &sessionService{
 			cfg:       cfg,
@@ -70,6 +72,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 		},
 		projects:  &projectService{sdk: sdk},
 		providers: &providerService{sdk: sdk},
+		agents:    &agentService{sdk: sdk},
 	}
 }
 
@@ -91,6 +94,10 @@ func (p *Provider) Sessions() agent.SessionService {
 
 func (p *Provider) Providers() agent.ProviderService {
 	return p.providers
+}
+
+func (p *Provider) Agents() agent.AgentService {
+	return p.agents
 }
 
 func (p *Provider) SetInteractionHandler(handler acp.InteractionHandler) {
@@ -123,6 +130,14 @@ type providerService struct {
 
 func (s *providerService) List(ctx context.Context) ([]agent.Provider, error) {
 	return s.sdk.ListProviders(ctx)
+}
+
+type agentService struct {
+	sdk *sdkclient.Adapter
+}
+
+func (s *agentService) List(ctx context.Context, directory string) ([]agent.AgentConfig, error) {
+	return s.sdk.ListAgents(ctx, directory)
 }
 
 type sessionService struct {
@@ -341,7 +356,13 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 		s.logger.Printf("ACP model override: %s", modelID)
 	}
 
-	result, err := conn.Prompt(runCtx, sessionID, effectivePrompt, modelID)
+	result, err := conn.Prompt(
+		runCtx,
+		sessionID,
+		effectivePrompt,
+		strings.TrimSpace(input.Agent),
+		modelID,
+	)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(runCtx.Err(), context.Canceled) {
 			return &agent.RunResult{

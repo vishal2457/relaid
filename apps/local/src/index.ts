@@ -125,6 +125,7 @@ async function main(): Promise<void> {
         payload.sessionId,
         createInteractionHandler(payload.projectId),
         undefined,
+        payload.agent,
         payload.model,
       );
 

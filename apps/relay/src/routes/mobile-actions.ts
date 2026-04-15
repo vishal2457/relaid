@@ -27,6 +27,7 @@ type SessionPromptRequest = {
   projectId: string;
   sessionId: string;
   prompt: string;
+  agent?: string;
   model?: { providerId: string; modelId: string };
 };
 
@@ -59,7 +60,7 @@ router.post(
     try {
       const userId = requireUserId(req.headers["x-user-id"]);
       const sessionId = req.params.sessionId;
-      const { requestId, projectId, prompt, model } =
+      const { requestId, projectId, prompt, agent, model } =
         req.body as SessionPromptRequest;
 
       if (!requestId || !projectId) {
@@ -106,6 +107,7 @@ router.post(
             projectId,
             sessionId,
             prompt,
+            agent,
             model,
             userId,
           },

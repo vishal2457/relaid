@@ -52,6 +52,8 @@ import {
   deliverBufferedInteractions,
 } from "../services/interaction-buffer";
 
+const PERMISSION_NOTIFICATION_CATEGORY = "PERMISSION_REQUEST";
+
 export interface SocketData {
   userId: string;
   serverId: string;
@@ -117,6 +119,20 @@ type ProjectDeleteResponse = {
 
 type ProvidersListResponse = {
   providers: ProviderPayload[];
+  error?: string;
+};
+
+type AgentsListResponse = {
+  agents: Array<{
+    name: string;
+    description?: string;
+    mode: "subagent" | "primary" | "all";
+    builtIn: boolean;
+    model?: {
+      providerID: string;
+      modelID: string;
+    };
+  }>;
   error?: string;
 };
 
@@ -332,6 +348,7 @@ async function handleLocalServerConnection(
   pipeResponse("local_servers_list_response");
   pipeResponse("local_server_register_response");
   pipeResponse("providers_list_response");
+  pipeResponse("agents_list_response");
   pipeResponse("git_staged_files_response");
   pipeResponse("git_stage_files_response");
   pipeResponse("git_unstage_files_response");
@@ -370,6 +387,8 @@ async function handleLocalServerConnection(
       sessionId: payload.sessionId,
       jobId: payload.jobId,
       permission: payload.permission,
+    }, {
+      categoryId: PERMISSION_NOTIFICATION_CATEGORY,
     });
   });
 
@@ -1082,6 +1101,40 @@ function handleMobileConnection(socket: Socket, userId: string): void {
       );
     }
   });
+
+  socket.on(
+    "agents_list_request",
+    async (data: {
+      requestId: string;
+      projectId?: string;
+      directory?: string;
+    }) => {
+      try {
+        const result = await requestConnectedServer<AgentsListResponse>(
+          userId,
+          "agents_list_request",
+          "agents_list_response",
+          {
+            projectId: data.projectId,
+            directory: data.directory,
+          },
+        );
+
+        socket.emit("agents_list_response", {
+          requestId: data.requestId,
+          agents: result.response.agents || [],
+        });
+      } catch (error) {
+        emitSocketError(
+          socket,
+          "agents_list_response",
+          data.requestId,
+          { agents: [] },
+          error,
+        );
+      }
+    },
+  );
 
   socket.on("permission_response", async (data: PermissionResponseEvent) => {
     clearBufferedInteraction(data.requestId);

@@ -72,8 +72,8 @@ func (p *CodexProtocol) BuildLoadSessionParams(sessionID, cwd string) map[string
 	}
 }
 
-func (p *CodexProtocol) BuildPromptParams(sessionID, prompt string) map[string]any {
-	return map[string]any{
+func (p *CodexProtocol) BuildPromptParams(sessionID, prompt, agent string) map[string]any {
+	params := map[string]any{
 		"sessionId": sessionID,
 		"prompt": []map[string]any{
 			{
@@ -82,6 +82,10 @@ func (p *CodexProtocol) BuildPromptParams(sessionID, prompt string) map[string]a
 			},
 		},
 	}
+	if agent != "" {
+		params["agent"] = agent
+	}
+	return params
 }
 
 func (p *CodexProtocol) BuildCancelParams(sessionID string) map[string]any {

@@ -73,6 +73,8 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 		go h.handleSessionAbort(args)
 	case EventProvidersListRequest:
 		go h.handleProvidersList(args)
+	case EventAgentsListRequest:
+		go h.handleAgentsList(args)
 	case EventGitStagedFilesRequest:
 		go h.handleGitStagedFiles(args)
 	case EventGitStageFilesRequest:
@@ -156,6 +158,7 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 		EventSessionPromptResponse,
 		EventSessionAborted,
 		EventProvidersListResponse,
+		EventAgentsListResponse,
 		EventGitStagedFilesResponse,
 		EventGitStageFilesResponse,
 		EventGitUnstageFilesResponse,
@@ -663,6 +666,7 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		Prompt:    req.Prompt,
 		SessionID: req.SessionID,
 		ProjectID: req.ProjectID,
+		Agent:     req.Agent,
 	}
 	if req.Model != nil {
 		runInput.Model = &agent.ModelRef{
@@ -794,6 +798,70 @@ func (h *Handler) handleProvidersList(args []json.RawMessage) {
 	}
 
 	h.emit(EventProvidersListResponse, payload)
+}
+
+func (h *Handler) handleAgentsList(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req AgentsListRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse agents_list_request: %v", err)
+		return
+	}
+
+	provider, err := h.getProvider()
+	if err != nil {
+		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
+		return
+	}
+
+	directory := req.Directory
+	if directory == "" && req.ProjectID != "" {
+		project, err := provider.Projects().Get(context.Background(), req.ProjectID)
+		if err != nil {
+			h.emit(EventAgentsListResponse, AgentsListResponse{
+				RequestID: req.RequestID,
+				Agents:    []AgentPayload{},
+			})
+			return
+		}
+		if project != nil {
+			directory = project.Worktree
+		}
+	}
+
+	agents, err := provider.Agents().List(context.Background(), directory)
+	if err != nil {
+		h.emit(EventAgentsListResponse, AgentsListResponse{
+			RequestID: req.RequestID,
+			Agents:    []AgentPayload{},
+		})
+		return
+	}
+
+	payload := AgentsListResponse{
+		RequestID: req.RequestID,
+		Agents:    make([]AgentPayload, 0, len(agents)),
+	}
+	for _, item := range agents {
+		var model *ModelRefJSON
+		if item.Model != nil {
+			model = &ModelRefJSON{
+				ProviderID: item.Model.ProviderID,
+				ModelID:    item.Model.ModelID,
+			}
+		}
+		payload.Agents = append(payload.Agents, AgentPayload{
+			Name:        item.Name,
+			Description: item.Description,
+			Mode:        item.Mode,
+			BuiltIn:     item.BuiltIn,
+			Model:       model,
+		})
+	}
+
+	h.emit(EventAgentsListResponse, payload)
 }
 
 func (h *Handler) handleGitStagedFiles(args []json.RawMessage) {

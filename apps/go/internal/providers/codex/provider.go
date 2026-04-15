@@ -38,6 +38,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			SessionsRun:    true,
 			SessionsStream: true,
 			ProvidersList:  true,
+			AgentsList:     false,
 		},
 		sessions: &sessionService{
 			cfg:       cfg,
@@ -71,6 +72,10 @@ func (p *Provider) Sessions() agent.SessionService {
 }
 
 func (p *Provider) Providers() agent.ProviderService {
+	return nil
+}
+
+func (p *Provider) Agents() agent.AgentService {
 	return nil
 }
 
@@ -268,7 +273,13 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 		modelID = input.Model.ModelID
 	}
 
-	promptResult, err := conn.Prompt(runCtx, threadID, prompt, modelID)
+	promptResult, err := conn.Prompt(
+		runCtx,
+		threadID,
+		prompt,
+		strings.TrimSpace(input.Agent),
+		modelID,
+	)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(runCtx.Err(), context.Canceled) {
 			return &agent.RunResult{

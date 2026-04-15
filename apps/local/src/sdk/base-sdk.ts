@@ -61,6 +61,7 @@ export interface RunOptions {
   interactionHandler?: CodingSdkInteractionHandler;
   abortSignal?: AbortSignal;
   systemPrompt?: string;
+  agent?: string;
   model?: {
     providerId: string;
     modelId: string;

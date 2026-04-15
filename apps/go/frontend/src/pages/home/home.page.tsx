@@ -14,8 +14,6 @@ import { Input } from "../../shared/components/ui/input";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "../../shared/components/ui/dialog";
@@ -44,50 +42,37 @@ export const HomePage = () => {
     isPinging,
   } = useRelayHooks();
 
-  const {
-    clients,
-    isLoading: isLoadingClients,
-    refresh: refreshClients,
-  } = useConnectedClients();
+  const { clients, refresh: refreshClients } = useConnectedClients();
+
+  const statusColor = isConnected
+    ? "text-green-500"
+    : storedUrl
+      ? "text-yellow-500"
+      : "text-muted-foreground";
+
+  const StatusIcon = isConnected ? Wifi : WifiOff;
+  const statusLabel = isConnected
+    ? "Connected"
+    : storedUrl
+      ? "Disconnected"
+      : "Not configured";
 
   return (
-    <div className="container mx-auto max-w-2xl py-8">
-      <h1 className="mb-8 text-2xl font-bold">Home</h1>
-
+    <div className="container mx-auto max-w-lg py-8">
       <div className="space-y-6">
-        <div className="rounded-lg border p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-              <Link2 className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold">Relay Connection</h2>
-              <p className="text-sm text-muted-foreground">
-                Connect to relay server for remote access
-              </p>
-            </div>
-          </div>
+        <section className="rounded-lg border p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+            Relay
+          </h2>
 
           <div className="flex items-center justify-between mb-4">
-            {isConnected ? (
-              <div className="flex items-center gap-2 text-green-600">
-                <Wifi className="h-4 w-4" />
-                <span className="text-sm font-medium">Connected</span>
-              </div>
-            ) : storedUrl && storedUrl !== "" ? (
-              <div className="flex items-center gap-2 text-yellow-600">
-                <WifiOff className="h-4 w-4" />
-                <span className="text-sm font-medium">Disconnected</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <WifiOff className="h-4 w-4" />
-                <span className="text-sm font-medium">Not configured</span>
-              </div>
-            )}
+            <div className={`flex items-center gap-2 text-sm ${statusColor}`}>
+              <StatusIcon className="h-4 w-4" />
+              {statusLabel}
+            </div>
             {storedUrl && (
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={pingRelay}
                 disabled={isPinging}
@@ -100,161 +85,127 @@ export const HomePage = () => {
             )}
           </div>
 
-          <div className="space-y-4">
-            <Input
-              label="Relay Server URL"
-              placeholder="https://relay.example.com"
-              type={showUrl ? "text" : "password"}
-              value={relayUrl || storedUrl || ""}
-              onChange={(e) => setRelayUrl(e.target.value)}
-              hint="Enter the relay server URL (e.g., https://relay.example.com)"
-              suffixButton={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="border border-l-0 border-input rounded-l-none hover:bg-transparent h-9 px-3"
-                  onClick={() => setShowUrl(!showUrl)}
-                >
-                  {showUrl ? (
-                    <EyeOff className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <Eye className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </Button>
-              }
-            />
-
-            <div className="flex gap-2">
+          <Input
+            placeholder="https://relay.example.com"
+            type={showUrl ? "text" : "password"}
+            value={relayUrl || storedUrl || ""}
+            onChange={(e) => setRelayUrl(e.target.value)}
+            hint="Relay server URL for remote access"
+            suffixButton={
               <Button
-                onClick={() => {
-                  const url = relayUrl || storedUrl;
-                  if (url) {
-                    saveUrl(url);
-                  }
-                }}
-                disabled={!relayUrl && !storedUrl}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="border border-l-0 border-input rounded-l-none hover:bg-transparent h-9 px-3"
+                onClick={() => setShowUrl(!showUrl)}
               >
-                <RefreshCw
-                  className={`mr-2 h-4 w-4 ${isSaving ? "animate-spin" : ""}`}
-                />
-                Save & Verify
+                {showUrl ? (
+                  <EyeOff className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <Eye className="h-4 w-4 text-muted-foreground" />
+                )}
               </Button>
+            }
+          />
 
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (storedUrl) {
-                    createPairing().then((data) => {
-                      if (data) {
-                        setPairingData({
-                          pairingUrl: data.pairingUrl,
-                          expiresAt: data.expiresAt,
-                        });
-                        setShowQrDialog(true);
-                      }
-                    });
-                  }
-                }}
-                disabled={!storedUrl || isCreating}
-              >
-                <Link2 className="mr-2 h-4 w-4" />
-                Generate QR Code
-              </Button>
-            </div>
+          <div className="flex gap-2 mt-3">
+            <Button
+              className="flex-1"
+              onClick={() => {
+                const url = relayUrl || storedUrl;
+                if (url) saveUrl(url);
+              }}
+              disabled={!relayUrl && !storedUrl}
+            >
+              {isSaving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (storedUrl) {
+                  createPairing().then((data) => {
+                    if (data) {
+                      setPairingData({
+                        pairingUrl: data.pairingUrl,
+                        expiresAt: data.expiresAt,
+                      });
+                      setShowQrDialog(true);
+                    }
+                  });
+                }
+              }}
+              disabled={!storedUrl || isCreating}
+            >
+              <Link2 className="mr-2 h-4 w-4" />
+              Pair
+            </Button>
           </div>
-        </div>
+        </section>
 
         {isConnected && (
-          <div className="rounded-lg border p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                  <Smartphone className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold">Connected Clients</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Mobile apps connected to relay
-                  </p>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={refreshClients}
-                disabled={isLoadingClients}
-              >
-                <RefreshCw
-                  className={`mr-1.5 h-3.5 w-3.5 ${isLoadingClients ? "animate-spin" : ""}`}
-                />
+          <section className="rounded-lg border p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Smartphone className="h-4 w-4" />
+                Clients
+              </h2>
+              <Button variant="ghost" size="sm" onClick={refreshClients}>
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                 Refresh
               </Button>
             </div>
 
             {clients.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No mobile clients connected
+                No clients connected
               </p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-1.5">
                 {clients.map((client) => (
                   <li
                     key={client.connectionId}
                     className="flex items-center gap-2 text-sm"
                   >
-                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
                     <span>Mobile Client</span>
-                    <span className="text-muted-foreground">
-                      ({client.connectionId})
+                    <span className="text-muted-foreground font-mono text-xs">
+                      {client.connectionId}
                     </span>
                   </li>
                 ))}
               </ul>
             )}
-          </div>
+          </section>
         )}
       </div>
 
       <Dialog open={showQrDialog} onOpenChange={setShowQrDialog}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Pairing QR Code</DialogTitle>
-            <DialogDescription>
-              Scan this QR code with your mobile app to connect
-            </DialogDescription>
+            <DialogTitle>Scan to pair</DialogTitle>
           </DialogHeader>
 
-          <div className="flex flex-col items-center justify-center py-4">
+          <div className="flex flex-col items-center py-4">
             {pairingData?.pairingUrl ? (
-              <div className="text-center">
-                <div className="mb-4 rounded-lg border p-4 bg-white">
+              <>
+                <div className="rounded-lg border p-3 bg-white">
                   <QRCode
                     value={pairingData.pairingUrl}
-                    size={200}
-                    level={"M"}
-                    includeMargin={true}
+                    size={180}
+                    level="M"
+                    includeMargin
                   />
                 </div>
-                <p className="text-sm text-muted-foreground break-all">
-                  {pairingData.pairingUrl}
+                <p className="text-xs text-muted-foreground mt-3">
+                  Expires {new Date(pairingData.expiresAt).toLocaleTimeString()}
                 </p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Expires: {new Date(pairingData.expiresAt).toLocaleString()}
-                </p>
-              </div>
+              </>
             ) : (
-              <div className="flex items-center justify-center p-8">
-                <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
+              <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
             )}
           </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowQrDialog(false)}>
-              Close
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

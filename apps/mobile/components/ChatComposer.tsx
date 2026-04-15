@@ -59,6 +59,7 @@ type ComposerSelection = {
 };
 
 type ChatComposerProps = {
+  activeAgentName: string;
   activeProject: boolean;
   activeProjectName: string;
   borderColor: string;
@@ -73,6 +74,7 @@ type ChatComposerProps = {
   metaColor: string;
   onChangeText: (value: string) => void;
   onInputHeightChange: (height: number) => void;
+  onPressAgent: () => void;
   onPressBranch: () => void;
   onSelectionChange: (
     event: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
@@ -92,6 +94,7 @@ type ChatComposerProps = {
 };
 
 export function ChatComposer({
+  activeAgentName,
   activeProject,
   activeProjectName,
   borderColor,
@@ -106,6 +109,7 @@ export function ChatComposer({
   metaColor,
   onChangeText,
   onInputHeightChange,
+  onPressAgent,
   onPressBranch,
   onSelectionChange,
   onSelectFileSuggestion,
@@ -380,14 +384,11 @@ export function ChatComposer({
                 {activeProjectName}
               </Text>
             </Pressable>
-            <View
-              style={[styles.metaDivider, { backgroundColor: borderColor }]}
-            />
             <Pressable
               onPress={onPressModel}
               style={({ pressed }) => [
                 styles.metaButton,
-                styles.metaButtonRight,
+                styles.metaButtonMiddle,
                 { borderColor },
                 pressed && styles.metaButtonPressed,
               ]}
@@ -407,6 +408,32 @@ export function ChatComposer({
                 ellipsizeMode="tail"
               >
                 {selectedModelName}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={onPressAgent}
+              style={({ pressed }) => [
+                styles.metaButton,
+                styles.metaButtonRight,
+                { borderColor },
+                pressed && styles.metaButtonPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="account-switch-outline"
+                size={14}
+                color={metaColor}
+              />
+              <Text
+                variant="bodySmall"
+                style={[
+                  styles.metaButtonText,
+                  { color: theme.colors.onSurface },
+                ]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {activeAgentName}
               </Text>
             </Pressable>
           </View>
@@ -469,6 +496,10 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 8,
     borderRightWidth: 0,
   },
+  metaButtonMiddle: {
+    borderRadius: 0,
+    borderRightWidth: 0,
+  },
   metaButtonRight: {
     borderTopRightRadius: 8,
     borderBottomRightRadius: 8,
@@ -488,10 +519,6 @@ const styles = StyleSheet.create({
   metaButtonText: {
     fontSize: 12,
     flex: 1,
-  },
-  metaDivider: {
-    width: 1,
-    alignSelf: "stretch",
   },
   mentionEmptyState: {
     paddingHorizontal: 12,

@@ -60,6 +60,7 @@ import {
   type ProjectFileMatch,
 } from "@/lib/api/projects";
 import { useProjectSkills, type Skill } from "@/lib/api/skills";
+import { useAgents, type Agent } from "@/lib/api/agents";
 import { useBranches, useSwitchBranch, type Branch } from "@/lib/api/branches";
 import {
   useProviders,
@@ -149,6 +150,7 @@ type ConnectionState = "connected" | "disconnected" | "connecting" | "error";
 
 const LAST_SELECTED_PROJECT_ID = "LAST_SELECTED_PROJECT_ID";
 const LAST_SELECTED_MODEL = "LAST_SELECTED_MODEL";
+const LAST_SELECTED_AGENT_BY_PROJECT = "LAST_SELECTED_AGENT_BY_PROJECT";
 
 type SessionPromptStartedEvent = {
   requestId: string;
@@ -235,6 +237,26 @@ function getModelSearchScore(model: ActiveModel, query: string): number {
   );
 }
 
+function getDefaultAgent(agents: Agent[]): Agent | null {
+  if (agents.length === 0) {
+    return null;
+  }
+
+  return (
+    agents.find((agent) => agent.name === "general") ??
+    agents.find((agent) => agent.mode !== "subagent") ??
+    agents[0]
+  );
+}
+
+function getAgentSubtitle(agent: Agent): string {
+  if (agent.model) {
+    return `${agent.model.providerID} / ${agent.model.modelID}`;
+  }
+
+  return agent.builtIn ? "Built-in" : agent.mode;
+}
+
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -273,8 +295,10 @@ export default function ChatScreen() {
     React.useState<SessionMessage | null>(null);
   const [showProjectSheet, setShowProjectSheet] = React.useState(false);
   const [showProviderSheet, setShowProviderSheet] = React.useState(false);
+  const [showAgentSheet, setShowAgentSheet] = React.useState(false);
   const [showBranchSheet, setShowBranchSheet] = React.useState(false);
   const [modelSearchQuery, setModelSearchQuery] = React.useState("");
+  const [agentSearchQuery, setAgentSearchQuery] = React.useState("");
   const [branchSearchQuery, setBranchSearchQuery] = React.useState("");
   const [activeProject, setActiveProject] = React.useState<Project | null>(
     null,
@@ -282,6 +306,7 @@ export default function ChatScreen() {
   const [activeModel, setActiveModel] = React.useState<ActiveModel | null>(
     null,
   );
+  const [activeAgent, setActiveAgent] = React.useState<Agent | null>(null);
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(
     null,
   );
@@ -332,6 +357,10 @@ export default function ChatScreen() {
   const createSessionMutation = useCreateSession();
   const { data: projects, isLoading: projectsLoading } = useProjects();
   const { data: providers, isLoading: providersLoading } = useProviders();
+  const { data: agents = [], isLoading: agentsLoading } = useAgents(
+    activeProject?.id ?? "",
+    Boolean(activeProject),
+  );
   const activeMention = React.useMemo(
     () => getActiveMention(inputText, inputSelection),
     [inputSelection, inputText],
@@ -466,6 +495,70 @@ export default function ChatScreen() {
   }, [activeModel, hydrated]);
 
   React.useEffect(() => {
+    if (!hydrated || !activeProject) {
+      return;
+    }
+
+    void AsyncStorage.getItem(LAST_SELECTED_AGENT_BY_PROJECT)
+      .then((raw) => {
+        if (!raw || !isMountedRef.current) {
+          return;
+        }
+
+        const saved = JSON.parse(raw) as Record<string, string>;
+        const savedAgentName = saved[activeProject.id];
+        if (!savedAgentName || agents.length === 0) {
+          return;
+        }
+
+        const matchedAgent = agents.find((agent) => agent.name === savedAgentName);
+        if (matchedAgent) {
+          setActiveAgent((current: Agent | null) =>
+            current?.name === matchedAgent.name ? current : matchedAgent,
+          );
+        }
+      })
+      .catch(() => {});
+  }, [activeProject, agents, hydrated]);
+
+  React.useEffect(() => {
+    if (!agents.length) {
+      setActiveAgent(null);
+      return;
+    }
+
+    setActiveAgent((current: Agent | null) => {
+      if (current) {
+        const matched = agents.find((agent) => agent.name === current.name);
+        if (matched) {
+          return matched;
+        }
+      }
+
+      return getDefaultAgent(agents);
+    });
+  }, [agents]);
+
+  React.useEffect(() => {
+    if (!hydrated || !activeProject || !activeAgent) {
+      return;
+    }
+
+    void AsyncStorage.getItem(LAST_SELECTED_AGENT_BY_PROJECT)
+      .then((raw) => {
+        const currentMap = raw
+          ? (JSON.parse(raw) as Record<string, string>)
+          : {};
+        currentMap[activeProject.id] = activeAgent.name;
+        return AsyncStorage.setItem(
+          LAST_SELECTED_AGENT_BY_PROJECT,
+          JSON.stringify(currentMap),
+        );
+      })
+      .catch(() => {});
+  }, [activeAgent, activeProject, hydrated]);
+
+  React.useEffect(() => {
     if (!hydrated || !providers) return;
 
     (async () => {
@@ -504,12 +597,22 @@ export default function ChatScreen() {
   );
   const switchBranchMutation = useSwitchBranch(activeProject?.id ?? "");
 
+  const activeSessionMessages = React.useMemo(() => {
+    if (!activeSessionId) {
+      return [];
+    }
+
+    return (messages ?? []).filter(
+      (message) => message.sessionID === activeSessionId,
+    );
+  }, [activeSessionId, messages]);
+
   const displayedMessages = React.useMemo(() => {
     if (!optimisticMessage) {
-      return messages ?? [];
+      return activeSessionMessages;
     }
-    return [...(messages ?? []), optimisticMessage];
-  }, [messages, optimisticMessage]);
+    return [...activeSessionMessages, optimisticMessage];
+  }, [activeSessionMessages, optimisticMessage]);
 
   const sortedModels = React.useMemo(() => {
     const models = flattenProvidersToModels(providers ?? []);
@@ -552,6 +655,31 @@ export default function ChatScreen() {
     );
     return sorted;
   }, [projects, activeProject]);
+
+  const sortedAgents = React.useMemo(() => {
+    const normalizedQuery = normalizeSearchValue(agentSearchQuery);
+    const filtered = normalizedQuery
+      ? agents.filter((agent) => {
+          const haystacks = [
+            agent.name,
+            agent.description ?? "",
+            agent.model?.providerID ?? "",
+            agent.model?.modelID ?? "",
+          ];
+          return haystacks.some((value) =>
+            normalizeSearchValue(value).includes(normalizedQuery),
+          );
+        })
+      : agents;
+
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (a.name === activeAgent?.name) return -1;
+      if (b.name === activeAgent?.name) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    return sorted;
+  }, [activeAgent?.name, agentSearchQuery, agents]);
 
   const sortedBranches = React.useMemo(() => {
     const normalizedQuery = branchSearchQuery.toLowerCase().trim();
@@ -1065,11 +1193,33 @@ export default function ChatScreen() {
       : false;
 
   const handleSend = React.useCallback(async () => {
-    if (!activeProject || !trimmedInput) {
+    if (!activeProject || !trimmedInput || isSessionSending) {
       return;
     }
 
+    const prompt = trimmedInput;
+    const requestId = `mobile_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 9)}`;
+    const optimisticMessageId = `optimistic_${requestId}`;
     let sessionId = activeSessionId;
+    const isCreatingSession = !sessionId;
+
+    setOptimisticMessage({
+      id: optimisticMessageId,
+      sessionID: sessionId ?? `pending_${requestId}`,
+      role: "user",
+      content: prompt,
+      visibleContent: prompt,
+      thinkingContent: null,
+      thinkingDurationSeconds: null,
+      parts: [{ type: "text", content: prompt, durationSeconds: null }],
+      createdAt: Date.now(),
+    });
+    resetStreamingContent();
+    setInputText("");
+    setInputSelection({ start: 0, end: 0 });
+    setInputHeight(MIN_INPUT_HEIGHT);
 
     if (!sessionId) {
       const tempRequestId = `creating_${Date.now()}`;
@@ -1082,43 +1232,34 @@ export default function ChatScreen() {
         allowSessionChangeRecoveryRef.current = false;
         setActiveSessionId(sessionId);
         setCreatingSessionId(null);
+        setOptimisticMessage((current) =>
+          current?.id === optimisticMessageId
+            ? { ...current, sessionID: sessionId }
+            : current,
+        );
       } catch (createError) {
         setCreatingSessionId(null);
+        setOptimisticMessage(null);
+        setInputText(prompt);
+        setInputSelection({ start: prompt.length, end: prompt.length });
+        setInputHeight(MIN_INPUT_HEIGHT);
         console.error(createError);
         Alert.alert("Error", "Failed to create session");
         return;
       }
     }
-
-    const requestId = `mobile_${Date.now()}_${Math.random()
-      .toString(36)
-      .slice(2, 9)}`;
-
     const newPending = new Map(pendingRequestIds);
     newPending.set(sessionId, requestId);
     setPendingRequestIds(newPending);
     pendingRequestIdsRef.current = newPending;
     activeSessionIdRef.current = sessionId;
-    setOptimisticMessage({
-      id: `optimistic_${requestId}`,
-      sessionID: sessionId,
-      role: "user",
-      content: trimmedInput,
-      visibleContent: trimmedInput,
-      thinkingContent: null,
-      thinkingDurationSeconds: null,
-      parts: [{ type: "text", content: trimmedInput, durationSeconds: null }],
-      createdAt: Date.now(),
-    });
-    resetStreamingContent();
-    setInputText("");
-    setInputSelection({ start: 0, end: 0 });
-    setInputHeight(MIN_INPUT_HEIGHT);
     void saveActiveSessionStream({
       requestId,
       projectId: activeProject.id,
       sessionId,
-      baselineMessageId: messages?.[messages.length - 1]?.id ?? null,
+      baselineMessageId: isCreatingSession
+        ? null
+        : activeSessionMessages[activeSessionMessages.length - 1]?.id ?? null,
     });
 
     clearRequestRecoveryTimeout();
@@ -1130,13 +1271,14 @@ export default function ChatScreen() {
     }, 60_000);
 
     try {
-      await sendPromptRequest({
-        sessionId,
-        requestId,
-        projectId: activeProject.id,
-        prompt: trimmedInput,
-        model: activeModel
-          ? {
+        await sendPromptRequest({
+          sessionId,
+          requestId,
+          projectId: activeProject.id,
+          prompt,
+          agent: activeAgent?.name,
+          model: activeModel
+            ? {
               providerId: activeModel.providerId,
               modelId: activeModel.id,
             }
@@ -1151,13 +1293,15 @@ export default function ChatScreen() {
     activeProject,
     activeSessionId,
     trimmedInput,
+    isSessionSending,
     pendingRequestIds,
-    messages,
+    activeSessionMessages,
     createSessionMutation,
     clearPendingStreamState,
     clearRequestRecoveryTimeout,
     recoverPendingStream,
     activeModel,
+    activeAgent,
     resetStreamingContent,
   ]);
 
@@ -1563,6 +1707,11 @@ export default function ChatScreen() {
               ListFooterComponent={
                 isSessionSending ? (
                   <TypingIndicator
+                    key={
+                      (activeSessionId
+                        ? pendingRequestIds.get(activeSessionId)
+                        : creatingSessionId) ?? "typing"
+                    }
                     streamingContent={streamingContent}
                     borderColor={borderColor}
                     assistantBubble={assistantBubble}
@@ -1587,6 +1736,7 @@ export default function ChatScreen() {
         ) : null}
         <ChatComposer
           activeProject={Boolean(activeProject)}
+          activeAgentName={activeAgent?.name ?? "Default agent"}
           activeProjectName={activeProject?.name ?? "No project"}
           borderColor={borderColor}
           branchName={currentBranch}
@@ -1596,6 +1746,7 @@ export default function ChatScreen() {
           inputSelection={inputSelection}
           inputText={inputText}
           isSending={isSessionSending}
+          onPressAgent={() => setShowAgentSheet(true)}
           onPressBranch={() => setShowBranchSheet(true)}
           mentionQuery={activeMention?.query ?? ""}
           metaColor={metaColor}
@@ -1607,7 +1758,11 @@ export default function ChatScreen() {
           onSelectFileSuggestion={handleSelectFileSuggestion}
           onSend={() => void handleSend()}
           onAbort={handleAbort}
-          selectedModelName={activeModel?.name ?? "No model"}
+          selectedModelName={
+            activeModel
+              ? `${activeModel.providerName} / ${activeModel.name}`
+              : "No model"
+          }
           showMentionSuggestions={showMentionSuggestions}
           showSkillSuggestions={showSkillSuggestions}
           skillSuggestions={skillSuggestions}
@@ -1848,6 +2003,125 @@ export default function ChatScreen() {
                       style={{ color: theme.colors.onSurfaceVariant }}
                     >
                       No models found
+                    </Text>
+                  </View>
+                }
+              />
+            )}
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showAgentSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowAgentSheet(false);
+          setAgentSearchQuery("");
+        }}
+      >
+        <Pressable
+          style={styles.sheetOverlay}
+          onPress={() => {
+            setShowAgentSheet(false);
+            setAgentSearchQuery("");
+          }}
+        >
+          <View style={[styles.sheetContainer, { backgroundColor: sheetBg }]}>
+            <View style={styles.sheetHandle} />
+            <Text variant="titleMedium" style={styles.sheetTitle}>
+              Select Agent
+            </Text>
+            <View style={styles.sheetSearchContainer}>
+              <PaperTextInput
+                mode="outlined"
+                dense
+                value={agentSearchQuery}
+                onChangeText={setAgentSearchQuery}
+                placeholder="Search agents"
+                autoCapitalize="none"
+                autoCorrect={false}
+                left={<PaperTextInput.Icon icon="magnify" />}
+                right={
+                  agentSearchQuery ? (
+                    <PaperTextInput.Icon
+                      icon="close"
+                      onPress={() => setAgentSearchQuery("")}
+                    />
+                  ) : undefined
+                }
+              />
+            </View>
+            {agentsLoading ? (
+              <View style={styles.sheetLoading}>
+                <ActivityIndicator />
+              </View>
+            ) : (
+              <FlatList
+                data={sortedAgents}
+                keyExtractor={(item) => item.name}
+                style={styles.sheetList}
+                renderItem={({ item }) => {
+                  const isActiveAgent = activeAgent?.name === item.name;
+                  return (
+                    <Pressable
+                      onPress={() => {
+                        setActiveAgent(item);
+                        setShowAgentSheet(false);
+                        setAgentSearchQuery("");
+                      }}
+                      style={[
+                        styles.sheetItem,
+                        {
+                          backgroundColor: isActiveAgent
+                            ? "rgba(150,150,150,0.12)"
+                            : "transparent",
+                          borderColor,
+                        },
+                      ]}
+                    >
+                      <View style={styles.sheetItemRow}>
+                        <View
+                          style={[
+                            styles.statusDot,
+                            {
+                              backgroundColor: isActiveAgent
+                                ? "#00FF41"
+                                : "#14B8A6",
+                            },
+                          ]}
+                        />
+                        <View style={styles.sheetItemContent}>
+                          <Text
+                            variant="bodyLarge"
+                            style={{
+                              fontWeight: isActiveAgent ? "600" : "500",
+                              color: theme.colors.onSurface,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {item.name}
+                          </Text>
+                          <Text
+                            variant="bodySmall"
+                            style={{ color: metaColor, marginTop: 2 }}
+                            numberOfLines={2}
+                          >
+                            {item.description?.trim() || getAgentSubtitle(item)}
+                          </Text>
+                        </View>
+                      </View>
+                    </Pressable>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={styles.sheetEmpty}>
+                    <Text
+                      variant="bodyMedium"
+                      style={{ color: theme.colors.onSurfaceVariant }}
+                    >
+                      No agents found
                     </Text>
                   </View>
                 }

@@ -44,6 +44,8 @@ const (
 
 	EventProvidersListRequest  = "providers_list_request"
 	EventProvidersListResponse = "providers_list_response"
+	EventAgentsListRequest     = "agents_list_request"
+	EventAgentsListResponse    = "agents_list_response"
 
 	EventGitStagedFilesRequest   = "git_staged_files_request"
 	EventGitStagedFilesResponse  = "git_staged_files_response"
@@ -286,6 +288,7 @@ type SessionPromptRequest struct {
 	ProjectID string          `json:"projectId"`
 	SessionID string          `json:"sessionId"`
 	Prompt    string          `json:"prompt"`
+	Agent     string          `json:"agent,omitempty"`
 	UserID    string          `json:"userId,omitempty"`
 	Model     *agent.ModelRef `json:"model,omitempty"`
 }
@@ -388,6 +391,30 @@ type ProvidersListRequest struct {
 type ProvidersListResponse struct {
 	RequestID string            `json:"requestId"`
 	Providers []ProviderPayload `json:"providers"`
+}
+
+type AgentsListRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId,omitempty"`
+	Directory string `json:"directory,omitempty"`
+}
+
+type AgentsListResponse struct {
+	RequestID string         `json:"requestId"`
+	Agents    []AgentPayload `json:"agents"`
+}
+
+type AgentPayload struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Mode        string        `json:"mode"`
+	BuiltIn     bool          `json:"builtIn"`
+	Model       *ModelRefJSON `json:"model,omitempty"`
+}
+
+type ModelRefJSON struct {
+	ProviderID string `json:"providerID"`
+	ModelID    string `json:"modelID"`
 }
 
 type ProviderPayload struct {
