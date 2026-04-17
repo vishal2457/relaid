@@ -258,6 +258,7 @@ export default function ChatScreen() {
   const [creatingSessionId, setCreatingSessionId] = React.useState<
     string | null
   >(null);
+  const [hasActiveStreamEvent, setHasActiveStreamEvent] = React.useState(false);
   const pendingRequestIdsRef = React.useRef<Map<string, string>>(new Map());
   const activeSessionIdRef = React.useRef<string | null>(null);
   const allowSessionChangeRecoveryRef = React.useRef(false);
@@ -270,7 +271,6 @@ export default function ChatScreen() {
     applyChunk: applyStreamingChunk,
     flush: flushStreamingContent,
     reset: resetStreamingContent,
-    hasContent: hasStreamingContent,
   } = useLiveAssistantStream();
   const followUpRefreshTimeoutRef = React.useRef<ReturnType<
     typeof setTimeout
@@ -788,6 +788,7 @@ export default function ChatScreen() {
     (sessionId?: string, requestId?: string) => {
       pendingRequestIdsRef.current = new Map();
       setPendingRequestIds(new Map());
+      setHasActiveStreamEvent(false);
       setOptimisticMessage(null);
       resetStreamingContent();
       clearFollowUpRefreshTimeout();
@@ -816,6 +817,7 @@ export default function ChatScreen() {
     newPending.set(sessionId, activeStream.requestId);
     pendingRequestIdsRef.current = newPending;
     setPendingRequestIds(newPending);
+    setHasActiveStreamEvent(false);
     setOptimisticMessage(null);
     resetStreamingContent();
 
@@ -950,6 +952,7 @@ export default function ChatScreen() {
         pending.get(payload.sessionId) === payload.requestId &&
         payload.sessionId === activeSessionIdRef.current
       ) {
+        setHasActiveStreamEvent(false);
         setPendingRequestIds(new Map(pending));
       }
     },
@@ -965,6 +968,7 @@ export default function ChatScreen() {
         return;
       }
 
+      setHasActiveStreamEvent(true);
       applyStreamingChunk(payload);
     },
   );
@@ -1175,6 +1179,12 @@ export default function ChatScreen() {
     : activeSessionId
       ? pendingRequestIds.has(activeSessionId)
       : false;
+  const footerStreamingContent = hasActiveStreamEvent ? streamingContent : "";
+  const footerThinkingContent = hasActiveStreamEvent
+    ? streamingThinkingContent
+    : null;
+  const footerActivities = hasActiveStreamEvent ? streamingActivities : [];
+  const footerPhase = hasActiveStreamEvent ? streamingPhase : "thinking";
 
   const handleSend = React.useCallback(async () => {
     if (!activeProject || !trimmedInput || isSessionSending) {
@@ -1200,6 +1210,7 @@ export default function ChatScreen() {
       parts: [{ type: "text", content: prompt, durationSeconds: null }],
       createdAt: Date.now(),
     });
+    setHasActiveStreamEvent(false);
     resetStreamingContent();
     setInputText("");
     setInputSelection({ start: 0, end: 0 });
@@ -1690,17 +1701,17 @@ export default function ChatScreen() {
                 </View>
               }
               ListFooterComponent={
-                isSessionSending || hasStreamingContent ? (
+                isSessionSending || hasActiveStreamEvent ? (
                   <TypingIndicator
                     key={
                       (activeSessionId
                         ? pendingRequestIds.get(activeSessionId)
                         : creatingSessionId) ?? "typing"
                     }
-                    streamingContent={streamingContent}
-                    thinkingContent={streamingThinkingContent}
-                    activities={streamingActivities}
-                    phase={streamingPhase}
+                    streamingContent={footerStreamingContent}
+                    thinkingContent={footerThinkingContent}
+                    activities={footerActivities}
+                    phase={footerPhase}
                     borderColor={borderColor}
                     assistantBubble={assistantBubble}
                     metaColor={metaColor}

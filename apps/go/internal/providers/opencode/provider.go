@@ -23,6 +23,7 @@ type Provider struct {
 	projects     *projectService
 	providers    *providerService
 	agents       *agentService
+	serverMgr    *ServerManager
 }
 
 func New(cfg config.Config, logger *log.Logger) *Provider {
@@ -73,6 +74,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 		projects:  &projectService{sdk: sdk},
 		providers: &providerService{sdk: sdk},
 		agents:    &agentService{sdk: sdk},
+		serverMgr: serverMgr,
 	}
 }
 
@@ -105,6 +107,9 @@ func (p *Provider) SetInteractionHandler(handler acp.InteractionHandler) {
 }
 
 func (p *Provider) Shutdown(context.Context) error {
+	if p.serverMgr != nil {
+		p.serverMgr.Stop()
+	}
 	return nil
 }
 

@@ -87,6 +87,7 @@ export default function SessionMessagesScreen() {
   const [pendingRequestId, setPendingRequestId] = React.useState<string | null>(
     null,
   );
+  const [hasActiveStreamEvent, setHasActiveStreamEvent] = React.useState(false);
   const pendingRequestIdRef = React.useRef<string | null>(null);
   const {
     visibleText: streamingContent,
@@ -97,7 +98,6 @@ export default function SessionMessagesScreen() {
     applyChunk: applyStreamingChunk,
     flush: flushStreamingContent,
     reset: resetStreamingContent,
-    hasContent: hasStreamingContent,
   } = useLiveAssistantStream();
   const [optimisticMessage, setOptimisticMessage] =
     React.useState<SessionMessage | null>(null);
@@ -243,6 +243,7 @@ export default function SessionMessagesScreen() {
     (requestId?: string) => {
       pendingRequestIdRef.current = null;
       setPendingRequestId(null);
+      setHasActiveStreamEvent(false);
       setOptimisticMessage(null);
       resetStreamingContent();
       clearFollowUpRefreshTimeout();
@@ -267,6 +268,7 @@ export default function SessionMessagesScreen() {
 
     pendingRequestIdRef.current = activeStream.requestId;
     setPendingRequestId(activeStream.requestId);
+    setHasActiveStreamEvent(false);
     setOptimisticMessage(null);
     resetStreamingContent();
 
@@ -333,6 +335,7 @@ export default function SessionMessagesScreen() {
         payload.sessionId === sessionId
       ) {
         setPendingRequestId(payload.requestId);
+        setHasActiveStreamEvent(false);
       }
     };
 
@@ -344,6 +347,7 @@ export default function SessionMessagesScreen() {
         return;
       }
 
+      setHasActiveStreamEvent(true);
       applyStreamingChunk(payload);
     };
 
@@ -496,6 +500,12 @@ export default function SessionMessagesScreen() {
     (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
   const trimmedInput = inputText.trim();
   const isSending = pendingRequestId !== null;
+  const footerStreamingContent = hasActiveStreamEvent ? streamingContent : "";
+  const footerThinkingContent = hasActiveStreamEvent
+    ? streamingThinkingContent
+    : null;
+  const footerActivities = hasActiveStreamEvent ? streamingActivities : [];
+  const footerPhase = hasActiveStreamEvent ? streamingPhase : "thinking";
 
   const handleAbortSession = React.useCallback(async () => {
     if (!sessionId || !projectId || !pendingRequestId) {
@@ -538,6 +548,7 @@ export default function SessionMessagesScreen() {
     });
     setInputText("");
     setInputHeight(MIN_INPUT_HEIGHT);
+    setHasActiveStreamEvent(false);
     resetStreamingContent();
     setPendingRequestId(requestId);
     pendingRequestIdRef.current = requestId;
@@ -902,13 +913,13 @@ export default function SessionMessagesScreen() {
                 />
               }
               ListFooterComponent={
-                isSending || hasStreamingContent ? (
+                isSending || hasActiveStreamEvent ? (
                   <TypingIndicator
                     key={pendingRequestId ?? "typing"}
-                    streamingContent={streamingContent}
-                    thinkingContent={streamingThinkingContent}
-                    activities={streamingActivities}
-                    phase={streamingPhase}
+                    streamingContent={footerStreamingContent}
+                    thinkingContent={footerThinkingContent}
+                    activities={footerActivities}
+                    phase={footerPhase}
                     borderColor={borderColor}
                     assistantBubble={assistantBubble}
                     metaColor={metaColor}

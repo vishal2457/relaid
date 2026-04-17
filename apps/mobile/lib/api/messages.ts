@@ -4,8 +4,6 @@ import type {
   AssistantMessage,
   Part,
   ReasoningPart,
-  StepFinishPart,
-  StepStartPart,
   TextPart,
   ToolPart,
   SessionMessageResponse,
@@ -47,7 +45,7 @@ export interface SessionAssistantActivityItem {
 
 export interface SessionAssistantActivity {
   id: string;
-  kind: "explored" | "write" | "edit" | "shell" | "tool" | "step";
+  kind: "explored" | "write" | "edit" | "shell" | "tool";
   label: string;
   detail: string | null;
   output: string | null;
@@ -100,8 +98,6 @@ export interface SessionMessage {
   // Message summary with diffs (only for user messages)
   summary?: MessageSummary;
 }
-
-type AssistantActivityPart = ToolPart | StepStartPart | StepFinishPart;
 
 function getToolLabel(part: ToolPart): string {
   const title =
@@ -465,23 +461,6 @@ function formatExplorationSummary(parts: ToolPart[]): string {
   return summary.join(", ");
 }
 
-function getStepActivity(
-  part: StepStartPart | StepFinishPart,
-): SessionAssistantActivity {
-  return {
-    id: part.id,
-    kind: "step",
-    label: "Step",
-    detail: part.type === "step-finish" ? part.reason : "Started",
-    output: null,
-    filename: null,
-    directory: null,
-    additions: null,
-    deletions: null,
-    tool: null,
-  };
-}
-
 function getToolActivity(part: ToolPart): SessionAssistantActivity {
   if (part.tool === "write" || part.tool === "edit") {
     const pathDetails = getNormalizedPath(getToolPath(part));
@@ -559,8 +538,6 @@ function getAssistantActivities(parts: Part[]): SessionAssistantActivity[] {
 
   for (const part of parts) {
     if (part.type === "step-start" || part.type === "step-finish") {
-      flushExplorationBuffer();
-      activities.push(getStepActivity(part));
       continue;
     }
 
@@ -593,9 +570,9 @@ function getPartDurationSeconds(part: TextPart | ReasoningPart): number | null {
 function parseStreamedActivityPart(
   type: "tool" | "step",
   content: string,
-): AssistantActivityPart | null {
+): ToolPart | null {
   try {
-    const parsed = JSON.parse(content) as AssistantActivityPart;
+    const parsed = JSON.parse(content) as ToolPart;
     if (
       !parsed ||
       typeof parsed !== "object" ||
@@ -609,13 +586,6 @@ function parseStreamedActivityPart(
       return parsed;
     }
 
-    if (
-      type === "step" &&
-      (parsed.type === "step-start" || parsed.type === "step-finish")
-    ) {
-      return parsed;
-    }
-
     return null;
   } catch {
     return null;
@@ -626,11 +596,13 @@ export function adaptStreamActivity(
   type: "tool" | "step",
   content: string,
 ): SessionAssistantActivity | null {
+  if (type === "step") {
+    return null;
+  }
+
   const parsed = parseStreamedActivityPart(type, content);
   if (parsed) {
-    return parsed.type === "tool"
-      ? getToolActivity(parsed)
-      : getStepActivity(parsed);
+    return getToolActivity(parsed);
   }
 
   const detail = content.trim();
@@ -652,19 +624,6 @@ export function adaptStreamActivity(
       tool: null,
     };
   }
-
-  return {
-    id: "stream-step",
-    kind: "step",
-    label: "Step",
-    detail,
-    output: null,
-    filename: null,
-    directory: null,
-    additions: null,
-    deletions: null,
-    tool: null,
-  };
 }
 
 // Convert OpenCode MessageResponse to mobile SessionMessage
