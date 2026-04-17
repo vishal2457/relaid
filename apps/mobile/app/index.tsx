@@ -2,6 +2,7 @@ import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   Alert,
+  AppState,
   FlatList,
   Keyboard,
   Modal,
@@ -13,6 +14,7 @@ import {
   StyleSheet,
   TextInputSelectionChangeEventData,
   View,
+  type AppStateStatus,
   type FlatList as FlatListType,
   type KeyboardEvent,
 } from "react-native";
@@ -47,12 +49,11 @@ import {
   clearActiveSessionStream,
   FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
   getActiveSessionStream,
-  hasRecoveredAssistantResponse,
   isStreamingSessionStatus,
   saveActiveSessionStream,
   shouldScheduleSessionRefresh,
 } from "@/lib/active-session-stream";
-import { useBufferedStreamingText } from "@/lib/streaming-text";
+import { useLiveAssistantStream } from "@/lib/live-assistant-stream";
 import {
   useProjectFileSearch,
   useProjects,
@@ -61,17 +62,19 @@ import {
 } from "@/lib/api/projects";
 import { useProjectSkills, type Skill } from "@/lib/api/skills";
 import { useAgents, type Agent } from "@/lib/api/agents";
-import { useBranches, useSwitchBranch, type Branch } from "@/lib/api/branches";
+import { useBranches, useSwitchBranch } from "@/lib/api/branches";
 import {
   useProviders,
-  type Provider,
   type ActiveModel,
   flattenProvidersToModels,
 } from "@/lib/api/providers";
 import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
 import { queryClient } from "@/lib/query-client";
 import { showPermissionNotification } from "@/lib/permission-notifications";
-import { isAppInForeground } from "@/lib/notifications";
+import {
+  isAppInForeground,
+  showNewMessageNotification,
+} from "@/lib/notifications";
 import {
   connectSseClient,
   getSseClient,
@@ -83,8 +86,10 @@ import {
   subscribeToSse,
   type SseClient,
 } from "@/lib/sse";
-import { showNewMessageNotification } from "@/lib/notifications";
-import { AppState, type AppStateStatus } from "react-native";
+import type {
+  SessionPromptResponseEvent,
+  SessionStreamChunkEvent,
+} from "@/lib/sse/events";
 import { GitDrawer } from "@/components/GitDrawer";
 import { useGitFileStatus } from "@/lib/api/git";
 // Message queue temporarily disabled - will be re-enabled later
@@ -156,28 +161,6 @@ type SessionPromptStartedEvent = {
   requestId: string;
   projectId: string;
   sessionId: string;
-};
-
-type SessionPromptResponseEvent = {
-  requestId: string;
-  projectId: string;
-  sessionId: string;
-  success: boolean;
-  output: string;
-  error?: string;
-  exitCode: number;
-  duration: number;
-  messages?: SessionMessage[];
-};
-
-type SessionStreamChunkEvent = {
-  requestId: string;
-  projectId: string;
-  sessionId: string;
-  messageId?: string;
-  chunk: string;
-  type: "text" | "reasoning" | "tool" | "step" | "status" | "complete";
-  isComplete?: boolean;
 };
 
 type PermissionRequestEvent = PermissionRequest;
@@ -275,16 +258,20 @@ export default function ChatScreen() {
   const [creatingSessionId, setCreatingSessionId] = React.useState<
     string | null
   >(null);
+  const [hasActiveStreamEvent, setHasActiveStreamEvent] = React.useState(false);
   const pendingRequestIdsRef = React.useRef<Map<string, string>>(new Map());
   const activeSessionIdRef = React.useRef<string | null>(null);
   const allowSessionChangeRecoveryRef = React.useRef(false);
   const {
-    text: streamingContent,
-    appendChunk: appendStreamingChunk,
+    visibleText: streamingContent,
+    thinkingContent: streamingThinkingContent,
+    activities: streamingActivities,
+    phase: streamingPhase,
+    revision: streamingRevision,
+    applyChunk: applyStreamingChunk,
     flush: flushStreamingContent,
     reset: resetStreamingContent,
-  } = useBufferedStreamingText();
-  const streamingContentRef = React.useRef("");
+  } = useLiveAssistantStream();
   const followUpRefreshTimeoutRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -346,7 +333,7 @@ export default function ChatScreen() {
     };
   }, []);
 
-  const [connectionState, setConnectionState] =
+  const [, setConnectionState] =
     React.useState<ConnectionState>("disconnected");
   const sseClientRef = React.useRef<SseClient | null>(null);
   const isMountedRef = React.useRef(true);
@@ -400,15 +387,11 @@ export default function ChatScreen() {
 
   React.useEffect(() => {
     projectsRef.current = projects;
-  }, [projects]);
+  }, [projects, resetStreamingContent]);
 
   React.useEffect(() => {
     pendingRequestIdsRef.current = pendingRequestIds;
   }, [pendingRequestIds]);
-
-  React.useEffect(() => {
-    streamingContentRef.current = streamingContent;
-  }, [streamingContent]);
 
   React.useEffect(() => {
     return () => {
@@ -473,7 +456,7 @@ export default function ChatScreen() {
     return () => {
       cancelled = true;
     };
-  }, [projects]);
+  }, [projects, resetStreamingContent]);
 
   React.useEffect(() => {
     if (!hydrated) return;
@@ -511,7 +494,9 @@ export default function ChatScreen() {
           return;
         }
 
-        const matchedAgent = agents.find((agent) => agent.name === savedAgentName);
+        const matchedAgent = agents.find(
+          (agent) => agent.name === savedAgentName,
+        );
         if (matchedAgent) {
           setActiveAgent((current: Agent | null) =>
             current?.name === matchedAgent.name ? current : matchedAgent,
@@ -695,7 +680,7 @@ export default function ChatScreen() {
       return a.name.localeCompare(b.name);
     });
     return filtered;
-  }, [branches, branchSearchQuery, currentBranch]);
+  }, [branches, branchSearchQuery]);
 
   const hasScrolledToBottom = React.useRef(false);
   React.useEffect(() => {
@@ -722,7 +707,11 @@ export default function ChatScreen() {
   }, [displayedMessages.length]);
 
   React.useEffect(() => {
-    if (!streamingContent) {
+    if (
+      !streamingContent &&
+      !streamingThinkingContent &&
+      streamingActivities.length === 0
+    ) {
       return;
     }
 
@@ -736,7 +725,13 @@ export default function ChatScreen() {
         flatListRef.current?.scrollToEnd({ animated: false });
       }
     }, 120);
-  }, [isNearBottom, streamingContent]);
+  }, [
+    isNearBottom,
+    streamingActivities.length,
+    streamingContent,
+    streamingRevision,
+    streamingThinkingContent,
+  ]);
 
   const clearFollowUpRefreshTimeout = React.useCallback(() => {
     if (followUpRefreshTimeoutRef.current) {
@@ -793,6 +788,7 @@ export default function ChatScreen() {
     (sessionId?: string, requestId?: string) => {
       pendingRequestIdsRef.current = new Map();
       setPendingRequestIds(new Map());
+      setHasActiveStreamEvent(false);
       setOptimisticMessage(null);
       resetStreamingContent();
       clearFollowUpRefreshTimeout();
@@ -821,10 +817,11 @@ export default function ChatScreen() {
     newPending.set(sessionId, activeStream.requestId);
     pendingRequestIdsRef.current = newPending;
     setPendingRequestIds(newPending);
+    setHasActiveStreamEvent(false);
     setOptimisticMessage(null);
     resetStreamingContent();
 
-    const [sessionResult, messagesResult] = await Promise.allSettled([
+    const [sessionResult] = await Promise.allSettled([
       refetchActiveSession(),
       refetch(),
     ]);
@@ -833,18 +830,9 @@ export default function ChatScreen() {
       return;
     }
 
-    const recoveredMessages =
-      messagesResult.status === "fulfilled"
-        ? messagesResult.value.data
-        : undefined;
+    const recoveredStatus = sessionResult.value.data?.status;
 
-    if (
-      !isStreamingSessionStatus(sessionResult.value.data?.status) &&
-      hasRecoveredAssistantResponse(
-        recoveredMessages,
-        activeStream.baselineMessageId,
-      )
-    ) {
+    if (!isStreamingSessionStatus(recoveredStatus)) {
       flushStreamingContent();
       clearPendingStreamState(sessionId, activeStream.requestId);
     }
@@ -964,6 +952,7 @@ export default function ChatScreen() {
         pending.get(payload.sessionId) === payload.requestId &&
         payload.sessionId === activeSessionIdRef.current
       ) {
+        setHasActiveStreamEvent(false);
         setPendingRequestIds(new Map(pending));
       }
     },
@@ -979,9 +968,8 @@ export default function ChatScreen() {
         return;
       }
 
-      if (payload.type === "text") {
-        appendStreamingChunk(payload.chunk);
-      }
+      setHasActiveStreamEvent(true);
+      applyStreamingChunk(payload);
     },
   );
 
@@ -1191,6 +1179,12 @@ export default function ChatScreen() {
     : activeSessionId
       ? pendingRequestIds.has(activeSessionId)
       : false;
+  const footerStreamingContent = hasActiveStreamEvent ? streamingContent : "";
+  const footerThinkingContent = hasActiveStreamEvent
+    ? streamingThinkingContent
+    : null;
+  const footerActivities = hasActiveStreamEvent ? streamingActivities : [];
+  const footerPhase = hasActiveStreamEvent ? streamingPhase : "thinking";
 
   const handleSend = React.useCallback(async () => {
     if (!activeProject || !trimmedInput || isSessionSending) {
@@ -1216,6 +1210,7 @@ export default function ChatScreen() {
       parts: [{ type: "text", content: prompt, durationSeconds: null }],
       createdAt: Date.now(),
     });
+    setHasActiveStreamEvent(false);
     resetStreamingContent();
     setInputText("");
     setInputSelection({ start: 0, end: 0 });
@@ -1228,13 +1223,14 @@ export default function ChatScreen() {
         const session = await createSessionMutation.mutateAsync(
           activeProject.id,
         );
-        sessionId = session.id;
+        const resolvedSessionId = session.id;
+        sessionId = resolvedSessionId;
         allowSessionChangeRecoveryRef.current = false;
-        setActiveSessionId(sessionId);
+        setActiveSessionId(resolvedSessionId);
         setCreatingSessionId(null);
         setOptimisticMessage((current) =>
           current?.id === optimisticMessageId
-            ? { ...current, sessionID: sessionId }
+            ? { ...current, sessionID: resolvedSessionId }
             : current,
         );
       } catch (createError) {
@@ -1259,7 +1255,7 @@ export default function ChatScreen() {
       sessionId,
       baselineMessageId: isCreatingSession
         ? null
-        : activeSessionMessages[activeSessionMessages.length - 1]?.id ?? null,
+        : (activeSessionMessages[activeSessionMessages.length - 1]?.id ?? null),
     });
 
     clearRequestRecoveryTimeout();
@@ -1271,14 +1267,14 @@ export default function ChatScreen() {
     }, 60_000);
 
     try {
-        await sendPromptRequest({
-          sessionId,
-          requestId,
-          projectId: activeProject.id,
-          prompt,
-          agent: activeAgent?.name,
-          model: activeModel
-            ? {
+      await sendPromptRequest({
+        sessionId,
+        requestId,
+        projectId: activeProject.id,
+        prompt,
+        agent: activeAgent?.name,
+        model: activeModel
+          ? {
               providerId: activeModel.providerId,
               modelId: activeModel.id,
             }
@@ -1705,16 +1701,20 @@ export default function ChatScreen() {
                 </View>
               }
               ListFooterComponent={
-                isSessionSending ? (
+                isSessionSending || hasActiveStreamEvent ? (
                   <TypingIndicator
                     key={
                       (activeSessionId
                         ? pendingRequestIds.get(activeSessionId)
                         : creatingSessionId) ?? "typing"
                     }
-                    streamingContent={streamingContent}
+                    streamingContent={footerStreamingContent}
+                    thinkingContent={footerThinkingContent}
+                    activities={footerActivities}
+                    phase={footerPhase}
                     borderColor={borderColor}
                     assistantBubble={assistantBubble}
+                    metaColor={metaColor}
                   />
                 ) : null
               }
@@ -1758,11 +1758,7 @@ export default function ChatScreen() {
           onSelectFileSuggestion={handleSelectFileSuggestion}
           onSend={() => void handleSend()}
           onAbort={handleAbort}
-          selectedModelName={
-            activeModel
-              ? `${activeModel.providerName} / ${activeModel.name}`
-              : "No model"
-          }
+          selectedModelDisplayName={activeModel ? activeModel.name : "No model"}
           showMentionSuggestions={showMentionSuggestions}
           showSkillSuggestions={showSkillSuggestions}
           skillSuggestions={skillSuggestions}
@@ -1826,6 +1822,8 @@ export default function ChatScreen() {
                     <Pressable
                       onPress={() => {
                         if (item.id !== activeProject?.id) {
+                          activeSessionIdRef.current = null;
+                          clearPendingStreamState();
                           setActiveProject(item);
                           setActiveSessionId(null);
                           setOptimisticMessage(null);
@@ -2252,11 +2250,15 @@ export default function ChatScreen() {
         activeSessionId={activeSessionId}
         onSelectSession={(sessionId) => {
           if (sessionId === null) {
+            activeSessionIdRef.current = null;
+            clearPendingStreamState();
             setActiveSessionId(null);
             setOptimisticMessage(null);
             hasScrolledToBottom.current = false;
           } else {
+            clearRequestRecoveryTimeout();
             setActiveSessionId(sessionId);
+            activeSessionIdRef.current = sessionId;
             setOptimisticMessage(null);
             hasScrolledToBottom.current = false;
           }

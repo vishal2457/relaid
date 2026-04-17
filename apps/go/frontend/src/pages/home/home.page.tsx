@@ -4,6 +4,7 @@ import {
   EyeOff,
   Link2,
   RefreshCw,
+  Settings,
   Smartphone,
   Wifi,
   WifiOff,
@@ -18,12 +19,18 @@ import {
   DialogTitle,
 } from "../../shared/components/ui/dialog";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../../shared/components/ui/tooltip";
+import {
   useRelayHooks,
   useConnectedClients,
 } from "../../shared/api/features/relay.api";
 
 export const HomePage = () => {
   const [relayUrl, setRelayUrl] = useState("");
+  const [showConfigDialog, setShowConfigDialog] = useState(false);
   const [showQrDialog, setShowQrDialog] = useState(false);
   const [showUrl, setShowUrl] = useState(false);
   const [pairingData, setPairingData] = useState<{
@@ -65,82 +72,69 @@ export const HomePage = () => {
             Relay
           </h2>
 
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between">
             <div className={`flex items-center gap-2 text-sm ${statusColor}`}>
               <StatusIcon className="h-4 w-4" />
               {statusLabel}
             </div>
-            {storedUrl && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={pingRelay}
-                disabled={isPinging}
-              >
-                <RefreshCw
-                  className={`mr-1.5 h-3.5 w-3.5 ${isPinging ? "animate-spin" : ""}`}
-                />
-                Ping
-              </Button>
-            )}
-          </div>
 
-          <Input
-            placeholder="https://relay.example.com"
-            type={showUrl ? "text" : "password"}
-            value={relayUrl || storedUrl || ""}
-            onChange={(e) => setRelayUrl(e.target.value)}
-            hint="Relay server URL for remote access"
-            suffixButton={
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="border border-l-0 border-input rounded-l-none hover:bg-transparent h-9 px-3"
-                onClick={() => setShowUrl(!showUrl)}
-              >
-                {showUrl ? (
-                  <EyeOff className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <Eye className="h-4 w-4 text-muted-foreground" />
-                )}
-              </Button>
-            }
-          />
-
-          <div className="flex gap-2 mt-3">
-            <Button
-              className="flex-1"
-              onClick={() => {
-                const url = relayUrl || storedUrl;
-                if (url) saveUrl(url);
-              }}
-              disabled={!relayUrl && !storedUrl}
-            >
-              {isSaving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
-              Save
-            </Button>
-
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (storedUrl) {
-                  createPairing().then((data) => {
-                    if (data) {
-                      setPairingData({
-                        pairingUrl: data.pairingUrl,
-                        expiresAt: data.expiresAt,
-                      });
-                      setShowQrDialog(true);
-                    }
-                  });
-                }
-              }}
-              disabled={!storedUrl || isCreating}
-            >
-              <Link2 className="mr-2 h-4 w-4" />
-              Pair
-            </Button>
+            <div className="inline-flex rounded-md shadow-sm" role="group">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-r-none border-r-0"
+                    onClick={pingRelay}
+                    disabled={!storedUrl || isPinging}
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${isPinging ? "animate-spin" : ""}`}
+                    />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Ping</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-none"
+                    onClick={() => setShowConfigDialog(true)}
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Configure</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-l-none border-l-0"
+                    onClick={() => {
+                      if (storedUrl) {
+                        createPairing().then((data) => {
+                          if (data) {
+                            setPairingData({
+                              pairingUrl: data.pairingUrl,
+                              expiresAt: data.expiresAt,
+                            });
+                            setShowQrDialog(true);
+                          }
+                        });
+                      }
+                    }}
+                    disabled={!storedUrl || isCreating}
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Pair</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
         </section>
 
@@ -180,6 +174,54 @@ export const HomePage = () => {
           </section>
         )}
       </div>
+
+      <Dialog open={showConfigDialog} onOpenChange={setShowConfigDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Configure Relay</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <Input
+              placeholder="https://relay.example.com"
+              type={showUrl ? "text" : "password"}
+              value={relayUrl || storedUrl || ""}
+              onChange={(e) => setRelayUrl(e.target.value)}
+              hint="Relay server URL for remote access"
+              suffixButton={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="border border-l-0 border-input rounded-l-none hover:bg-transparent h-9 px-3"
+                  onClick={() => setShowUrl(!showUrl)}
+                >
+                  {showUrl ? (
+                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              }
+            />
+
+            <Button
+              className="w-full"
+              onClick={() => {
+                const url = relayUrl || storedUrl;
+                if (url) {
+                  saveUrl(url);
+                  setShowConfigDialog(false);
+                }
+              }}
+              disabled={!relayUrl && !storedUrl}
+            >
+              {isSaving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showQrDialog} onOpenChange={setShowQrDialog}>
         <DialogContent className="sm:max-w-sm">

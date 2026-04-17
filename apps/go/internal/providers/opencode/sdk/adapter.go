@@ -17,12 +17,12 @@ import (
 )
 
 type Adapter struct {
+	mu        sync.Mutex
 	client    *opencode.Client
 	http      *httpClient
+	baseURL   string
 	cwd       string
 	lazySetup func() (string, error)
-	initOnce  sync.Once
-	initErr   error
 }
 
 func New(baseURL, cwd string) *Adapter {
@@ -32,9 +32,10 @@ func New(baseURL, cwd string) *Adapter {
 	}
 
 	return &Adapter{
-		client: opencode.NewClient(opts...),
-		http:   newHTTPClient(baseURL),
-		cwd:    cwd,
+		client:  opencode.NewClient(opts...),
+		http:    newHTTPClient(baseURL),
+		baseURL: baseURL,
+		cwd:     cwd,
 	}
 }
 
@@ -45,31 +46,38 @@ func NewLazy(cwd string, resolveURL func() (string, error)) *Adapter {
 	}
 }
 
-func (a *Adapter) ensureClient() error {
-	if a.client != nil {
-		return nil
-	}
+func (a *Adapter) ensureClient() (*opencode.Client, *httpClient, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	if a.lazySetup == nil {
-		return fmt.Errorf("opencode SDK client not configured")
-	}
-	a.initOnce.Do(func() {
-		baseURL, err := a.lazySetup()
-		if err != nil {
-			a.initErr = fmt.Errorf("start opencode server: %w", err)
-			return
+		if a.client == nil || a.http == nil {
+			return nil, nil, fmt.Errorf("opencode SDK client not configured")
 		}
+		return a.client, a.http, nil
+	}
+
+	baseURL, err := a.lazySetup()
+	if err != nil {
+		return nil, nil, fmt.Errorf("start opencode server: %w", err)
+	}
+
+	if a.client == nil || a.http == nil || a.baseURL != baseURL {
 		opts := []option.RequestOption{option.WithBaseURL(baseURL)}
 		a.client = opencode.NewClient(opts...)
 		a.http = newHTTPClient(baseURL)
-	})
-	return a.initErr
+		a.baseURL = baseURL
+	}
+
+	return a.client, a.http, nil
 }
 
 func (a *Adapter) ListProjects(ctx context.Context) ([]agent.Project, error) {
-	if err := a.ensureClient(); err != nil {
+	client, _, err := a.ensureClient()
+	if err != nil {
 		return nil, err
 	}
-	projects, err := a.client.Project.List(ctx, opencode.ProjectListParams{
+	projects, err := client.Project.List(ctx, opencode.ProjectListParams{
 		Directory: opencode.F(a.cwd),
 	})
 	if err != nil {
@@ -98,10 +106,11 @@ func (a *Adapter) GetProject(ctx context.Context, projectID string) (*agent.Proj
 }
 
 func (a *Adapter) GetSession(ctx context.Context, sessionID string) (*agent.Session, error) {
-	if err := a.ensureClient(); err != nil {
+	client, _, err := a.ensureClient()
+	if err != nil {
 		return nil, err
 	}
-	session, err := a.client.Session.Get(ctx, sessionID, opencode.SessionGetParams{})
+	session, err := client.Session.Get(ctx, sessionID, opencode.SessionGetParams{})
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +119,8 @@ func (a *Adapter) GetSession(ctx context.Context, sessionID string) (*agent.Sess
 }
 
 func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limit int) ([]agent.SessionMessagesResponse, error) {
-	if err := a.ensureClient(); err != nil {
+	_, httpClient, err := a.ensureClient()
+	if err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
@@ -125,7 +135,7 @@ func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limi
 		return []agent.SessionMessagesResponse{}, nil
 	}
 
-	messages, err := a.http.GetSessionMessages(ctx, sessionID, session.Directory, limit)
+	messages, err := httpClient.GetSessionMessages(ctx, sessionID, session.Directory, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +150,8 @@ func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limi
 }
 
 func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID string) ([]agent.FileDiff, error) {
-	if err := a.ensureClient(); err != nil {
+	client, _, err := a.ensureClient()
+	if err != nil {
 		return nil, err
 	}
 	session, err := a.GetSession(ctx, sessionID)
@@ -165,7 +176,7 @@ func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID strin
 		Deletions int    `json:"deletions"`
 		Patch     string `json:"patch"`
 	}
-	if err := a.client.Get(ctx, "session/"+sessionID+"/diff?"+query.Encode(), nil, &diffs); err != nil {
+	if err := client.Get(ctx, "session/"+sessionID+"/diff?"+query.Encode(), nil, &diffs); err != nil {
 		return nil, err
 	}
 
@@ -184,10 +195,11 @@ func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID strin
 }
 
 func (a *Adapter) ListProviders(ctx context.Context) ([]agent.Provider, error) {
-	if err := a.ensureClient(); err != nil {
+	client, _, err := a.ensureClient()
+	if err != nil {
 		return nil, err
 	}
-	response, err := a.client.App.Providers(ctx, opencode.AppProvidersParams{
+	response, err := client.App.Providers(ctx, opencode.AppProvidersParams{
 		Directory: opencode.F(a.cwd),
 	})
 	if err != nil {
@@ -222,7 +234,8 @@ func (a *Adapter) ListProviders(ctx context.Context) ([]agent.Provider, error) {
 }
 
 func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.AgentConfig, error) {
-	if err := a.ensureClient(); err != nil {
+	_, httpClient, err := a.ensureClient()
+	if err != nil {
 		return nil, err
 	}
 
@@ -241,7 +254,7 @@ func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.Age
 			ModelID    string `json:"modelID"`
 		} `json:"model"`
 	}
-	if err := a.http.get(ctx, "agent", query, &response); err != nil {
+	if err := httpClient.get(ctx, "agent", query, &response); err != nil {
 		return nil, err
 	}
 
@@ -322,7 +335,8 @@ func mapSession(session opencode.Session) agent.Session {
 }
 
 func (a *Adapter) ListSessions(ctx context.Context, directory string) ([]agent.Session, error) {
-	if err := a.ensureClient(); err != nil {
+	client, _, err := a.ensureClient()
+	if err != nil {
 		return nil, err
 	}
 
@@ -331,7 +345,7 @@ func (a *Adapter) ListSessions(ctx context.Context, directory string) ([]agent.S
 		params.Directory = opencode.F(directory)
 	}
 
-	sessions, err := a.client.Session.List(ctx, params)
+	sessions, err := client.Session.List(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +391,8 @@ func (a *Adapter) EnsureProjectDirectory(ctx context.Context, projectID, working
 }
 
 func (a *Adapter) SearchFiles(ctx context.Context, projectID string, query string, limit int) ([]agent.FileMatch, error) {
-	if err := a.ensureClient(); err != nil {
+	client, _, err := a.ensureClient()
+	if err != nil {
 		return nil, err
 	}
 
@@ -391,7 +406,7 @@ func (a *Adapter) SearchFiles(ctx context.Context, projectID string, query strin
 		Directory: opencode.F(worktree),
 	}
 
-	paths, err := a.client.Find.Files(ctx, params)
+	paths, err := client.Find.Files(ctx, params)
 	if err != nil {
 		return nil, err
 	}

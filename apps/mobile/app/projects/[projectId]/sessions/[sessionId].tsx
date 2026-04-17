@@ -32,7 +32,6 @@ import {
   clearActiveSessionStream,
   FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
   getActiveSessionStream,
-  hasRecoveredAssistantResponse,
   isStreamingSessionStatus,
   saveActiveSessionStream,
   shouldScheduleSessionRefresh,
@@ -40,7 +39,7 @@ import {
 import { queryClient } from "@/lib/query-client";
 import { showPermissionNotification } from "@/lib/permission-notifications";
 import { isAppInForeground } from "@/lib/notifications";
-import { useBufferedStreamingText } from "@/lib/streaming-text";
+import { useLiveAssistantStream } from "@/lib/live-assistant-stream";
 import {
   connectSseClient,
   getSseClient,
@@ -50,99 +49,18 @@ import {
   sendQuestionResponse,
   subscribeToSse,
 } from "@/lib/sse";
+import type {
+  SessionPromptResponseEvent,
+  SessionStreamChunkEvent,
+} from "@/lib/sse/events";
 import {
   PermissionCard,
   QuestionCard,
   type PermissionRequest,
   type QuestionRequest,
 } from "@/components/PermissionCard";
-import { MessageRow } from "@/components/Message";
+import { MessageRow, TypingIndicator } from "@/components/Message";
 import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
-
-type TextSegment = {
-  type: "normal" | "bold" | "code";
-  content: string;
-};
-
-const parseFormattedText = (text: string): TextSegment[] => {
-  const segments: TextSegment[] = [];
-  let remaining = text;
-
-  while (remaining.length > 0) {
-    const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
-    const codeMatch = remaining.match(/`([^`]+)`/);
-
-    const nextBold = boldMatch ? boldMatch.index! : Infinity;
-    const nextCode = codeMatch ? codeMatch.index! : Infinity;
-
-    if (nextBold === Infinity && nextCode === Infinity) {
-      segments.push({ type: "normal", content: remaining });
-      break;
-    }
-
-    const nextMatch = Math.min(nextBold, nextCode);
-
-    if (nextMatch > 0) {
-      segments.push({ type: "normal", content: remaining.slice(0, nextMatch) });
-    }
-
-    if (nextBold < nextCode && boldMatch) {
-      segments.push({ type: "bold", content: boldMatch[1] });
-      remaining = remaining.slice(nextBold + boldMatch[0].length);
-    } else if (codeMatch) {
-      segments.push({ type: "code", content: codeMatch[1] });
-      remaining = remaining.slice(nextCode + codeMatch[0].length);
-    }
-  }
-
-  return segments;
-};
-
-const BOLD_COLOR = "#F97316";
-const CODE_COLOR = "#22C55E";
-
-const FormattedText = ({
-  text,
-  baseStyle,
-}: {
-  text: string;
-  baseStyle: object;
-}) => {
-  const segments = parseFormattedText(text);
-
-  return (
-    <Text style={baseStyle}>
-      {segments.map((segment, index) => {
-        if (segment.type === "bold") {
-          return (
-            <Text key={index} style={{ fontWeight: "bold", color: BOLD_COLOR }}>
-              {segment.content}
-            </Text>
-          );
-        }
-        if (segment.type === "code") {
-          return (
-            <Text
-              key={index}
-              style={{ color: CODE_COLOR, fontFamily: "monospace" }}
-            >
-              {segment.content}
-            </Text>
-          );
-        }
-        return <Text key={index}>{segment.content}</Text>;
-      })}
-    </Text>
-  );
-};
-
-const formatDateTime = (value: string | number | null | undefined) => {
-  if (!value) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-};
 
 const MIN_INPUT_HEIGHT = 44;
 const MAX_INPUT_HEIGHT = 150;
@@ -156,53 +74,8 @@ type SessionPromptStartedEvent = {
   sessionId: string;
 };
 
-type SessionPromptResponseEvent = {
-  requestId: string;
-  projectId: string;
-  sessionId: string;
-  success: boolean;
-  output: string;
-  error?: string;
-  exitCode: number;
-  duration: number;
-  messages?: SessionMessage[];
-};
-
-type SessionStreamChunkEvent = {
-  requestId: string;
-  projectId: string;
-  sessionId: string;
-  messageId?: string;
-  chunk: string;
-  type: "text" | "reasoning" | "tool" | "step" | "status" | "complete";
-  isComplete?: boolean;
-};
-
-type PermissionRequestEvent = {
-  requestId: string;
-  projectId: string;
-  sessionId: string;
-  jobId: string;
-  threadId: string;
-  permission: string;
-  patterns: string[];
-  metadata: Record<string, unknown>;
-};
-
-type QuestionRequestEvent = {
-  requestId: string;
-  projectId: string;
-  sessionId: string;
-  jobId: string;
-  threadId: string;
-  questions: Array<{
-    header: string;
-    question: string;
-    options: Array<{ label: string; description: string }>;
-    multiple?: boolean;
-    custom?: boolean;
-  }>;
-};
+type PermissionRequestEvent = PermissionRequest;
+type QuestionRequestEvent = QuestionRequest;
 
 export default function SessionMessagesScreen() {
   const theme = useTheme();
@@ -214,13 +87,18 @@ export default function SessionMessagesScreen() {
   const [pendingRequestId, setPendingRequestId] = React.useState<string | null>(
     null,
   );
+  const [hasActiveStreamEvent, setHasActiveStreamEvent] = React.useState(false);
   const pendingRequestIdRef = React.useRef<string | null>(null);
   const {
-    text: streamingContent,
-    appendChunk: appendStreamingChunk,
+    visibleText: streamingContent,
+    thinkingContent: streamingThinkingContent,
+    activities: streamingActivities,
+    phase: streamingPhase,
+    revision: streamingRevision,
+    applyChunk: applyStreamingChunk,
     flush: flushStreamingContent,
     reset: resetStreamingContent,
-  } = useBufferedStreamingText();
+  } = useLiveAssistantStream();
   const [optimisticMessage, setOptimisticMessage] =
     React.useState<SessionMessage | null>(null);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
@@ -307,7 +185,11 @@ export default function SessionMessagesScreen() {
   }, [displayedMessages.length]);
 
   React.useEffect(() => {
-    if (!streamingContent) {
+    if (
+      !streamingContent &&
+      !streamingThinkingContent &&
+      streamingActivities.length === 0
+    ) {
       return;
     }
 
@@ -319,7 +201,12 @@ export default function SessionMessagesScreen() {
       streamScrollTimeoutRef.current = null;
       flatListRef.current?.scrollToEnd({ animated: false });
     }, 120);
-  }, [streamingContent]);
+  }, [
+    streamingActivities.length,
+    streamingContent,
+    streamingRevision,
+    streamingThinkingContent,
+  ]);
 
   React.useEffect(() => {
     pendingRequestIdRef.current = pendingRequestId;
@@ -356,6 +243,7 @@ export default function SessionMessagesScreen() {
     (requestId?: string) => {
       pendingRequestIdRef.current = null;
       setPendingRequestId(null);
+      setHasActiveStreamEvent(false);
       setOptimisticMessage(null);
       resetStreamingContent();
       clearFollowUpRefreshTimeout();
@@ -380,10 +268,11 @@ export default function SessionMessagesScreen() {
 
     pendingRequestIdRef.current = activeStream.requestId;
     setPendingRequestId(activeStream.requestId);
+    setHasActiveStreamEvent(false);
     setOptimisticMessage(null);
     resetStreamingContent();
 
-    const [sessionResult, messagesResult] = await Promise.allSettled([
+    const [sessionResult] = await Promise.allSettled([
       refetchSession(),
       refetch(),
     ]);
@@ -392,18 +281,9 @@ export default function SessionMessagesScreen() {
       return;
     }
 
-    const recoveredMessages =
-      messagesResult.status === "fulfilled"
-        ? messagesResult.value.data
-        : undefined;
+    const recoveredStatus = sessionResult.value.data?.status;
 
-    if (
-      !isStreamingSessionStatus(sessionResult.value.data?.status) &&
-      hasRecoveredAssistantResponse(
-        recoveredMessages,
-        activeStream.baselineMessageId,
-      )
-    ) {
+    if (!isStreamingSessionStatus(recoveredStatus)) {
       flushStreamingContent();
       clearPendingStreamState(activeStream.requestId);
     }
@@ -455,6 +335,7 @@ export default function SessionMessagesScreen() {
         payload.sessionId === sessionId
       ) {
         setPendingRequestId(payload.requestId);
+        setHasActiveStreamEvent(false);
       }
     };
 
@@ -466,9 +347,8 @@ export default function SessionMessagesScreen() {
         return;
       }
 
-      if (payload.type === "text") {
-        appendStreamingChunk(payload.chunk);
-      }
+      setHasActiveStreamEvent(true);
+      applyStreamingChunk(payload);
     };
 
     const handlePromptResponse = (payload: SessionPromptResponseEvent) => {
@@ -595,7 +475,9 @@ export default function SessionMessagesScreen() {
       unsubscribe();
     };
   }, [
+    applyStreamingChunk,
     clearPendingStreamState,
+    flushStreamingContent,
     projectId,
     recoverPendingStream,
     refreshSessionSnapshot,
@@ -618,39 +500,12 @@ export default function SessionMessagesScreen() {
     (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
   const trimmedInput = inputText.trim();
   const isSending = pendingRequestId !== null;
-
-  const TypingIndicator = () => (
-    <View style={[styles.messageRow, styles.messageRowLeft]}>
-      <View
-        style={[
-          styles.messageBubble,
-          {
-            backgroundColor: assistantBubble,
-            borderColor,
-            alignSelf: "flex-start",
-          },
-        ]}
-      >
-        {streamingContent ? (
-          <FormattedText
-            text={streamingContent}
-            baseStyle={[styles.messageText, { color: theme.colors.onSurface }]}
-          />
-        ) : (
-          <View style={styles.typingIndicator}>
-            <View style={styles.typingDots}>
-              {[0, 1, 2].map((i) => (
-                <View
-                  key={i}
-                  style={[styles.typingDot, { backgroundColor: metaColor }]}
-                />
-              ))}
-            </View>
-          </View>
-        )}
-      </View>
-    </View>
-  );
+  const footerStreamingContent = hasActiveStreamEvent ? streamingContent : "";
+  const footerThinkingContent = hasActiveStreamEvent
+    ? streamingThinkingContent
+    : null;
+  const footerActivities = hasActiveStreamEvent ? streamingActivities : [];
+  const footerPhase = hasActiveStreamEvent ? streamingPhase : "thinking";
 
   const handleAbortSession = React.useCallback(async () => {
     if (!sessionId || !projectId || !pendingRequestId) {
@@ -693,6 +548,7 @@ export default function SessionMessagesScreen() {
     });
     setInputText("");
     setInputHeight(MIN_INPUT_HEIGHT);
+    setHasActiveStreamEvent(false);
     resetStreamingContent();
     setPendingRequestId(requestId);
     pendingRequestIdRef.current = requestId;
@@ -1057,7 +913,18 @@ export default function SessionMessagesScreen() {
                 />
               }
               ListFooterComponent={
-                isSending ? <TypingIndicator key={pendingRequestId ?? "typing"} /> : null
+                isSending || hasActiveStreamEvent ? (
+                  <TypingIndicator
+                    key={pendingRequestId ?? "typing"}
+                    streamingContent={footerStreamingContent}
+                    thinkingContent={footerThinkingContent}
+                    activities={footerActivities}
+                    phase={footerPhase}
+                    borderColor={borderColor}
+                    assistantBubble={assistantBubble}
+                    metaColor={metaColor}
+                  />
+                ) : null
               }
             />
           )}

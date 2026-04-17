@@ -84,7 +84,7 @@ type ChatComposerProps = {
   onAbort?: () => void;
   onPressModel: () => void;
   onPressProject: () => void;
-  selectedModelName: string;
+  selectedModelDisplayName: string;
   showMentionSuggestions: boolean;
   showSkillSuggestions: boolean;
   skillSuggestions?: Skill[];
@@ -117,7 +117,7 @@ export function ChatComposer({
   onAbort,
   onPressModel,
   onPressProject,
-  selectedModelName,
+  selectedModelDisplayName,
   showMentionSuggestions,
   showSkillSuggestions,
   skillSuggestions,
@@ -407,7 +407,7 @@ export function ChatComposer({
                 numberOfLines={1}
                 ellipsizeMode="tail"
               >
-                {selectedModelName}
+                {selectedModelDisplayName}
               </Text>
             </Pressable>
             <Pressable
@@ -476,13 +476,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   metaRow: {
-    flex: 1,
     flexDirection: "row",
     gap: 0,
     marginRight: 12,
+    flexShrink: 1,
+    overflow: "hidden",
   },
   metaButton: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
@@ -490,6 +490,8 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     borderWidth: 1,
     gap: 6,
+    maxWidth: 200,
+    flexShrink: 1,
   },
   metaButtonLeft: {
     borderTopLeftRadius: 8,
@@ -518,7 +520,7 @@ const styles = StyleSheet.create({
   },
   metaButtonText: {
     fontSize: 12,
-    flex: 1,
+    flexShrink: 1,
   },
   mentionEmptyState: {
     paddingHorizontal: 12,

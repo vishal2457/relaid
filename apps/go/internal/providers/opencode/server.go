@@ -45,7 +45,7 @@ func (sm *ServerManager) Start(ctx context.Context) (string, error) {
 
 	sm.logger.Printf("opencode: starting server on port %d", port)
 
-	cmd := exec.CommandContext(ctx, sm.bin, "serve",
+	cmd := exec.Command(sm.bin, "serve",
 		"--port", fmt.Sprintf("%d", port),
 		"--hostname", "127.0.0.1",
 	)
@@ -82,7 +82,22 @@ func (sm *ServerManager) Start(ctx context.Context) (string, error) {
 	}()
 
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
-	if err := sm.waitHealthy(serverCtx, url); err != nil {
+	waitCtx := serverCtx
+	if ctx != nil {
+		var stopWaiting context.CancelFunc
+		waitCtx, stopWaiting = context.WithCancel(serverCtx)
+		go func() {
+			select {
+			case <-ctx.Done():
+				stopWaiting()
+			case <-serverCtx.Done():
+				stopWaiting()
+			}
+		}()
+		defer stopWaiting()
+	}
+
+	if err := sm.waitHealthy(waitCtx, url); err != nil {
 		sm.stopLocked()
 		return "", fmt.Errorf("server health check: %w", err)
 	}
