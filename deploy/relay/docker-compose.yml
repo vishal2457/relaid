@@ -1,0 +1,16 @@
+services:
+  relay:
+    container_name: relaid-relay
+    image: ${RELAY_IMAGE}
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${RELAY_PORT:-3001}:3001"
+    volumes:
+      - relay-db:/data
+      - relay-logs:/logs
+
+volumes:
+  relay-db:
+  relay-logs:

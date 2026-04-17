@@ -213,73 +213,16 @@ func (s *Service) GetFileStatusLists() Result[StatusLists] {
 		branchName = head.Name().Short()
 	}
 
-	// Use native git status --porcelain instead of go-git's Status()
-	// go-git's Status() can hang indefinitely in certain scenarios
-	out, err := runGit(s.cwd, "status", "--porcelain", "-u")
+	// Use native git status porcelain output instead of go-git's Status().
+	// The NUL-delimited format avoids path quoting issues and handles renames
+	// consistently even when file names contain spaces or special characters.
+	out, err := runGit(s.cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		s.handleError("getFileStatusLists", err)
 		return fail[StatusLists](err.Error())
 	}
 
-	var staged, unstaged []FileWithStatus
-
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		if len(line) < 3 {
-			continue
-		}
-
-		// Porcelain format: XY PATH or XY ORIG_PATH -> PATH for renames
-		// X = index/staging status, Y = worktree/unstaged status
-		indexStatus := line[0]    // Staging status (column 1)
-		worktreeStatus := line[1] // Worktree status (column 2)
-		path := strings.TrimSpace(line[2:])
-
-		// Handle rename/copy format: XY ORIG_PATH -> PATH
-		if indexStatus == 'R' || indexStatus == 'C' {
-			parts := strings.Split(path, " -> ")
-			if len(parts) == 2 {
-				path = strings.TrimSpace(parts[1])
-			}
-		}
-
-		// Map index status codes (staged changes) - only if not a space (unmodified)
-		// Note: A file can have BOTH staged and unstaged changes (e.g., "MM")
-		switch indexStatus {
-		case 'A':
-			staged = append(staged, FileWithStatus{Path: path, Status: "added"})
-		case 'M':
-			staged = append(staged, FileWithStatus{Path: path, Status: "modified"})
-		case 'D':
-			staged = append(staged, FileWithStatus{Path: path, Status: "deleted"})
-		case 'R':
-			staged = append(staged, FileWithStatus{Path: path, Status: "renamed"})
-		case 'C':
-			staged = append(staged, FileWithStatus{Path: path, Status: "copied"})
-		case 'U':
-			staged = append(staged, FileWithStatus{Path: path, Status: "unmerged"})
-		}
-
-		// Map worktree status codes (unstaged changes)
-		// These are independent of staged status - a file can be in both lists
-		switch worktreeStatus {
-		case 'M':
-			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "modified"})
-		case 'D':
-			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "deleted"})
-		case 'A':
-			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "added"})
-		case 'U':
-			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "unmerged"})
-		case '?':
-			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "untracked"})
-		case '!':
-			unstaged = append(unstaged, FileWithStatus{Path: path, Status: "ignored"})
-		}
-	}
+	staged, unstaged := parseStatusPorcelainV1Z(out)
 
 	return ok(StatusLists{
 		Staged:   staged,

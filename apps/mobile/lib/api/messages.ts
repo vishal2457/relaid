@@ -2,6 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import baseApi from "../axios/base";
 import type {
   AssistantMessage,
+  Part,
+  ReasoningPart,
+  StepFinishPart,
+  StepStartPart,
   TextPart,
   ToolPart,
   SessionMessageResponse,
@@ -43,7 +47,7 @@ export interface SessionAssistantActivityItem {
 
 export interface SessionAssistantActivity {
   id: string;
-  kind: "explored" | "write" | "edit" | "shell" | "tool";
+  kind: "explored" | "write" | "edit" | "shell" | "tool" | "step";
   label: string;
   detail: string | null;
   output: string | null;
@@ -97,6 +101,8 @@ export interface SessionMessage {
   summary?: MessageSummary;
 }
 
+type AssistantActivityPart = ToolPart | StepStartPart | StepFinishPart;
+
 function getToolLabel(part: ToolPart): string {
   const title =
     "title" in part.state && typeof part.state.title === "string"
@@ -124,6 +130,34 @@ function getToolErrorSummary(toolParts: ToolPart[]): string {
       : "";
 
   return error ? `${getToolLabel(failedTool)} failed: ${error}` : "";
+}
+
+function getReasoningState(reasoningParts: ReasoningPart[]): {
+  thinkingContent: string | null;
+  thinkingDurationSeconds: number | null;
+} {
+  const content = reasoningParts
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+
+  const durations = reasoningParts
+    .map((part) =>
+      typeof part.time?.end === "number"
+        ? part.time.end - part.time.start
+        : null,
+    )
+    .filter(
+      (duration): duration is number => duration !== null && duration >= 0,
+    );
+
+  return {
+    thinkingContent: content || null,
+    thinkingDurationSeconds:
+      durations.length > 0
+        ? durations.reduce((total, duration) => total + duration, 0)
+        : null,
+  };
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -431,9 +465,74 @@ function formatExplorationSummary(parts: ToolPart[]): string {
   return summary.join(", ");
 }
 
-function getAssistantActivities(
-  toolParts: ToolPart[],
-): SessionAssistantActivity[] {
+function getStepActivity(
+  part: StepStartPart | StepFinishPart,
+): SessionAssistantActivity {
+  return {
+    id: part.id,
+    kind: "step",
+    label: "Step",
+    detail: part.type === "step-finish" ? part.reason : "Started",
+    output: null,
+    filename: null,
+    directory: null,
+    additions: null,
+    deletions: null,
+    tool: null,
+  };
+}
+
+function getToolActivity(part: ToolPart): SessionAssistantActivity {
+  if (part.tool === "write" || part.tool === "edit") {
+    const pathDetails = getNormalizedPath(getToolPath(part));
+    const diffCounts = part.tool === "edit" ? getEditDiffCounts(part) : null;
+
+    return {
+      id: part.id,
+      kind: part.tool,
+      label: TOOL_LABELS[part.tool] ?? getToolLabel(part),
+      detail: null,
+      output: null,
+      filename: pathDetails.filename,
+      directory: pathDetails.directory,
+      additions: diffCounts?.additions ?? null,
+      deletions: diffCounts?.deletions ?? null,
+      tool: part.tool,
+      oldContent: diffCounts?.oldContent ?? null,
+      newContent: diffCounts?.newContent ?? null,
+    };
+  }
+
+  if (part.tool === "bash" || part.tool === "shell") {
+    return {
+      id: part.id,
+      kind: "shell",
+      label: "Shell",
+      detail: getShellDetail(part),
+      output: getToolOutput(part),
+      filename: null,
+      directory: null,
+      additions: null,
+      deletions: null,
+      tool: part.tool,
+    };
+  }
+
+  return {
+    id: part.id,
+    kind: "tool",
+    label: TOOL_LABELS[part.tool] ?? getToolLabel(part),
+    detail: getGenericToolDetail(part),
+    output: null,
+    filename: null,
+    directory: null,
+    additions: null,
+    deletions: null,
+    tool: part.tool,
+  };
+}
+
+function getAssistantActivities(parts: Part[]): SessionAssistantActivity[] {
   const activities: SessionAssistantActivity[] = [];
   const explorationBuffer: ToolPart[] = [];
 
@@ -458,63 +557,24 @@ function getAssistantActivities(
     explorationBuffer.length = 0;
   };
 
-  for (const part of toolParts) {
+  for (const part of parts) {
+    if (part.type === "step-start" || part.type === "step-finish") {
+      flushExplorationBuffer();
+      activities.push(getStepActivity(part));
+      continue;
+    }
+
+    if (part.type !== "tool") {
+      continue;
+    }
+
     if (EXPLORATION_TOOLS.has(part.tool)) {
       explorationBuffer.push(part);
       continue;
     }
 
     flushExplorationBuffer();
-
-    if (part.tool === "write" || part.tool === "edit") {
-      const pathDetails = getNormalizedPath(getToolPath(part));
-      const diffCounts = part.tool === "edit" ? getEditDiffCounts(part) : null;
-
-      activities.push({
-        id: part.id,
-        kind: part.tool,
-        label: TOOL_LABELS[part.tool] ?? getToolLabel(part),
-        detail: null,
-        output: null,
-        filename: pathDetails.filename,
-        directory: pathDetails.directory,
-        additions: diffCounts?.additions ?? null,
-        deletions: diffCounts?.deletions ?? null,
-        tool: part.tool,
-        oldContent: diffCounts?.oldContent ?? null,
-        newContent: diffCounts?.newContent ?? null,
-      });
-      continue;
-    }
-
-    if (part.tool === "bash" || part.tool === "shell") {
-      activities.push({
-        id: part.id,
-        kind: "shell",
-        label: "Shell",
-        detail: getShellDetail(part),
-        output: getToolOutput(part),
-        filename: null,
-        directory: null,
-        additions: null,
-        deletions: null,
-        tool: part.tool,
-      });
-      continue;
-    }
-
-    activities.push({
-      id: part.id,
-      kind: "tool",
-      label: TOOL_LABELS[part.tool] ?? getToolLabel(part),
-      detail: getGenericToolDetail(part),
-      output: null,
-      filename: null,
-      directory: null,
-      additions: null,
-      deletions: null,
-      tool: part.tool,
-    });
+    activities.push(getToolActivity(part));
   }
 
   flushExplorationBuffer();
@@ -522,47 +582,159 @@ function getAssistantActivities(
   return activities;
 }
 
+function getPartDurationSeconds(part: TextPart | ReasoningPart): number | null {
+  if (typeof part.time?.end !== "number") {
+    return null;
+  }
+
+  return part.time.end - part.time.start;
+}
+
+function parseStreamedActivityPart(
+  type: "tool" | "step",
+  content: string,
+): AssistantActivityPart | null {
+  try {
+    const parsed = JSON.parse(content) as AssistantActivityPart;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.id !== "string" ||
+      typeof parsed.type !== "string"
+    ) {
+      return null;
+    }
+
+    if (type === "tool" && parsed.type === "tool") {
+      return parsed;
+    }
+
+    if (
+      type === "step" &&
+      (parsed.type === "step-start" || parsed.type === "step-finish")
+    ) {
+      return parsed;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function adaptStreamActivity(
+  type: "tool" | "step",
+  content: string,
+): SessionAssistantActivity | null {
+  const parsed = parseStreamedActivityPart(type, content);
+  if (parsed) {
+    return parsed.type === "tool"
+      ? getToolActivity(parsed)
+      : getStepActivity(parsed);
+  }
+
+  const detail = content.trim();
+  if (!detail) {
+    return null;
+  }
+
+  if (type === "tool") {
+    return {
+      id: "stream-tool",
+      kind: "tool",
+      label: "Tool",
+      detail,
+      output: null,
+      filename: null,
+      directory: null,
+      additions: null,
+      deletions: null,
+      tool: null,
+    };
+  }
+
+  return {
+    id: "stream-step",
+    kind: "step",
+    label: "Step",
+    detail,
+    output: null,
+    filename: null,
+    directory: null,
+    additions: null,
+    deletions: null,
+    tool: null,
+  };
+}
 
 // Convert OpenCode MessageResponse to mobile SessionMessage
 export function adaptMessage(
-  messageResponse: SessionMessageResponse
+  messageResponse: SessionMessageResponse,
 ): SessionMessage {
   const message = messageResponse.info;
   const parts = messageResponse.parts ?? [];
 
-  // Extract text parts
   const textParts = parts.filter((p): p is TextPart => p.type === "text");
+  const reasoningParts = parts.filter(
+    (p): p is ReasoningPart => p.type === "reasoning",
+  );
   const toolParts = parts.filter((p): p is ToolPart => p.type === "tool");
 
-  // Build content from text parts
   const textContent = textParts.map((p) => p.text).join("");
   const toolErrorSummary = getToolErrorSummary(toolParts);
   const content = textContent || toolErrorSummary;
-
   const visibleContent = content;
+  const { thinkingContent, thinkingDurationSeconds } =
+    getReasoningState(reasoningParts);
 
-  // Convert tool parts to simple format
-  const convertedParts: SessionMessagePart[] = [
-    ...textParts.map((p) => ({
-      type: "text" as const,
-      content: p.text,
-      durationSeconds: p.time?.end ? p.time.end - p.time.start : null,
-    })),
-    ...toolParts.map((p) => ({
-      type: "tool" as const,
-      content: JSON.stringify({
-        id: p.id,
-        tool: p.tool,
-        state: p.state,
-      }),
-      durationSeconds:
-        p.state && "time" in p.state && p.state.time
-          ? "end" in p.state.time
-            ? p.state.time.end - p.state.time.start
-            : null
-          : null,
-    })),
-  ];
+  const convertedParts = parts.flatMap<SessionMessagePart>((part) => {
+    if (part.type === "text") {
+      return [
+        {
+          type: "text" as const,
+          content: part.text,
+          durationSeconds: getPartDurationSeconds(part),
+        },
+      ];
+    }
+
+    if (part.type === "reasoning") {
+      return [
+        {
+          type: "reasoning" as const,
+          content: part.text,
+          durationSeconds: getPartDurationSeconds(part),
+        },
+      ];
+    }
+
+    if (part.type === "tool") {
+      return [
+        {
+          type: "tool" as const,
+          content: JSON.stringify(part),
+          durationSeconds:
+            "time" in part.state && typeof part.state.time === "object"
+              ? "end" in part.state.time
+                ? part.state.time.end - part.state.time.start
+                : null
+              : null,
+        },
+      ];
+    }
+
+    if (part.type === "step-start" || part.type === "step-finish") {
+      return [
+        {
+          type: "step" as const,
+          content: JSON.stringify(part),
+          durationSeconds: null,
+        },
+      ];
+    }
+
+    return [];
+  });
 
   // Extract token info from assistant message
   const assistantMessage =
@@ -582,7 +754,7 @@ export function adaptMessage(
   const assistant =
     assistantMessage && message.role === "assistant"
       ? (() => {
-          const activities = getAssistantActivities(toolParts);
+          const activities = getAssistantActivities(parts);
 
           return {
             mode: assistantMessage.mode ?? null,
@@ -597,7 +769,6 @@ export function adaptMessage(
   // Extract summary from user message
   const userMessage =
     message.role === "user" ? (message as UserMessage) : undefined;
-      
 
   return {
     id: message.id,
@@ -605,8 +776,8 @@ export function adaptMessage(
     role: message.role,
     content,
     visibleContent,
-    thinkingContent: null,
-    thinkingDurationSeconds: null,
+    thinkingContent,
+    thinkingDurationSeconds,
     parts: convertedParts,
     createdAt: message.time.created,
     time: message.time,
@@ -637,7 +808,7 @@ export function useSessionMessages(sessionId: string, limit = 100) {
         params: { limit },
       });
 
-return (response.data.messages ?? []).map(adaptMessage);
+      return (response.data.messages ?? []).map(adaptMessage);
     },
   });
 }

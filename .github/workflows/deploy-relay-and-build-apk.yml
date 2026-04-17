@@ -1,0 +1,174 @@
+name: Deploy Relay And Build APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  RELAY_IMAGE_NAME: ${{ github.repository_owner }}/relaid-relay
+
+jobs:
+  build-relay-image:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/main') || startsWith(github.ref, 'refs/heads/master')
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.RELAY_IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+            type=ref,event=tag
+
+      - name: Build and push relay image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/relay/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-relay:
+    runs-on: ubuntu-latest
+    needs: build-relay-image
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/main') || startsWith(github.ref, 'refs/heads/master')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create relay environment file
+        run: |
+          mkdir -p .deploy
+          cp deploy/relay/docker-compose.yml .deploy/docker-compose.yml
+          cat <<EOF > .deploy/relay.env
+          RELAY_IMAGE=${{ env.REGISTRY }}/${{ env.RELAY_IMAGE_NAME }}:latest
+          RELAY_PORT=${{ secrets.RELAY_PORT || '3001' }}
+          PORT=3001
+          HOST=0.0.0.0
+          PUBLIC_BASE_URL=${{ secrets.RELAY_PUBLIC_BASE_URL }}
+          CORS_ORIGIN=${{ secrets.RELAY_CORS_ORIGIN || '*' }}
+          LOG_LEVEL=${{ secrets.RELAY_LOG_LEVEL || 'info' }}
+          DB_PATH=/data/chat-server.db
+          LOGS_DIR=/logs
+          PAIRING_SESSION_TTL_MS=${{ secrets.RELAY_PAIRING_SESSION_TTL_MS || '300000' }}
+          SOCKET_REQUEST_TIMEOUT_MS=${{ secrets.RELAY_SOCKET_REQUEST_TIMEOUT_MS || '30000' }}
+          EOF
+
+      - name: Copy deployment files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          target: ${{ secrets.RELAY_DEPLOY_PATH }}
+          source: ".deploy/docker-compose.yml,.deploy/relay.env"
+          strip_components: 1
+
+      - name: Pull image and restart relay
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          script: |
+            set -eu
+            cd "${{ secrets.RELAY_DEPLOY_PATH }}"
+            mv relay.env .env
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ${{ env.REGISTRY }} -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker image prune -f
+
+  build-mobile-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Decode Android keystore
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > apps/mobile/android/app/release.keystore
+
+      - name: Build Android APK
+        working-directory: apps/mobile/android
+        env:
+          RELEASE_STORE_FILE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'release.keystore' || '' }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Rename APK for distribution
+        id: apk
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          APK_NAME="relaid-${GITHUB_REF_NAME}-${SHORT_SHA}.apk"
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "$APK_NAME"
+          echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "apk_path=$APK_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.apk_name }}
+          path: ${{ steps.apk.outputs.apk_path }}
+          if-no-files-found: error
+
+      - name: Attach APK to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.apk_path }}

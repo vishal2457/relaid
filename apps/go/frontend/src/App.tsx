@@ -3,6 +3,7 @@ import { NuqsAdapter } from "nuqs/adapters/react";
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { AppRouter } from "./routes/router";
+import { TooltipProvider } from "./shared/components/ui/tooltip";
 import { healthApi } from "./shared/api/features/health.api";
 import { getApiBaseUrl } from "./shared/utils/runtime-config";
 import { queryClient } from "./shared/utils/query-client";
@@ -107,7 +108,7 @@ function App() {
   }
 
   return (
-    <>
+    <TooltipProvider>
       <NuqsAdapter>
         <QueryClientProvider client={queryClient}>
           <AppRouter />
@@ -120,7 +121,7 @@ function App() {
           closeButton
         />
       </NuqsAdapter>
-    </>
+    </TooltipProvider>
   );
 }
 

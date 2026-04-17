@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   StyleSheet,
   View,
@@ -7,6 +7,9 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
+  Modal,
+  Pressable,
+  FlatList,
 } from "react-native";
 import {
   Text,
@@ -38,6 +41,8 @@ export default function SettingsScreen() {
   const [pingStatus, setPingStatus] = useState<
     "idle" | "pinging" | "success" | "error"
   >("idle");
+  const [showPairingSheet, setShowPairingSheet] = useState(false);
+  const [showRelaySheet, setShowRelaySheet] = useState(false);
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, "");
@@ -85,6 +90,28 @@ export default function SettingsScreen() {
   }, [clearSession]);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
+  const sheetBg = theme.dark ? "#1E252D" : "#FFFFFF";
+  const sheetOverlay = {
+    flex: 1,
+    justifyContent: "flex-end" as const,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  };
+  const sheetContainer = {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: "60%" as const,
+    paddingHorizontal: 20,
+    paddingBottom: 32,
+  };
+  const sheetHandle = {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#CBD5E1",
+    alignSelf: "center" as const,
+    marginTop: 12,
+    marginBottom: 8,
+  };
 
   return (
     <SafeAreaView
@@ -111,118 +138,25 @@ export default function SettingsScreen() {
           >
             <Card mode="outlined" style={{ borderColor }}>
               <Card.Content>
-                <View style={styles.settingRow}>
-                  <View style={styles.settingInfo}>
-                    <Text variant="bodyLarge" style={styles.settingTitle}>
-                      Pairing
-                    </Text>
-                    <Text variant="bodySmall" style={styles.settingDescription}>
-                      {isPaired
-                        ? `${session?.serverName || "Paired server"} is connected to this phone`
-                        : "This phone is not paired yet"}
-                    </Text>
-                  </View>
-                </View>
-
-                {isPaired ? (
-                  <>
-                    <Text variant="bodySmall" style={styles.metaText}>
-                      Server ID: {session?.serverId}
-                    </Text>
-                    <Text variant="bodySmall" style={styles.metaText}>
-                      Device ID: {session?.deviceId}
-                    </Text>
-                    <View style={styles.buttonRow}>
-                      <Button
-                        mode="outlined"
-                        onPress={handleForgetDevice}
-                        icon="link-off"
-                      >
-                        Forget This Device
-                      </Button>
-                    </View>
-                  </>
-                ) : (
-                  <View style={styles.buttonRow}>
-                    <Button
-                      mode="contained-tonal"
-                      onPress={() => router.push("/pair" as any)}
-                      icon="qrcode-scan"
-                    >
-                      Open Pairing Screen
-                    </Button>
-                  </View>
-                )}
-              </Card.Content>
-            </Card>
-
-            <Card mode="outlined" style={{ borderColor, marginTop: 20 }}>
-              <Card.Content>
-                <View style={styles.settingRow}>
-                  <View style={styles.settingInfo}>
-                    <Text variant="bodyLarge" style={styles.settingTitle}>
-                      Relay URL
-                    </Text>
-                    <Text variant="bodySmall" style={styles.settingDescription}>
-                      Base URL of the relay server
-                    </Text>
-                  </View>
-                </View>
-
-                <TextInput
-                  mode="outlined"
-                  value={urlInput}
-                  onChangeText={setUrlInput}
-                  placeholder="http://100.95.62.14:3001"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  style={styles.input}
-                  outlineStyle={styles.inputOutline}
-                />
-
-                <View style={styles.buttonRow}>
-                  {urlInput !== DEFAULT_SERVER_URL && (
-                    <Button
-                      mode="outlined"
-                      onPress={handleReset}
-                      style={styles.pingButton}
-                      icon="refresh"
-                    >
-                      Reset
-                    </Button>
-                  )}
+                <Text variant="titleMedium" style={styles.cardTitle}>
+                  Connection
+                </Text>
+                <View style={styles.buttonGroup}>
                   <Button
                     mode="outlined"
-                    onPress={handlePing}
-                    disabled={!urlInput.trim() || pingStatus === "pinging"}
-                    style={styles.pingButton}
-                    icon={
-                      pingStatus === "pinging"
-                        ? "loading"
-                        : pingStatus === "success"
-                          ? "check"
-                          : pingStatus === "error"
-                            ? "close"
-                            : "access-point"
-                    }
+                    onPress={() => setShowPairingSheet(true)}
+                    icon="link"
+                    style={styles.groupButton}
                   >
-                    {pingStatus === "pinging"
-                      ? "Pinging..."
-                      : pingStatus === "success"
-                        ? "Connected"
-                        : pingStatus === "error"
-                          ? "Failed"
-                          : "Ping"}
+                    Pairing
                   </Button>
                   <Button
-                    mode="contained"
-                    onPress={handleSave}
-                    disabled={!urlInput.trim()}
-                    style={styles.saveButton}
-                    icon={saved ? "check" : "content-save"}
+                    mode="outlined"
+                    onPress={() => setShowRelaySheet(true)}
+                    icon="access-point"
+                    style={styles.groupButton}
                   >
-                    {saved ? "Saved" : "Save"}
+                    Relay
                   </Button>
                 </View>
               </Card.Content>
@@ -237,6 +171,151 @@ export default function SettingsScreen() {
           </ScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={showPairingSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPairingSheet(false)}
+      >
+        <Pressable
+          style={sheetOverlay}
+          onPress={() => setShowPairingSheet(false)}
+        >
+          <View
+            style={[sheetContainer, { backgroundColor: sheetBg }]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={sheetHandle} />
+            <Text variant="titleMedium" style={styles.sheetTitle}>
+              Pairing
+            </Text>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text variant="bodyLarge" style={styles.settingTitle}>
+                  Status
+                </Text>
+                <Text variant="bodySmall" style={styles.settingDescription}>
+                  {isPaired
+                    ? `${session?.serverName || "Paired server"} is connected to this phone`
+                    : "This phone is not paired yet"}
+                </Text>
+              </View>
+            </View>
+
+            {isPaired ? (
+              <>
+                <Text variant="bodySmall" style={styles.metaText}>
+                  Server ID: {session?.serverId}
+                </Text>
+                <Text variant="bodySmall" style={styles.metaText}>
+                  Device ID: {session?.deviceId}
+                </Text>
+                <View style={styles.sheetButtonRow}>
+                  <Button
+                    mode="outlined"
+                    onPress={handleForgetDevice}
+                    icon="link-off"
+                  >
+                    Forget This Device
+                  </Button>
+                </View>
+              </>
+            ) : (
+              <View style={styles.sheetButtonRow}>
+                <Button
+                  mode="contained-tonal"
+                  onPress={() => {
+                    setShowPairingSheet(false);
+                    router.push("/pair" as any);
+                  }}
+                  icon="qrcode-scan"
+                >
+                  Open Pairing Screen
+                </Button>
+              </View>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showRelaySheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRelaySheet(false)}
+      >
+        <Pressable
+          style={sheetOverlay}
+          onPress={() => setShowRelaySheet(false)}
+        >
+          <View
+            style={[sheetContainer, { backgroundColor: sheetBg }]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={sheetHandle} />
+            <Text variant="titleMedium" style={styles.sheetTitle}>
+              Relay URL
+            </Text>
+            <TextInput
+              mode="outlined"
+              value={urlInput}
+              onChangeText={setUrlInput}
+              placeholder="http://100.95.62.14:3001"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              style={styles.input}
+              outlineStyle={styles.inputOutline}
+            />
+
+            <View style={styles.sheetButtonRow}>
+              {urlInput !== DEFAULT_SERVER_URL && (
+                <Button
+                  mode="outlined"
+                  onPress={handleReset}
+                  style={styles.pingButton}
+                  icon="refresh"
+                >
+                  Reset
+                </Button>
+              )}
+              <Button
+                mode="outlined"
+                onPress={handlePing}
+                disabled={!urlInput.trim() || pingStatus === "pinging"}
+                style={styles.pingButton}
+                icon={
+                  pingStatus === "pinging"
+                    ? "loading"
+                    : pingStatus === "success"
+                      ? "check"
+                      : pingStatus === "error"
+                        ? "close"
+                        : "access-point"
+                }
+              >
+                {pingStatus === "pinging"
+                  ? "Pinging..."
+                  : pingStatus === "success"
+                    ? "Connected"
+                    : pingStatus === "error"
+                      ? "Failed"
+                      : "Ping"}
+              </Button>
+              <Button
+                mode="contained"
+                onPress={handleSave}
+                disabled={!urlInput.trim()}
+                style={styles.saveButton}
+                icon={saved ? "check" : "content-save"}
+              >
+                {saved ? "Saved" : "Save"}
+              </Button>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -262,6 +341,17 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 32,
+  },
+  cardTitle: {
+    fontWeight: "600",
+    marginBottom: 16,
+  },
+  buttonGroup: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  groupButton: {
+    flex: 1,
   },
   settingRow: {
     flexDirection: "row",
@@ -296,10 +386,21 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     gap: 8,
   },
+  sheetButtonRow: {
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
   pingButton: {
     borderRadius: 8,
   },
   saveButton: {
     borderRadius: 8,
+  },
+  sheetTitle: {
+    fontWeight: "700",
+    paddingBottom: 12,
   },
 });

@@ -21,6 +21,8 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  apps/go: {}
+
   apps/local:
     dependencies:
       '@chat-adapter/discord':
@@ -509,6 +511,9 @@ importers:
       express:
         specifier: ^4.18.2
         version: 4.22.1
+      morgan:
+        specifier: ^1.10.1
+        version: 1.10.1
       socket.io:
         specifier: ^4.8.1
         version: 4.8.3
