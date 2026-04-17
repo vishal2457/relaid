@@ -2,7 +2,6 @@ import React from "react";
 import { Animated, Pressable, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Text, useTheme } from "react-native-paper";
-import { ToolPart } from "./ToolPart";
 import { FormattedText } from "./FormattedText";
 import type { SessionAssistantActivity } from "@/lib/api/messages";
 import type { LiveAssistantPhase } from "@/lib/live-assistant-stream";
@@ -15,6 +14,20 @@ interface TypingIndicatorProps {
   borderColor: string;
   assistantBubble: string;
   metaColor: string;
+}
+
+function getCurrentActivityDetail(
+  activity: SessionAssistantActivity | null,
+): string | null {
+  if (!activity) {
+    return null;
+  }
+
+  if (activity.filename || activity.directory) {
+    return `${activity.directory ?? ""}${activity.filename ?? ""}` || null;
+  }
+
+  return activity.detail?.trim() || null;
 }
 
 export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
@@ -33,6 +46,8 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
     const isThinking =
       phase === "thinking" && streamingContent.trim().length === 0;
     const hasThinkingContent = Boolean(thinkingContent?.trim());
+    const currentActivity = activities[activities.length - 1] ?? null;
+    const currentActivityDetail = getCurrentActivityDetail(currentActivity);
 
     React.useEffect(() => {
       if (!isThinking) {
@@ -71,14 +86,36 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
           ]}
         >
           {isThinking ? (
-            <Animated.View style={{ opacity: blinkOpacity }}>
-              <Text
-                variant="labelMedium"
-                style={{ color: "#60A5FA", fontWeight: "600" }}
-              >
-                Thinking...
-              </Text>
-            </Animated.View>
+            <View style={styles.loaderContent}>
+              <Animated.View style={{ opacity: blinkOpacity }}>
+                <Text
+                  variant="labelMedium"
+                  style={{ color: "#60A5FA", fontWeight: "600" }}
+                >
+                  Thinking...
+                </Text>
+              </Animated.View>
+
+              {currentActivity ? (
+                <View style={styles.activityStatus}>
+                  <Text
+                    variant="labelSmall"
+                    style={{ color: theme.colors.onSurface, fontWeight: "600" }}
+                  >
+                    Using {currentActivity.label}
+                  </Text>
+                  {currentActivityDetail ? (
+                    <Text
+                      variant="bodySmall"
+                      numberOfLines={1}
+                      style={{ color: metaColor, flexShrink: 1 }}
+                    >
+                      {currentActivityDetail}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
           ) : (
             <FormattedText
               text={streamingContent}
@@ -122,20 +159,6 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
             ) : null}
           </View>
         ) : null}
-
-        {activities.length > 0 ? (
-          <View style={styles.activities}>
-            {activities.map((activity) => (
-              <ToolPart
-                key={activity.id}
-                activity={activity}
-                metaColor={metaColor}
-                borderColor={borderColor}
-                textColor={theme.colors.onSurface}
-              />
-            ))}
-          </View>
-        ) : null}
       </View>
     );
   },
@@ -155,6 +178,12 @@ const styles = StyleSheet.create({
     padding: 12,
     alignSelf: "flex-start",
   },
+  loaderContent: {
+    gap: 6,
+  },
+  activityStatus: {
+    gap: 2,
+  },
   thinkingCard: {
     maxWidth: "85%",
     borderWidth: 1,
@@ -169,9 +198,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
-  },
-  activities: {
-    width: "85%",
-    gap: 5,
   },
 });
