@@ -56,10 +56,17 @@ func (sm *ServerManager) Start(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("stderr pipe: %w", err)
 	}
 
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("start opencode serve: %w", err)
 	}
 
+	sm.logger.Printf("opencode: server pid %d", cmd.Process.Pid)
+	go sm.logOutput("stdout", stdout)
 	go sm.logStderr(stderr)
 
 	serverCtx, cancel := context.WithCancel(context.Background())
@@ -181,13 +188,17 @@ func (sm *ServerManager) waitHealthy(ctx context.Context, url string) error {
 }
 
 func (sm *ServerManager) logStderr(r io.Reader) {
+	sm.logOutput("stderr", r)
+}
+
+func (sm *ServerManager) logOutput(stream string, r io.Reader) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
 			line := strings.TrimRight(string(buf[:n]), "\n")
 			if line != "" {
-				sm.logger.Printf("opencode: %s", line)
+				sm.logger.Printf("opencode %s: %s", stream, line)
 			}
 		}
 		if err != nil {

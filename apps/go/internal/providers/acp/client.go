@@ -116,7 +116,7 @@ func (c *Client) Start(ctx context.Context, info ClientInfo, protocol Protocol, 
 		AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
 	}
 
-	if err := conn.call("initialize", protocol.BuildInitializeParams(info), &initResult); err != nil {
+	if err := conn.call(ctx, "initialize", protocol.BuildInitializeParams(info), &initResult); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (c *Connection) ListSessions(ctx context.Context, cwd, cursor string) (*Ses
 	params := c.protocol.BuildListParams(cwd, cursor)
 
 	var raw json.RawMessage
-	if err := c.call(c.protocol.ListMethod(), params, &raw); err != nil {
+	if err := c.call(ctx, c.protocol.ListMethod(), params, &raw); err != nil {
 		return nil, err
 	}
 
@@ -161,34 +161,54 @@ func (c *Connection) ListSessions(ctx context.Context, cwd, cursor string) (*Ses
 func (c *Connection) NewSession(ctx context.Context, cwd string) (*SessionCreateResult, error) {
 	params := c.protocol.BuildNewSessionParams(cwd)
 
+	var raw json.RawMessage
+	if err := c.call(ctx, c.protocol.NewSessionMethod(), params, &raw); err != nil {
+		return nil, err
+	}
+
+	c.logf("[skills-debug] ACP new session RAW response: %s", string(raw))
+
 	var result SessionCreateResult
-	if err := c.call(c.protocol.NewSessionMethod(), params, &result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
 
 	c.configOptions = result.ConfigOptions
-	c.logf("ACP new session config: %+v", result.ConfigOptions)
+	c.logf("[skills-debug] ACP new session: sessionId=%s configOptions_count=%d", result.SessionID, len(result.ConfigOptions))
+	for i, opt := range result.ConfigOptions {
+		c.logf("[skills-debug] ACP new session configOption[%d]: id=%q currentValue=%v", i, opt.ID, opt.CurrentValue)
+	}
 	return &result, nil
 }
 
 func (c *Connection) LoadSession(ctx context.Context, sessionID, cwd string) (*SessionLoadResult, error) {
 	params := c.protocol.BuildLoadSessionParams(sessionID, cwd)
 
+	var raw json.RawMessage
+	if err := c.call(ctx, c.protocol.LoadSessionMethod(), params, &raw); err != nil {
+		return nil, err
+	}
+
+	c.logf("[skills-debug] ACP load session RAW response: %s", string(raw))
+
 	var result SessionLoadResult
-	if err := c.call(c.protocol.LoadSessionMethod(), params, &result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
 
 	c.configOptions = result.ConfigOptions
-	c.logf("ACP load session config: %+v", result.ConfigOptions)
+	c.logf("[skills-debug] ACP load session: sessionId=%s configOptions_count=%d", result.SessionID, len(result.ConfigOptions))
+	for i, opt := range result.ConfigOptions {
+		c.logf("[skills-debug] ACP load session configOption[%d]: id=%q currentValue=%v", i, opt.ID, opt.CurrentValue)
+	}
 	return &result, nil
 }
 
-func (c *Connection) SetConfigOption(sessionID, configID, value string) error {
+func (c *Connection) SetConfigOption(ctx context.Context, sessionID, configID, value string) error {
 	var result struct {
 		ConfigOptions []ConfigOption `json:"configOptions"`
 	}
-	if err := c.call("session/set_config_option", map[string]any{
+	if err := c.call(ctx, "session/set_config_option", map[string]any{
 		"sessionId": sessionID,
 		"configId":  configID,
 		"value":     value,
@@ -204,7 +224,7 @@ func (c *Connection) Prompt(ctx context.Context, sessionID, prompt, agentName, m
 		updated := false
 		for _, opt := range c.configOptions {
 			if isAgentConfigOption(opt) {
-				if err := c.SetConfigOption(sessionID, opt.ID, agentName); err != nil {
+				if err := c.SetConfigOption(ctx, sessionID, opt.ID, agentName); err != nil {
 					c.logf("ACP: failed to set agent config option: %v", err)
 				} else {
 					updated = true
@@ -221,7 +241,7 @@ func (c *Connection) Prompt(ctx context.Context, sessionID, prompt, agentName, m
 		for _, opt := range c.configOptions {
 			if isModelConfigOption(opt.ID) {
 				targetValue := resolveModelValue(opt, modelID)
-				if err := c.SetConfigOption(sessionID, opt.ID, targetValue); err != nil {
+				if err := c.SetConfigOption(ctx, sessionID, opt.ID, targetValue); err != nil {
 					c.logf("ACP: failed to set model config option: %v", err)
 				}
 				break
@@ -232,7 +252,7 @@ func (c *Connection) Prompt(ctx context.Context, sessionID, prompt, agentName, m
 	params := c.protocol.BuildPromptParams(sessionID, prompt, agentName)
 
 	var result PromptResult
-	if err := c.call(c.protocol.PromptMethod(), params, &result); err != nil {
+	if err := c.call(ctx, c.protocol.PromptMethod(), params, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -256,7 +276,11 @@ func (c *Connection) Close() {
 	}
 }
 
-func (c *Connection) call(method string, params any, out any) error {
+func (c *Connection) call(ctx context.Context, method string, params any, out any) error {
+	if ctx == nil {
+		ctx = c.ctx
+	}
+
 	id := atomic.AddInt64(&c.nextID, 1)
 	responseCh := make(chan responseEnvelope, 1)
 
@@ -282,14 +306,22 @@ func (c *Connection) call(method string, params any, out any) error {
 		return err
 	}
 
-	response := <-responseCh
-	if response.err != nil {
-		return response.err
+	select {
+	case response := <-responseCh:
+		if response.err != nil {
+			return response.err
+		}
+		if out == nil {
+			return nil
+		}
+		return json.Unmarshal(response.result, out)
+	case <-ctx.Done():
+		c.deletePending(id)
+		return ctx.Err()
+	case <-c.ctx.Done():
+		c.deletePending(id)
+		return c.ctx.Err()
 	}
-	if out == nil {
-		return nil
-	}
-	return json.Unmarshal(response.result, out)
 }
 
 func (c *Connection) notify(method string, params any) error {

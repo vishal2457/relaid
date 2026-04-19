@@ -25,6 +25,13 @@ type CapabilitySet struct {
 	SessionsStream bool `json:"sessionsStream"`
 	ProvidersList  bool `json:"providersList"`
 	AgentsList     bool `json:"agentsList"`
+	SkillsList     bool `json:"skillsList"`
+}
+
+type Skill struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
 }
 
 type AgentProvider interface {
@@ -34,7 +41,12 @@ type AgentProvider interface {
 	Sessions() SessionService
 	Providers() ProviderService
 	Agents() AgentService
+	Skills() SkillsService
 	Shutdown(context.Context) error
+}
+
+type SkillsService interface {
+	List(ctx context.Context, projectID string, query string) ([]Skill, error)
 }
 
 type FileMatch struct {
@@ -75,6 +87,7 @@ type AgentConfig struct {
 	Description string
 	Mode        string
 	BuiltIn     bool
+	Hidden      bool
 	Model       *ModelRef
 }
 

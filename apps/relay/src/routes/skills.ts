@@ -18,7 +18,7 @@ function handleRouteError(
   res.status(500).json({ error: errMsg || defaultMessage });
 }
 
-router.get("/:projectId/skills", async (req: Request, res: Response) => {
+router.get("/:projectId", async (req: Request, res: Response) => {
   try {
     const userId = req.headers["x-user-id"] as string;
     const rawQuery = typeof req.query.q === "string" ? req.query.q : "";

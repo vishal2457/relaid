@@ -91,7 +91,12 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.httpServer.Shutdown(ctx)
+	httpErr := s.httpServer.Shutdown(ctx)
+	providerErr := s.registry.Shutdown(ctx)
+	if httpErr != nil {
+		return httpErr
+	}
+	return providerErr
 }
 
 func (s *Server) Healthy() bool {

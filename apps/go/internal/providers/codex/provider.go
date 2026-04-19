@@ -79,6 +79,10 @@ func (p *Provider) Agents() agent.AgentService {
 	return nil
 }
 
+func (p *Provider) Skills() agent.SkillsService {
+	return nil
+}
+
 func (p *Provider) Shutdown(context.Context) error {
 	return nil
 }

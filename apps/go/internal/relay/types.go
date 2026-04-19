@@ -114,6 +114,9 @@ const (
 	EventQuestionRequest    = "question_request"
 	EventQuestionResponse   = "question_response"
 
+	EventSkillsListRequest  = "skills_list_request"
+	EventSkillsListResponse = "skills_list_response"
+
 	EventErrorResponse = "error_response"
 )
 
@@ -889,6 +892,23 @@ type ErrorResponse struct {
 	RequestID string `json:"requestId"`
 	Code      string `json:"code"`
 	Message   string `json:"message"`
+}
+
+type SkillsListRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Query     string `json:"query,omitempty"`
+}
+
+type SkillPayload struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+}
+
+type SkillsListResponse struct {
+	RequestID string        `json:"requestId"`
+	Skills    []SkillPayload `json:"skills"`
 }
 
 func ParseRequestEnvelope(data json.RawMessage) (RequestEnvelope, error) {

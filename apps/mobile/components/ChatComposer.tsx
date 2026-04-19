@@ -286,33 +286,43 @@ export function ChatComposer({
               nestedScrollEnabled
             >
               {skillSuggestions.map((item) => (
-                <Pressable
-                  key={item.name}
-                  onPress={() => handleSkillSuggestionPress(item)}
-                  style={styles.mentionItem}
-                >
-                  <MaterialCommunityIcons
-                    name="lightning-bolt-outline"
-                    size={18}
-                    color={theme.colors.primary}
-                  />
-                  <View style={styles.mentionItemContent}>
-                    <Text
-                      variant="bodyMedium"
-                      style={{ color: theme.colors.onSurface }}
-                      numberOfLines={1}
-                    >
-                      {item.name}
-                    </Text>
-                    <Text
-                      variant="bodySmall"
-                      style={{ color: metaColor }}
-                      numberOfLines={2}
-                    >
-                      {item.description}
-                    </Text>
-                  </View>
-                </Pressable>
+<Pressable
+                    key={item.name}
+                    onPress={() => handleSkillSuggestionPress(item)}
+                    style={styles.mentionItem}
+                  >
+                    <View style={styles.mentionItemContent}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Text
+                          variant="bodyMedium"
+                          style={{ color: theme.colors.onSurface }}
+                          numberOfLines={1}
+                        >
+                          {item.name}
+                        </Text>
+                        {item.source ? (
+                          <Text
+                            variant="labelSmall"
+                            style={{
+                              color: theme.colors.onSurfaceVariant,
+                              opacity: 0.6,
+                              fontSize: 10,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {item.source}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text
+                        variant="bodySmall"
+                        style={{ color: metaColor }}
+                        numberOfLines={2}
+                      >
+                        {item.description}
+                      </Text>
+                    </View>
+                  </Pressable>
               ))}
             </ScrollView>
           ) : (

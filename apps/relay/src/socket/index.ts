@@ -1056,7 +1056,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
     async (data: { requestId: string; projectId: string; query?: string }) => {
       try {
         const results = await requestAllConnectedServers<{
-          skills: Array<{ name: string; description: string }>;
+          skills: Array<{ name: string; description: string; source?: string }>;
         }>(userId, "skills_list_request", "skills_list_response", {
           projectId: data.projectId,
           query: data.query,

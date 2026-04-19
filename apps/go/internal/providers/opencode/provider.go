@@ -14,7 +14,11 @@ import (
 	"relaid/internal/config"
 	"relaid/internal/providers/acp"
 	sdkclient "relaid/internal/providers/opencode/sdk"
+	skillpkg "relaid/internal/skills"
 )
+
+const defaultProviderTimeout = 20 * time.Second
+const defaultServerStartupTimeout = 60 * time.Second
 
 type Provider struct {
 	id           agent.ProviderID
@@ -23,6 +27,7 @@ type Provider struct {
 	projects     *projectService
 	providers    *providerService
 	agents       *agentService
+	skills       *skillService
 	serverMgr    *ServerManager
 }
 
@@ -34,8 +39,10 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 		sdk = sdkclient.New(cfg.OpencodeBaseURL, cfg.OpencodeCwd)
 	} else {
 		serverMgr = NewServerManager(cfg.OpencodeBin, cfg.OpencodeCwd, logger)
-		sdk = sdkclient.NewLazy(cfg.OpencodeCwd, func() (string, error) {
-			return serverMgr.Start(context.Background())
+		sdk = sdkclient.NewLazy(cfg.OpencodeCwd, func(ctx context.Context) (string, error) {
+			startCtx, cancel := context.WithTimeout(context.Background(), defaultServerStartupTimeout)
+			defer cancel()
+			return serverMgr.Start(startCtx)
 		})
 	}
 
@@ -43,7 +50,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 	protocol := NewOpenCodeProtocol()
 	activeRuns := &activeRunStore{runs: map[string]context.CancelFunc{}}
 
-	return &Provider{
+	provider := &Provider{
 		id: agent.ProviderOpencode,
 		capabilities: agent.CapabilitySet{
 			ProjectsList:   true,
@@ -57,6 +64,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			SessionsStream: true,
 			ProvidersList:  true,
 			AgentsList:     true,
+			SkillsList:     true,
 		},
 		sessions: &sessionService{
 			cfg:       cfg,
@@ -74,8 +82,21 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 		projects:  &projectService{sdk: sdk},
 		providers: &providerService{sdk: sdk},
 		agents:    &agentService{sdk: sdk},
+		skills:    &skillService{sdk: sdk, logger: logger},
 		serverMgr: serverMgr,
 	}
+
+	if serverMgr != nil {
+		go func() {
+			startCtx, cancel := context.WithTimeout(context.Background(), defaultServerStartupTimeout)
+			defer cancel()
+			if _, err := serverMgr.Start(startCtx); err != nil {
+				logger.Printf("opencode: background warmup failed: %v", err)
+			}
+		}()
+	}
+
+	return provider
 }
 
 func (p *Provider) ID() agent.ProviderID {
@@ -102,6 +123,10 @@ func (p *Provider) Agents() agent.AgentService {
 	return p.agents
 }
 
+func (p *Provider) Skills() agent.SkillsService {
+	return p.skills
+}
+
 func (p *Provider) SetInteractionHandler(handler acp.InteractionHandler) {
 	p.sessions.acpClient.SetInteractionHandler(handler)
 }
@@ -118,14 +143,20 @@ type projectService struct {
 }
 
 func (s *projectService) List(ctx context.Context) ([]agent.Project, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
 	return s.sdk.ListProjects(ctx)
 }
 
 func (s *projectService) Get(ctx context.Context, id string) (*agent.Project, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
 	return s.sdk.GetProject(ctx, id)
 }
 
 func (s *projectService) FileSearch(ctx context.Context, projectID string, query string, limit int) ([]agent.FileMatch, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
 	return s.sdk.SearchFiles(ctx, projectID, query, limit)
 }
 
@@ -134,6 +165,8 @@ type providerService struct {
 }
 
 func (s *providerService) List(ctx context.Context) ([]agent.Provider, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
 	return s.sdk.ListProviders(ctx)
 }
 
@@ -142,7 +175,66 @@ type agentService struct {
 }
 
 func (s *agentService) List(ctx context.Context, directory string) ([]agent.AgentConfig, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
 	return s.sdk.ListAgents(ctx, directory)
+}
+
+type skillService struct {
+	sdk    *sdkclient.Adapter
+	logger *log.Logger
+}
+
+func (s *skillService) List(ctx context.Context, projectID string, query string) ([]agent.Skill, error) {
+	worktree := ""
+	if projectID != "" {
+		project, err := s.sdk.GetProject(ctx, projectID)
+		if err != nil {
+			s.logger.Printf("[skills] project lookup error for %q: %v", projectID, err)
+		} else if project != nil {
+			worktree = project.Worktree
+		}
+	}
+
+	if worktree == "" {
+		worktree = s.sdk.Cwd()
+	}
+
+	s.logger.Printf("[skills-debug] skillService.List: projectID=%q worktree=%q query=%q", projectID, worktree, query)
+
+	skills, err := skillpkg.LoadAll(skillpkg.OpenCode, worktree)
+	if err != nil {
+		s.logger.Printf("[skills-debug] skillService.List: LoadAll error: %v", err)
+		return nil, err
+	}
+
+	if query != "" {
+		lower := strings.ToLower(query)
+		filtered := make([]agent.Skill, 0, len(skills))
+		for _, s := range skills {
+			if strings.Contains(strings.ToLower(s.Name), lower) || strings.Contains(strings.ToLower(s.Description), lower) {
+				filtered = append(filtered, agent.Skill{
+					Name:        s.Name,
+					Description: s.Description,
+					Source:      s.Source,
+				})
+			}
+		}
+		s.logger.Printf("[skills-debug] skillService.List: %d skills after filter (query=%q)", len(filtered), query)
+		return filtered, nil
+	}
+
+	result := make([]agent.Skill, 0, len(skills))
+	for _, s := range skills {
+		result = append(result, agent.Skill{
+			Name:        s.Name,
+			Description: s.Description,
+			Source:      s.Source,
+		})
+	}
+
+	s.logger.Printf("[skills-debug] skillService.List: %d skills total", len(result))
+	return result, nil
 }
 
 type sessionService struct {
@@ -161,6 +253,9 @@ type activeRunStore struct {
 }
 
 func (s *sessionService) List(ctx context.Context, filters agent.SessionFilters) ([]agent.Session, string, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
+
 	if filters.Cwd != "" {
 		if _, err := os.Stat(filters.Cwd); err != nil {
 			return nil, "", fmt.Errorf("invalid cwd: %w", err)
@@ -209,6 +304,9 @@ func (s *sessionService) List(ctx context.Context, filters agent.SessionFilters)
 }
 
 func (s *sessionService) Get(ctx context.Context, id string) (*agent.Session, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
+
 	session, err := s.sdk.GetSession(ctx, id)
 	if err != nil {
 		return nil, err
@@ -223,14 +321,21 @@ func (s *sessionService) Get(ctx context.Context, id string) (*agent.Session, er
 }
 
 func (s *sessionService) Messages(ctx context.Context, id string, limit int) ([]agent.SessionMessagesResponse, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
 	return s.sdk.GetSessionMessages(ctx, id, limit)
 }
 
 func (s *sessionService) Diff(ctx context.Context, id string, messageID string) ([]agent.FileDiff, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
 	return s.sdk.GetSessionDiff(ctx, id, messageID)
 }
 
 func (s *sessionService) Create(ctx context.Context, projectID string) (*agent.Session, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
+
 	workingDir, err := s.sdk.EnsureProjectDirectory(ctx, projectID, "")
 	if err != nil {
 		return nil, fmt.Errorf("resolve project directory: %w", err)
@@ -412,6 +517,26 @@ func parseTime(value string) time.Time {
 		return time.Now().UTC()
 	}
 	return parsed
+}
+
+func withTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		if ctx == nil {
+			return context.Background(), func() {}
+		}
+		return ctx, func() {}
+	}
+
+	if ctx == nil {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+
+	deadline, ok := ctx.Deadline()
+	if ok && time.Until(deadline) <= timeout {
+		return ctx, func() {}
+	}
+
+	return context.WithTimeout(ctx, timeout)
 }
 
 func (s *activeRunStore) Set(sessionID string, cancel context.CancelFunc) {

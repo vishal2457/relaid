@@ -3,6 +3,7 @@ package sdk
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -22,31 +23,41 @@ type Adapter struct {
 	http      *httpClient
 	baseURL   string
 	cwd       string
-	lazySetup func() (string, error)
+	lazySetup func(context.Context) (string, error)
 }
 
 func New(baseURL, cwd string) *Adapter {
-	opts := []option.RequestOption{}
-	if baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
-	}
-
 	return &Adapter{
-		client:  opencode.NewClient(opts...),
+		client:  newSDKClient(baseURL),
 		http:    newHTTPClient(baseURL),
 		baseURL: baseURL,
 		cwd:     cwd,
 	}
 }
 
-func NewLazy(cwd string, resolveURL func() (string, error)) *Adapter {
+func NewLazy(cwd string, resolveURL func(context.Context) (string, error)) *Adapter {
 	return &Adapter{
 		cwd:       cwd,
 		lazySetup: resolveURL,
 	}
 }
 
-func (a *Adapter) ensureClient() (*opencode.Client, *httpClient, error) {
+func (a *Adapter) Cwd() string {
+	return a.cwd
+}
+
+func newSDKClient(baseURL string) *opencode.Client {
+	opts := []option.RequestOption{
+		option.WithMaxRetries(0),
+		option.WithRequestTimeout(20 * time.Second),
+	}
+	if baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+	return opencode.NewClient(opts...)
+}
+
+func (a *Adapter) ensureClient(ctx context.Context) (*opencode.Client, *httpClient, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -57,14 +68,13 @@ func (a *Adapter) ensureClient() (*opencode.Client, *httpClient, error) {
 		return a.client, a.http, nil
 	}
 
-	baseURL, err := a.lazySetup()
+	baseURL, err := a.lazySetup(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("start opencode server: %w", err)
 	}
 
 	if a.client == nil || a.http == nil || a.baseURL != baseURL {
-		opts := []option.RequestOption{option.WithBaseURL(baseURL)}
-		a.client = opencode.NewClient(opts...)
+		a.client = newSDKClient(baseURL)
 		a.http = newHTTPClient(baseURL)
 		a.baseURL = baseURL
 	}
@@ -73,7 +83,7 @@ func (a *Adapter) ensureClient() (*opencode.Client, *httpClient, error) {
 }
 
 func (a *Adapter) ListProjects(ctx context.Context) ([]agent.Project, error) {
-	client, _, err := a.ensureClient()
+	client, _, err := a.ensureClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +116,7 @@ func (a *Adapter) GetProject(ctx context.Context, projectID string) (*agent.Proj
 }
 
 func (a *Adapter) GetSession(ctx context.Context, sessionID string) (*agent.Session, error) {
-	client, _, err := a.ensureClient()
+	client, _, err := a.ensureClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +129,7 @@ func (a *Adapter) GetSession(ctx context.Context, sessionID string) (*agent.Sess
 }
 
 func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limit int) ([]agent.SessionMessagesResponse, error) {
-	_, httpClient, err := a.ensureClient()
+	_, httpClient, err := a.ensureClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +160,7 @@ func (a *Adapter) GetSessionMessages(ctx context.Context, sessionID string, limi
 }
 
 func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID string) ([]agent.FileDiff, error) {
-	client, _, err := a.ensureClient()
+	client, _, err := a.ensureClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +205,7 @@ func (a *Adapter) GetSessionDiff(ctx context.Context, sessionID, messageID strin
 }
 
 func (a *Adapter) ListProviders(ctx context.Context) ([]agent.Provider, error) {
-	client, _, err := a.ensureClient()
+	client, _, err := a.ensureClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +244,7 @@ func (a *Adapter) ListProviders(ctx context.Context) ([]agent.Provider, error) {
 }
 
 func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.AgentConfig, error) {
-	_, httpClient, err := a.ensureClient()
+	_, httpClient, err := a.ensureClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -245,10 +255,13 @@ func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.Age
 	}
 
 	var response []struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Mode        string `json:"mode"`
-		BuiltIn     bool   `json:"builtIn"`
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Mode        string          `json:"mode"`
+		BuiltIn     bool            `json:"builtIn"`
+		Hidden      bool            `json:"hidden"`
+		Tools       map[string]bool `json:"tools"`
+		Prompt      string          `json:"prompt"`
 		Model       *struct {
 			ProviderID string `json:"providerID"`
 			ModelID    string `json:"modelID"`
@@ -256,6 +269,18 @@ func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.Age
 	}
 	if err := httpClient.get(ctx, "agent", query, &response); err != nil {
 		return nil, err
+	}
+
+	log.Printf("[skills-debug] ListAgents: directory=%q agents_count=%d", directory, len(response))
+	for i, item := range response {
+		toolNames := make([]string, 0, len(item.Tools))
+		for k, v := range item.Tools {
+			if v {
+				toolNames = append(toolNames, k)
+			}
+		}
+		sort.Strings(toolNames)
+		log.Printf("[skills-debug] agent[%d]: name=%q mode=%q builtIn=%v hidden=%v tools=%v prompt_len=%d", i, item.Name, item.Mode, item.BuiltIn, item.Hidden, toolNames, len(item.Prompt))
 	}
 
 	result := make([]agent.AgentConfig, 0, len(response))
@@ -272,6 +297,7 @@ func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.Age
 			Description: item.Description,
 			Mode:        item.Mode,
 			BuiltIn:     item.BuiltIn,
+			Hidden:      item.Hidden,
 			Model:       model,
 		})
 	}
@@ -335,7 +361,7 @@ func mapSession(session opencode.Session) agent.Session {
 }
 
 func (a *Adapter) ListSessions(ctx context.Context, directory string) ([]agent.Session, error) {
-	client, _, err := a.ensureClient()
+	client, _, err := a.ensureClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +417,7 @@ func (a *Adapter) EnsureProjectDirectory(ctx context.Context, projectID, working
 }
 
 func (a *Adapter) SearchFiles(ctx context.Context, projectID string, query string, limit int) ([]agent.FileMatch, error) {
-	client, _, err := a.ensureClient()
+	client, _, err := a.ensureClient(ctx)
 	if err != nil {
 		return nil, err
 	}

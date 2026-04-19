@@ -577,6 +577,7 @@ export type MessageQueueExecuteResponse = z.infer<
 export const SkillPayloadSchema = z.object({
   name: z.string(),
   description: z.string(),
+  source: z.string().optional(),
 });
 
 export type SkillPayload = z.infer<typeof SkillPayloadSchema>;

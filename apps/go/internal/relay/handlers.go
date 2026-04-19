@@ -75,6 +75,8 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 		go h.handleProvidersList(args)
 	case EventAgentsListRequest:
 		go h.handleAgentsList(args)
+	case EventSkillsListRequest:
+		go h.handleSkillsList(args)
 	case EventGitStagedFilesRequest:
 		go h.handleGitStagedFiles(args)
 	case EventGitStageFilesRequest:
@@ -164,6 +166,7 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 		EventGitUnstageFilesResponse,
 		EventGitFileDiffResponse,
 		EventGitDiscardFileResponse,
+		EventSkillsListResponse,
 		EventErrorResponse:
 		// silently ignore response events
 	default:
@@ -840,11 +843,19 @@ func (h *Handler) handleAgentsList(args []json.RawMessage) {
 		return
 	}
 
+	h.logger.Printf("[skills-debug] handleAgentsList: projectID=%q directory=%q agents_count=%d", req.ProjectID, directory, len(agents))
+	for i, a := range agents {
+		h.logger.Printf("[skills-debug] handleAgentsList: agent[%d] name=%q mode=%q builtIn=%v hidden=%v", i, a.Name, a.Mode, a.BuiltIn, a.Hidden)
+	}
+
 	payload := AgentsListResponse{
 		RequestID: req.RequestID,
 		Agents:    make([]AgentPayload, 0, len(agents)),
 	}
 	for _, item := range agents {
+		if item.Hidden {
+			continue
+		}
 		var model *ModelRefJSON
 		if item.Model != nil {
 			model = &ModelRefJSON{
@@ -1886,4 +1897,61 @@ func convertSessionPtr(s *agent.Session) *SessionPayload {
 	}
 	sp := convertSession(*s)
 	return &sp
+}
+
+func (h *Handler) getSkillsService() (agent.SkillsService, error) {
+	provider, err := h.getProvider()
+	if err != nil {
+		return nil, err
+	}
+	svc := provider.Skills()
+	if svc == nil {
+		return nil, fmt.Errorf("skills not supported by provider")
+	}
+	return svc, nil
+}
+
+func (h *Handler) handleSkillsList(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req SkillsListRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse skills_list_request: %v", err)
+		return
+	}
+
+	h.logger.Printf("[skills-debug] handleSkillsList: projectID=%q query=%q", req.ProjectID, req.Query)
+
+	skillsSvc, err := h.getSkillsService()
+	if err != nil {
+		h.logger.Printf("[skills-debug] handleSkillsList: skills service error: %v", err)
+		h.emitError(req.RequestID, "SKILLS_ERROR", err.Error())
+		return
+	}
+
+	skills, err := skillsSvc.List(context.Background(), req.ProjectID, req.Query)
+	if err != nil {
+		h.logger.Printf("[skills-debug] handleSkillsList: skills list error: %v", err)
+		h.emit(EventSkillsListResponse, SkillsListResponse{
+			RequestID: req.RequestID,
+			Skills:    []SkillPayload{},
+		})
+		return
+	}
+
+	payload := SkillsListResponse{
+		RequestID: req.RequestID,
+		Skills:    make([]SkillPayload, 0, len(skills)),
+	}
+	for _, s := range skills {
+		payload.Skills = append(payload.Skills, SkillPayload{
+			Name:        s.Name,
+			Description: s.Description,
+			Source:      s.Source,
+		})
+	}
+
+	h.logger.Printf("[skills-debug] handleSkillsList: returning %d skills", len(payload.Skills))
+	h.emit(EventSkillsListResponse, payload)
 }

@@ -4,6 +4,7 @@ import baseApi from "../axios/base";
 export interface Skill {
   name: string;
   description: string;
+  source?: string;
 }
 
 export const skillsKeys = {

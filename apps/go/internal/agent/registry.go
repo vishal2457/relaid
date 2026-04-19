@@ -1,6 +1,9 @@
 package agent
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 type Registry struct {
 	providers map[ProviderID]AgentProvider
@@ -24,4 +27,14 @@ func (r *Registry) Get(id ProviderID) (AgentProvider, error) {
 		return nil, fmt.Errorf("provider %q not registered", id)
 	}
 	return provider, nil
+}
+
+func (r *Registry) Shutdown(ctx context.Context) error {
+	var firstErr error
+	for _, provider := range r.providers {
+		if err := provider.Shutdown(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

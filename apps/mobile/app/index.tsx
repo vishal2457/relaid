@@ -462,7 +462,7 @@ export default function ChatScreen() {
     if (!hydrated) return;
     if (activeProject) {
       AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => {},
+        () => { },
       );
     }
   }, [activeProject, hydrated]);
@@ -473,7 +473,7 @@ export default function ChatScreen() {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
-      ).catch(() => {});
+      ).catch(() => { });
     }
   }, [activeModel, hydrated]);
 
@@ -503,7 +503,7 @@ export default function ChatScreen() {
           );
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [activeProject, agents, hydrated]);
 
   React.useEffect(() => {
@@ -540,7 +540,7 @@ export default function ChatScreen() {
           JSON.stringify(currentMap),
         );
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [activeAgent, activeProject, hydrated]);
 
   React.useEffect(() => {
@@ -560,7 +560,7 @@ export default function ChatScreen() {
             setActiveModel(savedModel);
           }
         }
-      } catch {}
+      } catch { }
     })();
   }, [hydrated, providers]);
 
@@ -605,18 +605,18 @@ export default function ChatScreen() {
 
     const filtered = normalizedQuery
       ? models
-          .map((model) => ({
-            model,
-            score: getModelSearchScore(model, normalizedQuery),
-          }))
-          .filter((entry) => entry.score >= 0)
-          .sort((a, b) => {
-            if (b.score !== a.score) {
-              return b.score - a.score;
-            }
-            return a.model.name.localeCompare(b.model.name);
-          })
-          .map((entry) => entry.model)
+        .map((model) => ({
+          model,
+          score: getModelSearchScore(model, normalizedQuery),
+        }))
+        .filter((entry) => entry.score >= 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) {
+            return b.score - a.score;
+          }
+          return a.model.name.localeCompare(b.model.name);
+        })
+        .map((entry) => entry.model)
       : models;
 
     if (!activeModel) {
@@ -645,16 +645,16 @@ export default function ChatScreen() {
     const normalizedQuery = normalizeSearchValue(agentSearchQuery);
     const filtered = normalizedQuery
       ? agents.filter((agent) => {
-          const haystacks = [
-            agent.name,
-            agent.description ?? "",
-            agent.model?.providerID ?? "",
-            agent.model?.modelID ?? "",
-          ];
-          return haystacks.some((value) =>
-            normalizeSearchValue(value).includes(normalizedQuery),
-          );
-        })
+        const haystacks = [
+          agent.name,
+          agent.description ?? "",
+          agent.model?.providerID ?? "",
+          agent.model?.modelID ?? "",
+        ];
+        return haystacks.some((value) =>
+          normalizeSearchValue(value).includes(normalizedQuery),
+        );
+      })
       : agents;
 
     const sorted = [...filtered];
@@ -864,7 +864,7 @@ export default function ChatScreen() {
 
   const connectSse = React.useCallback(() => {
     if (!isMountedRef.current) {
-      return () => {};
+      return () => { };
     }
 
     setConnectionState("connecting");
@@ -938,7 +938,7 @@ export default function ChatScreen() {
       setConnectionState("disconnected");
       sseClientRef.current = null;
       unsubscribe();
-      return () => {};
+      return () => { };
     }
 
     sseClientRef.current = client;
@@ -1153,17 +1153,17 @@ export default function ChatScreen() {
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
-        220,
-      ) + 8
+      mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
+      220,
+    ) + 8
     : 0;
   const showSkillSuggestions = Boolean(activeProject && activeSlash);
   const skillSuggestionCount = skillSuggestions?.length ?? 0;
   const skillSuggestionHeight = showSkillSuggestions
     ? Math.min(
-        skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
-        220,
-      ) + 8
+      skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
+      220,
+    ) + 8
     : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
@@ -1275,9 +1275,9 @@ export default function ChatScreen() {
         agent: activeAgent?.name,
         model: activeModel
           ? {
-              providerId: activeModel.providerId,
-              modelId: activeModel.id,
-            }
+            providerId: activeModel.providerId,
+            modelId: activeModel.id,
+          }
           : undefined,
       });
     } catch (error) {
@@ -1442,7 +1442,7 @@ export default function ChatScreen() {
 
   const scrollToBottom = React.useCallback(() => {
     flatListRef.current?.scrollToEnd({ animated: true });
-  }, []);
+  }, [flatListRef]);
 
   const handleSelectFileSuggestion = React.useCallback(
     (match: ProjectFileMatch) => {
@@ -1471,7 +1471,7 @@ export default function ChatScreen() {
       }
 
       const slashIndex = inputText.indexOf("/");
-      const replacement = `${skill.name} `;
+      const replacement = `/${skill.name} `;
       const nextText = [
         inputText.slice(0, slashIndex),
         replacement,
@@ -1637,8 +1637,8 @@ export default function ChatScreen() {
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
-          activeSessionId &&
-          displayedMessages.length === 0 ? (
+            activeSessionId &&
+            displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
@@ -1677,10 +1677,11 @@ export default function ChatScreen() {
                 },
               ]}
               showsVerticalScrollIndicator={false}
+              bounces={false}
               keyboardDismissMode={
                 Platform.OS === "ios" ? "interactive" : "on-drag"
               }
-              keyboardShouldPersistTaps="handled"
+              keyboardShouldPersistTaps="always"
               maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               onScroll={handleScroll}
               scrollEventThrottle={16}

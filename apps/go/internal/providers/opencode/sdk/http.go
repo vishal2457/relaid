@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -54,7 +56,14 @@ func (c *httpClient) get(ctx context.Context, path string, query url.Values, res
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	log.Printf("[skills-debug] HTTP GET %s raw response: %s", u.String(), string(bodyBytes))
+
+	if err := json.Unmarshal(bodyBytes, result); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
