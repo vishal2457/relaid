@@ -1,12 +1,20 @@
+import BottomSheet, { BottomSheetFlatList } from "@gorhom/bottom-sheet";
 import React from "react";
-import { FlatList, Pressable, StyleSheet, View } from "react-native";
+import {
+  Keyboard,
+  Platform,
+  Pressable,
+  StyleSheet,
+  View,
+  type KeyboardEvent,
+} from "react-native";
 import {
   ActivityIndicator,
   Text,
   TextInput,
   useTheme,
 } from "react-native-paper";
-import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type SelectionSheetProps<T> = {
   visible: boolean;
@@ -42,12 +50,35 @@ export function SelectionSheet<T>({
   keyExtractor,
 }: SelectionSheetProps<T>) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const isDark = theme.dark;
-
   const sheetBg = isDark ? "#1E293B" : "#FFFFFF";
-
   const bottomSheetRef = React.useRef<BottomSheet>(null);
   const snapPoints = React.useMemo(() => ["50%", "80%"], []);
+  const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+
+  React.useEffect(() => {
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(
+      showEvent,
+      (event: KeyboardEvent) => {
+        setKeyboardHeight(event.endCoordinates.height);
+      },
+    );
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  const listBottomPadding = Math.max(insets.bottom, 24) + keyboardHeight;
 
   const resolveItemId = React.useCallback(
     (item: T, index: number) => getItemId?.(item, index),
@@ -78,12 +109,15 @@ export function SelectionSheet<T>({
         ref={bottomSheetRef}
         index={0}
         snapPoints={snapPoints}
+        enableDynamicSizing={false}
         enablePanDownToClose
         onClose={onClose}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
         backgroundStyle={{ backgroundColor: sheetBg }}
         handleIndicatorStyle={{ backgroundColor: "#CBD5E1" }}
       >
-        <BottomSheetView style={{ flex: 1 }}>
+        <View>
           <Text
             variant="titleMedium"
             style={[styles.title, { color: theme.colors.onSurface }]}
@@ -113,49 +147,54 @@ export function SelectionSheet<T>({
               />
             </View>
           )}
+        </View>
 
-          {isLoading ? (
-            <View style={styles.loading}>
-              <ActivityIndicator />
-            </View>
-          ) : (
-            <FlatList
-              data={data}
-              keyExtractor={resolveKey}
-              contentContainerStyle={{ paddingBottom: 40 }}
-              renderItem={({ item, index }) => {
-                const itemId = resolveItemId(item, index);
-                const isSelected =
-                  selectedId !== undefined &&
-                  selectedId !== null &&
-                  itemId !== undefined &&
-                  itemId !== null &&
-                  itemId === selectedId;
+        {isLoading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator />
+          </View>
+        ) : (
+          <BottomSheetFlatList
+            data={data}
+            keyExtractor={resolveKey}
+            style={styles.list}
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingBottom: listBottomPadding },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item, index }) => {
+              const itemId = resolveItemId(item, index);
+              const isSelected =
+                selectedId !== undefined &&
+                selectedId !== null &&
+                itemId !== undefined &&
+                itemId !== null &&
+                itemId === selectedId;
 
-                const content = renderItem(item, isSelected, index);
-                if (!content) return null;
+              const content = renderItem(item, isSelected, index);
+              if (!content) return null;
 
-                if (!onItemPress) return <View>{content}</View>;
+              if (!onItemPress) return <View>{content}</View>;
 
-                return (
-                  <Pressable onPress={() => onItemPress(item, index)}>
-                    <View>{content}</View>
-                  </Pressable>
-                );
-              }}
-              ListEmptyComponent={
-                <View style={styles.empty}>
-                  <Text
-                    variant="bodyMedium"
-                    style={{ color: theme.colors.onSurfaceVariant }}
-                  >
-                    {emptyText}
-                  </Text>
-                </View>
-              }
-            />
-          )}
-        </BottomSheetView>
+              return (
+                <Pressable onPress={() => onItemPress(item, index)}>
+                  <View>{content}</View>
+                </Pressable>
+              );
+            }}
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Text
+                  variant="bodyMedium"
+                  style={{ color: theme.colors.onSurfaceVariant }}
+                >
+                  {emptyText}
+                </Text>
+              </View>
+            }
+          />
+        )}
       </BottomSheet>
     </View>
   );
@@ -183,5 +222,12 @@ const styles = StyleSheet.create({
   empty: {
     padding: 32,
     alignItems: "center",
+  },
+  list: {
+    flex: 1,
+    minHeight: 0,
+  },
+  listContent: {
+    paddingBottom: 40,
   },
 });

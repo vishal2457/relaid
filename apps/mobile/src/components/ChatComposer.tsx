@@ -8,6 +8,7 @@ import {
   TextInput,
   TextInputSelectionChangeEventData,
   View,
+  type LayoutChangeEvent,
 } from "react-native";
 import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -73,6 +74,7 @@ type ChatComposerProps = {
   mentionQuery: string;
   metaColor: string;
   onChangeText: (value: string) => void;
+  onComposerLayout?: (event: LayoutChangeEvent) => void;
   onInputHeightChange: (height: number) => void;
   onPressAgent: () => void;
   onPressBranch: () => void;
@@ -108,6 +110,7 @@ export function ChatComposer({
   mentionQuery,
   metaColor,
   onChangeText,
+  onComposerLayout,
   onInputHeightChange,
   onPressAgent,
   onPressBranch,
@@ -181,6 +184,7 @@ export function ChatComposer({
 
   return (
     <View
+      onLayout={onComposerLayout}
       style={[
         styles.container,
         {
@@ -286,43 +290,49 @@ export function ChatComposer({
               nestedScrollEnabled
             >
               {skillSuggestions.map((item) => (
-<Pressable
-                    key={item.name}
-                    onPress={() => handleSkillSuggestionPress(item)}
-                    style={styles.mentionItem}
-                  >
-                    <View style={styles.mentionItemContent}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Pressable
+                  key={item.name}
+                  onPress={() => handleSkillSuggestionPress(item)}
+                  style={styles.mentionItem}
+                >
+                  <View style={styles.mentionItemContent}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <Text
+                        variant="bodyMedium"
+                        style={{ color: theme.colors.onSurface }}
+                        numberOfLines={1}
+                      >
+                        {item.name}
+                      </Text>
+                      {item.source ? (
                         <Text
-                          variant="bodyMedium"
-                          style={{ color: theme.colors.onSurface }}
+                          variant="labelSmall"
+                          style={{
+                            color: theme.colors.onSurfaceVariant,
+                            opacity: 0.6,
+                            fontSize: 10,
+                          }}
                           numberOfLines={1}
                         >
-                          {item.name}
+                          {item.source}
                         </Text>
-                        {item.source ? (
-                          <Text
-                            variant="labelSmall"
-                            style={{
-                              color: theme.colors.onSurfaceVariant,
-                              opacity: 0.6,
-                              fontSize: 10,
-                            }}
-                            numberOfLines={1}
-                          >
-                            {item.source}
-                          </Text>
-                        ) : null}
-                      </View>
-                      <Text
-                        variant="bodySmall"
-                        style={{ color: metaColor }}
-                        numberOfLines={2}
-                      >
-                        {item.description}
-                      </Text>
+                      ) : null}
                     </View>
-                  </Pressable>
+                    <Text
+                      variant="bodySmall"
+                      style={{ color: metaColor }}
+                      numberOfLines={2}
+                    >
+                      {item.description}
+                    </Text>
+                  </View>
+                </Pressable>
               ))}
             </ScrollView>
           ) : (

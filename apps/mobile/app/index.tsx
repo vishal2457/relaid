@@ -5,7 +5,6 @@ import {
   AppState,
   FlatList,
   Keyboard,
-  Modal,
   NativeSyntheticEvent,
   NativeScrollEvent,
   Platform,
@@ -17,6 +16,7 @@ import {
   type AppStateStatus,
   type FlatList as FlatListType,
   type KeyboardEvent,
+  type LayoutChangeEvent,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -28,14 +28,12 @@ import {
   MIN_INPUT_HEIGHT,
 } from "@/src/components/ChatComposer";
 import { SessionDrawer } from "@/src/components/SessionDrawer";
-import { SelectionSheet } from "@/src/components/SelectionSheet";
+import { ProjectSelectionSheet } from "@/components/ProjectSelectionSheet";
+import { ModelSelectionSheet } from "@/components/ModelSelectionSheet";
+import { AgentSelectionSheet } from "@/components/AgentSelectionSheet";
+import { BranchSelectionSheet } from "@/components/BranchSelectionSheet";
 import { Stack } from "expo-router";
-import {
-  ActivityIndicator,
-  Text,
-  TextInput as PaperTextInput,
-  useTheme,
-} from "react-native-paper";
+import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -305,6 +303,7 @@ export default function ChatScreen() {
   const [hydrated, setHydrated] = React.useState(false);
   const [isNearBottom, setIsNearBottom] = React.useState(true);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+  const [composerLayoutHeight, setComposerLayoutHeight] = React.useState(0);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [pendingPermission, setPendingPermission] =
     React.useState<PermissionRequestEvent | null>(null);
@@ -1174,6 +1173,7 @@ export default function ChatScreen() {
     skillSuggestionHeight +
     keyboardHeight +
     (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
+  const measuredComposerHeight = composerLayoutHeight || composerHeight;
   const trimmedInput = inputText.trim();
   const isSessionSending = creatingSessionId
     ? true
@@ -1445,6 +1445,13 @@ export default function ChatScreen() {
     flatListRef.current?.scrollToEnd({ animated: true });
   }, [flatListRef]);
 
+  const handleComposerLayout = React.useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setComposerLayoutHeight((current) =>
+      current === nextHeight ? current : nextHeight,
+    );
+  }, []);
+
   const handleSelectFileSuggestion = React.useCallback(
     (match: ProjectFileMatch) => {
       if (!activeMention) {
@@ -1673,15 +1680,11 @@ export default function ChatScreen() {
               contentContainerStyle={[
                 styles.listContent,
                 {
-                  paddingTop: insets.top + 72,
-                  paddingBottom: composerHeight,
+                  paddingTop: insets.top + 8,
                 },
               ]}
               showsVerticalScrollIndicator={false}
               bounces={false}
-              keyboardDismissMode={
-                Platform.OS === "ios" ? "interactive" : "on-drag"
-              }
               keyboardShouldPersistTaps="always"
               maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               onScroll={handleScroll}
@@ -1736,6 +1739,29 @@ export default function ChatScreen() {
             isResponding={isRespondingToQuestion}
           />
         ) : null}
+        {!isNearBottom && (
+          <Pressable
+            onPress={scrollToBottom}
+            style={[
+              styles.scrollToBottomButton,
+              {
+                backgroundColor: theme.dark ? "#1E293B" : "#FFFFFF",
+                borderColor,
+                shadowColor: theme.dark ? "#000" : "#000",
+                bottom:
+                  keyboardHeight > 0
+                    ? keyboardHeight + measuredComposerHeight + 18
+                    : measuredComposerHeight,
+              },
+            ]}
+          >
+            <MaterialCommunityIcons
+              name="chevron-down"
+              size={20}
+              color={theme.colors.onSurface}
+            />
+          </Pressable>
+        )}
         <ChatComposer
           activeProject={Boolean(activeProject)}
           activeAgentName={activeAgent?.name ?? "Default agent"}
@@ -1753,6 +1779,7 @@ export default function ChatScreen() {
           mentionQuery={activeMention?.query ?? ""}
           metaColor={metaColor}
           onChangeText={setInputText}
+          onComposerLayout={handleComposerLayout}
           onInputHeightChange={setInputHeight}
           onPressModel={() => setShowProviderSheet(true)}
           onPressProject={() => setShowProjectSheet(true)}
@@ -1770,35 +1797,13 @@ export default function ChatScreen() {
         />
       </View>
 
-      {!isNearBottom && (
-        <Pressable
-          onPress={scrollToBottom}
-          style={[
-            styles.scrollToBottomButton,
-            {
-              backgroundColor: theme.dark ? "#1E293B" : "#FFFFFF",
-              borderColor,
-              shadowColor: theme.dark ? "#000" : "#000",
-              bottom:
-                keyboardHeight > 0
-                  ? keyboardHeight + KEYBOARD_ADDITIONAL_PADDING + 12
-                  : composerHeight + 80,
-            },
-          ]}
-        >
-          <MaterialCommunityIcons
-            name="chevron-down"
-            size={20}
-            color={theme.colors.onSurface}
-          />
-        </Pressable>
-      )}
-
-      <SelectionSheet
+      <ProjectSelectionSheet
         visible={showProjectSheet}
-        title="Select Project"
-        data={sortedProjects}
-        onItemPress={(item) => {
+        projects={sortedProjects}
+        activeProjectId={activeProject?.id}
+        loading={projectsLoading}
+        onClose={() => setShowProjectSheet(false)}
+        onSelectProject={(item) => {
           if (item.id !== activeProject?.id) {
             activeSessionIdRef.current = null;
             clearPendingStreamState();
@@ -1808,423 +1813,64 @@ export default function ChatScreen() {
             hasScrolledToBottom.current = false;
           }
         }}
-        onClose={() => setShowProjectSheet(false)}
-        isLoading={projectsLoading}
-        emptyText="No projects found"
-        selectedId={activeProject?.id}
-        getItemId={(item) => item.id}
-        renderItem={(item, isSelected) => {
-          const borderColor = theme.dark
-            ? "rgba(255,255,255,0.1)"
-            : "rgba(0,0,0,0.08)";
-          return (
-            <Pressable
-              onPress={() => {
-                if (item.id !== activeProject?.id) {
-                  activeSessionIdRef.current = null;
-                  clearPendingStreamState();
-                  setActiveProject(item);
-                  setActiveSessionId(null);
-                  setOptimisticMessage(null);
-                  hasScrolledToBottom.current = false;
-                }
-                setShowProjectSheet(false);
-              }}
-              style={[
-                styles.sheetItem,
-                {
-                  backgroundColor: isSelected
-                    ? "rgba(150,150,150,0.12)"
-                    : "transparent",
-                  borderColor,
-                },
-              ]}
-            >
-              <View style={styles.sheetItemRow}>
-                <View
-                  style={[
-                    styles.statusDot,
-                    {
-                      backgroundColor: isSelected ? "#00FF41" : "#F2A900",
-                    },
-                  ]}
-                />
-                <View style={styles.sheetItemContent}>
-                  <Text
-                    variant="bodyLarge"
-                    style={{
-                      fontWeight: isSelected ? "600" : "500",
-                      color: theme.colors.onSurface,
-                    }}
-                    numberOfLines={1}
-                  >
-                    {item.name}
-                  </Text>
-                  <Text
-                    variant="bodySmall"
-                    style={{ color: metaColor, marginTop: 2 }}
-                    numberOfLines={1}
-                  >
-                    {item.folder || "No folder path"}
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-          );
-        }}
       />
 
-      <Modal
+      <ModelSelectionSheet
         visible={showProviderSheet}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
+        models={sortedModels}
+        activeModelId={activeModel?.id}
+        loading={providersLoading}
+        searchQuery={modelSearchQuery}
+        onSearchChange={setModelSearchQuery}
+        onClose={() => {
           setShowProviderSheet(false);
           setModelSearchQuery("");
         }}
-      >
-        <Pressable
-          style={styles.sheetOverlay}
-          onPress={() => {
-            setShowProviderSheet(false);
-            setModelSearchQuery("");
-          }}
-        >
-          <View style={[styles.sheetContainer, { backgroundColor: sheetBg }]}>
-            <View style={styles.sheetHandle} />
-            <Text variant="titleMedium" style={styles.sheetTitle}>
-              Select Model
-            </Text>
-            <View style={styles.sheetSearchContainer}>
-              <PaperTextInput
-                mode="outlined"
-                dense
-                value={modelSearchQuery}
-                onChangeText={setModelSearchQuery}
-                placeholder="Search models or providers"
-                autoCapitalize="none"
-                autoCorrect={false}
-                left={<PaperTextInput.Icon icon="magnify" />}
-                right={
-                  modelSearchQuery ? (
-                    <PaperTextInput.Icon
-                      icon="close"
-                      onPress={() => setModelSearchQuery("")}
-                    />
-                  ) : undefined
-                }
-              />
-            </View>
-            {providersLoading ? (
-              <View style={styles.sheetLoading}>
-                <ActivityIndicator />
-              </View>
-            ) : (
-              <FlatList
-                data={sortedModels}
-                keyExtractor={(item) => item.id}
-                style={styles.sheetList}
-                renderItem={({ item }) => {
-                  const isActiveModel = activeModel?.id === item.id;
-                  return (
-                    <Pressable
-                      onPress={() => {
-                        setActiveModel(item);
-                        setShowProviderSheet(false);
-                        setModelSearchQuery("");
-                      }}
-                      style={[
-                        styles.sheetItem,
-                        {
-                          backgroundColor: isActiveModel
-                            ? "rgba(150,150,150,0.12)"
-                            : "transparent",
-                          borderColor,
-                        },
-                      ]}
-                    >
-                      <View style={styles.sheetItemRow}>
-                        <View
-                          style={[
-                            styles.statusDot,
-                            {
-                              backgroundColor: isActiveModel
-                                ? "#00FF41"
-                                : "#6366F1",
-                            },
-                          ]}
-                        />
-                        <View style={styles.sheetItemContent}>
-                          <Text
-                            variant="bodyLarge"
-                            style={{
-                              fontWeight: isActiveModel ? "600" : "500",
-                              color: theme.colors.onSurface,
-                            }}
-                            numberOfLines={1}
-                          >
-                            {item.name}
-                          </Text>
-                          <Text
-                            variant="bodySmall"
-                            style={{ color: metaColor, marginTop: 2 }}
-                            numberOfLines={1}
-                          >
-                            {item.providerName}
-                          </Text>
-                        </View>
-                      </View>
-                    </Pressable>
-                  );
-                }}
-                ListEmptyComponent={
-                  <View style={styles.sheetEmpty}>
-                    <Text
-                      variant="bodyMedium"
-                      style={{ color: theme.colors.onSurfaceVariant }}
-                    >
-                      No models found
-                    </Text>
-                  </View>
-                }
-              />
-            )}
-          </View>
-        </Pressable>
-      </Modal>
+        onSelectModel={(item) => {
+          setActiveModel(item);
+          setShowProviderSheet(false);
+          setModelSearchQuery("");
+        }}
+      />
 
-      <Modal
+      <AgentSelectionSheet
         visible={showAgentSheet}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
+        agents={sortedAgents}
+        activeAgentName={activeAgent?.name}
+        loading={agentsLoading}
+        searchQuery={agentSearchQuery}
+        onSearchChange={setAgentSearchQuery}
+        onClose={() => {
           setShowAgentSheet(false);
           setAgentSearchQuery("");
         }}
-      >
-        <Pressable
-          style={styles.sheetOverlay}
-          onPress={() => {
-            setShowAgentSheet(false);
-            setAgentSearchQuery("");
-          }}
-        >
-          <View style={[styles.sheetContainer, { backgroundColor: sheetBg }]}>
-            <View style={styles.sheetHandle} />
-            <Text variant="titleMedium" style={styles.sheetTitle}>
-              Select Agent
-            </Text>
-            <View style={styles.sheetSearchContainer}>
-              <PaperTextInput
-                mode="outlined"
-                dense
-                value={agentSearchQuery}
-                onChangeText={setAgentSearchQuery}
-                placeholder="Search agents"
-                autoCapitalize="none"
-                autoCorrect={false}
-                left={<PaperTextInput.Icon icon="magnify" />}
-                right={
-                  agentSearchQuery ? (
-                    <PaperTextInput.Icon
-                      icon="close"
-                      onPress={() => setAgentSearchQuery("")}
-                    />
-                  ) : undefined
-                }
-              />
-            </View>
-            {agentsLoading ? (
-              <View style={styles.sheetLoading}>
-                <ActivityIndicator />
-              </View>
-            ) : (
-              <FlatList
-                data={sortedAgents}
-                keyExtractor={(item) => item.name}
-                style={styles.sheetList}
-                renderItem={({ item }) => {
-                  const isActiveAgent = activeAgent?.name === item.name;
-                  return (
-                    <Pressable
-                      onPress={() => {
-                        setActiveAgent(item);
-                        setShowAgentSheet(false);
-                        setAgentSearchQuery("");
-                      }}
-                      style={[
-                        styles.sheetItem,
-                        {
-                          backgroundColor: isActiveAgent
-                            ? "rgba(150,150,150,0.12)"
-                            : "transparent",
-                          borderColor,
-                        },
-                      ]}
-                    >
-                      <View style={styles.sheetItemRow}>
-                        <View
-                          style={[
-                            styles.statusDot,
-                            {
-                              backgroundColor: isActiveAgent
-                                ? "#00FF41"
-                                : "#14B8A6",
-                            },
-                          ]}
-                        />
-                        <View style={styles.sheetItemContent}>
-                          <Text
-                            variant="bodyLarge"
-                            style={{
-                              fontWeight: isActiveAgent ? "600" : "500",
-                              color: theme.colors.onSurface,
-                            }}
-                            numberOfLines={1}
-                          >
-                            {item.name}
-                          </Text>
-                          <Text
-                            variant="bodySmall"
-                            style={{ color: metaColor, marginTop: 2 }}
-                            numberOfLines={2}
-                          >
-                            {item.description?.trim() || getAgentSubtitle(item)}
-                          </Text>
-                        </View>
-                      </View>
-                    </Pressable>
-                  );
-                }}
-                ListEmptyComponent={
-                  <View style={styles.sheetEmpty}>
-                    <Text
-                      variant="bodyMedium"
-                      style={{ color: theme.colors.onSurfaceVariant }}
-                    >
-                      No agents found
-                    </Text>
-                  </View>
-                }
-              />
-            )}
-          </View>
-        </Pressable>
-      </Modal>
+        onSelectAgent={(item) => {
+          setActiveAgent(item);
+          setShowAgentSheet(false);
+          setAgentSearchQuery("");
+        }}
+        getAgentSubtitle={getAgentSubtitle}
+      />
 
-      <Modal
+      <BranchSelectionSheet
         visible={showBranchSheet}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
+        branches={sortedBranches}
+        currentBranch={currentBranch}
+        loading={branchesLoading}
+        searchQuery={branchSearchQuery}
+        onSearchChange={setBranchSearchQuery}
+        onClose={() => {
           setShowBranchSheet(false);
           setBranchSearchQuery("");
         }}
-      >
-        <Pressable
-          style={styles.sheetOverlay}
-          onPress={() => {
-            setShowBranchSheet(false);
-            setBranchSearchQuery("");
-          }}
-        >
-          <View style={[styles.sheetContainer, { backgroundColor: sheetBg }]}>
-            <View style={styles.sheetHandle} />
-            <Text variant="titleMedium" style={styles.sheetTitle}>
-              Select Branch
-            </Text>
-            <View style={styles.sheetSearchContainer}>
-              <PaperTextInput
-                mode="outlined"
-                dense
-                value={branchSearchQuery}
-                onChangeText={setBranchSearchQuery}
-                placeholder="Search branches"
-                autoCapitalize="none"
-                autoCorrect={false}
-                left={<PaperTextInput.Icon icon="magnify" />}
-                right={
-                  branchSearchQuery ? (
-                    <PaperTextInput.Icon
-                      icon="close"
-                      onPress={() => setBranchSearchQuery("")}
-                    />
-                  ) : undefined
-                }
-              />
-            </View>
-            {branchesLoading ? (
-              <View style={styles.sheetLoading}>
-                <ActivityIndicator />
-              </View>
-            ) : (
-              <FlatList
-                data={sortedBranches}
-                keyExtractor={(item) => item.name}
-                style={styles.sheetList}
-                renderItem={({ item }) => {
-                  const isCurrentBranch = item.name === currentBranch;
-                  return (
-                    <Pressable
-                      onPress={async () => {
-                        if (!isCurrentBranch) {
-                          await switchBranchMutation.mutateAsync(item.name);
-                        }
-                        setShowBranchSheet(false);
-                        setBranchSearchQuery("");
-                      }}
-                      style={[
-                        styles.sheetItem,
-                        {
-                          backgroundColor: isCurrentBranch
-                            ? "rgba(150,150,150,0.12)"
-                            : "transparent",
-                          borderColor,
-                        },
-                      ]}
-                    >
-                      <View style={styles.sheetItemRow}>
-                        <View
-                          style={[
-                            styles.statusDot,
-                            {
-                              backgroundColor: isCurrentBranch
-                                ? "#00FF41"
-                                : "#F2A900",
-                            },
-                          ]}
-                        />
-                        <View style={styles.sheetItemContent}>
-                          <Text
-                            variant="bodyLarge"
-                            style={{
-                              fontWeight: isCurrentBranch ? "600" : "500",
-                              color: theme.colors.onSurface,
-                            }}
-                            numberOfLines={1}
-                          >
-                            {item.name}
-                          </Text>
-                        </View>
-                      </View>
-                    </Pressable>
-                  );
-                }}
-                ListEmptyComponent={
-                  <View style={styles.sheetEmpty}>
-                    <Text
-                      variant="bodyMedium"
-                      style={{ color: theme.colors.onSurfaceVariant }}
-                    >
-                      No branches found
-                    </Text>
-                  </View>
-                }
-              />
-            )}
-          </View>
-        </Pressable>
-      </Modal>
+        onSelectBranch={async (item) => {
+          if (item.name !== currentBranch) {
+            await switchBranchMutation.mutateAsync(item.name);
+          }
+          setShowBranchSheet(false);
+          setBranchSearchQuery("");
+        }}
+      />
 
       <SessionDrawer
         visible={showDrawer}
@@ -2313,65 +1959,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     gap: 12,
   },
-  sheetOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  sheetContainer: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: "60%",
-    paddingBottom: 32,
-  },
-  sheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#CBD5E1",
-    alignSelf: "center",
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  sheetTitle: {
-    fontWeight: "700",
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-  },
-  sheetLoading: {
-    padding: 32,
-    alignItems: "center",
-  },
-  sheetSearchContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  sheetList: {
-    paddingHorizontal: 12,
-  },
-  sheetItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.05)",
-  },
-  sheetItemRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  sheetItemContent: {
-    flex: 1,
-  },
-  sheetEmpty: {
-    padding: 32,
-    alignItems: "center",
-  },
   gitButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -2381,7 +1968,7 @@ const styles = StyleSheet.create({
   },
   scrollToBottomButton: {
     position: "absolute",
-    right: 16,
+    right: 20,
     width: 36,
     height: 36,
     borderRadius: 18,
