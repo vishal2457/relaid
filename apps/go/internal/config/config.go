@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/joho/godotenv"
 )
@@ -16,9 +17,11 @@ type Config struct {
 	OpencodeBin             string
 	OpencodeCwd             string
 	OpencodeBaseURL         string
+	OpencodeDBPath          string
 	OpencodeMaxPromptLength int
 	CodexBin                string
 	CodexCwd                string
+	DBPath                  string
 	MissingConfig           []string
 }
 
@@ -33,9 +36,11 @@ func Load() Config {
 		OpencodeBin:             getEnv("OPENCODE_BIN", "opencode"),
 		OpencodeCwd:             getWorkingDir(),
 		OpencodeBaseURL:         getEnv("OPENCODE_BASE_URL", ""),
+		OpencodeDBPath:          getEnv("OPENCODE_DB_PATH", defaultOpenCodeDBPath()),
 		OpencodeMaxPromptLength: getIntEnv("OPENCODE_MAX_PROMPT_LENGTH", 8000),
 		CodexBin:                getEnv("CODEX_BIN", "codex"),
 		CodexCwd:                getWorkingDir(),
+		DBPath:                  getEnv("RELAID_DB_PATH", defaultDBPath()),
 	}
 
 	if value := os.Getenv("OPENCODE_CWD"); value != "" {
@@ -44,12 +49,6 @@ func Load() Config {
 
 	if value := os.Getenv("CODEX_CWD"); value != "" {
 		cfg.CodexCwd = value
-	}
-
-	for _, key := range []string{"GOOSE_DBSTRING", "JWT_SECRET"} {
-		if os.Getenv(key) == "" {
-			cfg.MissingConfig = append(cfg.MissingConfig, key)
-		}
 	}
 
 	return cfg
@@ -80,4 +79,20 @@ func getIntEnv(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func defaultDBPath() string {
+	configDir, err := os.UserConfigDir()
+	if err != nil || configDir == "" {
+		return filepath.Join(".", "relaid.db")
+	}
+	return filepath.Join(configDir, "relaid", "relaid.db")
+}
+
+func defaultOpenCodeDBPath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		return filepath.Join(".", "opencode.db")
+	}
+	return filepath.Join(homeDir, ".local", "share", "opencode", "opencode.db")
 }

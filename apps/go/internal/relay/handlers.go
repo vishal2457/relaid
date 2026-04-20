@@ -5,19 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"relaid/internal/agent"
 	"relaid/internal/filesystem"
 	gitservice "relaid/internal/git"
+	"relaid/internal/workspace"
 )
 
 type Handler struct {
-	client   *Client
-	registry *agent.Registry
-	logger   *log.Logger
+	client     *Client
+	registry   *agent.Registry
+	logger     *log.Logger
+	workspaces *workspace.Service
 
 	dirService         *filesystem.DirectoryService
 	pendingPermissions map[string]chan PermissionReply
@@ -33,11 +34,12 @@ type QuestionReply struct {
 	Answers [][]string
 }
 
-func NewHandler(client *Client, registry *agent.Registry, logger *log.Logger) *Handler {
+func NewHandler(client *Client, registry *agent.Registry, workspaces *workspace.Service, logger *log.Logger) *Handler {
 	return &Handler{
 		client:             client,
 		registry:           registry,
 		logger:             logger,
+		workspaces:         workspaces,
 		dirService:         filesystem.NewDirectoryService(),
 		pendingPermissions: make(map[string]chan PermissionReply),
 		pendingQuestions:   make(map[string]chan QuestionReply),
@@ -185,18 +187,41 @@ func (h *Handler) getProvider() (agent.AgentProvider, error) {
 }
 
 func (h *Handler) resolveWorktree(projectID string) (string, error) {
+	workspaceItem, err := h.resolveWorkspace(projectID)
+	if err != nil {
+		return "", err
+	}
+	return workspaceItem.Directory, nil
+}
+
+func (h *Handler) resolveWorkspace(projectID string) (*workspace.Workspace, error) {
+	if h.workspaces == nil {
+		return nil, fmt.Errorf("workspace service unavailable")
+	}
+	workspaceItem, err := h.workspaces.GetByKey(context.Background(), projectID)
+	if err != nil {
+		return nil, err
+	}
+	if workspaceItem == nil {
+		return nil, fmt.Errorf("project %q not found", projectID)
+	}
+	return workspaceItem, nil
+}
+
+func (h *Handler) resolveOpencodeProjectID(projectKey string) (*workspace.Workspace, string, error) {
+	workspaceItem, err := h.resolveWorkspace(projectKey)
+	if err != nil {
+		return nil, "", err
+	}
 	provider, err := h.getProvider()
 	if err != nil {
-		return "", fmt.Errorf("provider not found: %w", err)
+		return nil, "", err
 	}
-	project, err := provider.Projects().Get(context.Background(), projectID)
+	projectID, err := h.workspaces.EnsureOpencodeProjectID(context.Background(), provider, workspaceItem)
 	if err != nil {
-		return "", fmt.Errorf("project %q not found: %w", projectID, err)
+		return nil, "", err
 	}
-	if project == nil {
-		return "", fmt.Errorf("project %q not found", projectID)
-	}
-	return project.Worktree, nil
+	return workspaceItem, projectID, nil
 }
 
 func (h *Handler) emit(event string, payload interface{}) {
@@ -225,15 +250,7 @@ func (h *Handler) handleProjectsList(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
-	if err != nil {
-		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
-		return
-	}
-
-	h.logger.Printf("relay: provider: %v", provider)
-
-	projects, err := provider.Projects().List(context.Background())
+	projects, err := h.workspaces.List(context.Background())
 	if err != nil {
 		h.logger.Printf("relay: failed to list projects: %v", err)
 		h.emit(EventProjectsListResponse, ProjectsListResponse{
@@ -248,19 +265,13 @@ func (h *Handler) handleProjectsList(args []json.RawMessage) {
 		Projects:  make([]ProjectPayload, 0, len(projects)),
 	}
 	for _, p := range projects {
-		name := p.ID
-		if p.Worktree != "" {
-			name = filepath.Base(p.Worktree)
-		}
 		pp := ProjectPayload{
-			ID:        p.ID,
-			Name:      name,
-			Folder:    p.Worktree,
-			CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
-			UpdatedAt: p.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
-		}
-		if p.Initialized != nil {
-			pp.UpdatedAt = p.Initialized.Format("2006-01-02T15:04:05.000Z")
+			ID:          p.Key,
+			Name:        p.Name,
+			Description: p.Description,
+			Folder:      p.Directory,
+			CreatedAt:   p.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
+			UpdatedAt:   p.UpdatedAt.Format("2006-01-02T15:04:05.000Z"),
 		}
 		payload.Projects = append(payload.Projects, pp)
 	}
@@ -278,13 +289,7 @@ func (h *Handler) handleProjectGet(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
-	if err != nil {
-		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
-		return
-	}
-
-	project, err := provider.Projects().Get(context.Background(), req.ProjectID)
+	project, err := h.resolveWorkspace(req.ProjectID)
 	if err != nil || project == nil {
 		h.emit(EventProjectGetResponse, ProjectGetResponse{
 			RequestID: req.RequestID,
@@ -293,19 +298,13 @@ func (h *Handler) handleProjectGet(args []json.RawMessage) {
 		return
 	}
 
-	name := project.ID
-	if project.Worktree != "" {
-		name = filepath.Base(project.Worktree)
-	}
 	pp := &ProjectPayload{
-		ID:        project.ID,
-		Name:      name,
-		Folder:    project.Worktree,
-		CreatedAt: project.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
-		UpdatedAt: project.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
-	}
-	if project.Initialized != nil {
-		pp.UpdatedAt = project.Initialized.Format("2006-01-02T15:04:05.000Z")
+		ID:          project.Key,
+		Name:        project.Name,
+		Description: project.Description,
+		Folder:      project.Directory,
+		CreatedAt:   project.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
+		UpdatedAt:   project.UpdatedAt.Format("2006-01-02T15:04:05.000Z"),
 	}
 
 	h.emit(EventProjectGetResponse, ProjectGetResponse{
@@ -396,7 +395,16 @@ func (h *Handler) handleProjectFileSearch(args []json.RawMessage) {
 		return
 	}
 
-	matches, err := provider.Projects().FileSearch(context.Background(), req.ProjectID, req.Query, req.Limit)
+	_, opencodeProjectID, err := h.resolveOpencodeProjectID(req.ProjectID)
+	if err != nil {
+		h.emit(EventProjectFileSearchResponse, ProjectFileSearchResponse{
+			RequestID: req.RequestID,
+			Results:   []ProjectFileMatch{},
+		})
+		return
+	}
+
+	matches, err := provider.Projects().FileSearch(context.Background(), opencodeProjectID, req.Query, req.Limit)
 	if err != nil {
 		h.emit(EventProjectFileSearchResponse, ProjectFileSearchResponse{
 			RequestID: req.RequestID,
@@ -524,7 +532,7 @@ func (h *Handler) handleSessionsList(args []json.RawMessage) {
 		Sessions:  make([]SessionPayload, 0, len(sessions)),
 	}
 	for _, s := range sessions {
-		payload.Sessions = append(payload.Sessions, convertSession(s))
+		payload.Sessions = append(payload.Sessions, h.convertSession(s))
 	}
 
 	h.emit(EventSessionsListResponse, payload)
@@ -557,7 +565,7 @@ func (h *Handler) handleSessionGet(args []json.RawMessage) {
 
 	h.emit(EventSessionGetResponse, SessionGetResponse{
 		RequestID: req.RequestID,
-		Session:   convertSessionPtr(session),
+		Session:   h.convertSessionPtr(session),
 	})
 }
 
@@ -608,7 +616,13 @@ func (h *Handler) handleSessionCreate(args []json.RawMessage) {
 		return
 	}
 
-	session, err := provider.Sessions().Create(context.Background(), req.ProjectID)
+	_, opencodeProjectID, err := h.resolveOpencodeProjectID(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "SESSION_CREATE_ERROR", err.Error())
+		return
+	}
+
+	session, err := provider.Sessions().Create(context.Background(), opencodeProjectID)
 	if err != nil {
 		h.emitError(req.RequestID, "SESSION_CREATE_ERROR", err.Error())
 		return
@@ -616,7 +630,7 @@ func (h *Handler) handleSessionCreate(args []json.RawMessage) {
 
 	h.emit(EventSessionCreateResponse, SessionCreateResponse{
 		RequestID: req.RequestID,
-		Session:   convertSession(*session),
+		Session:   h.convertSession(*session),
 	})
 }
 
@@ -690,7 +704,7 @@ func (h *Handler) handleSessionUpdate(args []json.RawMessage) {
 
 	h.emit(EventSessionUpdateResponse, SessionUpdateResponse{
 		RequestID: req.RequestID,
-		Session:   convertSessionPtr(session),
+		Session:   h.convertSessionPtr(session),
 	})
 }
 
@@ -724,10 +738,24 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		return
 	}
 
+	_, opencodeProjectID, err := h.resolveOpencodeProjectID(req.ProjectID)
+	if err != nil {
+		h.emit(EventSessionPromptResponse, SessionPromptResponsePayload{
+			RequestID: req.RequestID,
+			ProjectID: req.ProjectID,
+			SessionID: req.SessionID,
+			Success:   false,
+			Error:     err.Error(),
+			ExitCode:  -1,
+			Duration:  0,
+		})
+		return
+	}
+
 	runInput := agent.RunInput{
 		Prompt:    req.Prompt,
 		SessionID: req.SessionID,
-		ProjectID: req.ProjectID,
+		ProjectID: opencodeProjectID,
 		Agent:     req.Agent,
 	}
 	if req.Model != nil {
@@ -880,7 +908,7 @@ func (h *Handler) handleAgentsList(args []json.RawMessage) {
 
 	directory := req.Directory
 	if directory == "" && req.ProjectID != "" {
-		project, err := provider.Projects().Get(context.Background(), req.ProjectID)
+		workspaceItem, err := h.resolveWorkspace(req.ProjectID)
 		if err != nil {
 			h.emit(EventAgentsListResponse, AgentsListResponse{
 				RequestID: req.RequestID,
@@ -888,8 +916,8 @@ func (h *Handler) handleAgentsList(args []json.RawMessage) {
 			})
 			return
 		}
-		if project != nil {
-			directory = project.Worktree
+		if workspaceItem != nil {
+			directory = workspaceItem.Directory
 		}
 	}
 
@@ -1918,10 +1946,21 @@ func (h *Handler) RequestQuestion(payload QuestionRequestPayload) ([][]string, e
 	}
 }
 
-func convertSession(s agent.Session) SessionPayload {
+func (h *Handler) convertSession(s agent.Session) SessionPayload {
+	projectKey := s.ProjectID
+	if s.Directory != "" {
+		if workspaceItem, err := h.workspaces.GetByDirectory(context.Background(), s.Directory); err == nil && workspaceItem != nil {
+			projectKey = workspaceItem.Key
+		}
+	} else if s.ProjectID != "" {
+		if workspaceItem, err := h.workspaces.GetByOpencodeProjectID(context.Background(), s.ProjectID); err == nil && workspaceItem != nil {
+			projectKey = workspaceItem.Key
+		}
+	}
+
 	sp := SessionPayload{
 		ID:        s.ID,
-		ProjectID: s.ProjectID,
+		ProjectID: projectKey,
 		Directory: s.Directory,
 		Prompt:    s.Title,
 		Status:    string(s.Status),
@@ -1950,11 +1989,11 @@ func convertSession(s agent.Session) SessionPayload {
 	return sp
 }
 
-func convertSessionPtr(s *agent.Session) *SessionPayload {
+func (h *Handler) convertSessionPtr(s *agent.Session) *SessionPayload {
 	if s == nil {
 		return nil
 	}
-	sp := convertSession(*s)
+	sp := h.convertSession(*s)
 	return &sp
 }
 
@@ -1989,7 +2028,15 @@ func (h *Handler) handleSkillsList(args []json.RawMessage) {
 		return
 	}
 
-	skills, err := skillsSvc.List(context.Background(), req.ProjectID, req.Query)
+	directory := ""
+	if req.ProjectID != "" {
+		workspaceItem, err := h.resolveWorkspace(req.ProjectID)
+		if err == nil && workspaceItem != nil {
+			directory = workspaceItem.Directory
+		}
+	}
+
+	skills, err := skillsSvc.List(context.Background(), directory, req.Query)
 	if err != nil {
 		h.logger.Printf("[skills-debug] handleSkillsList: skills list error: %v", err)
 		h.emit(EventSkillsListResponse, SkillsListResponse{

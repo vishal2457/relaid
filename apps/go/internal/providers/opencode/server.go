@@ -142,7 +142,7 @@ func (sm *ServerManager) checkHealth(url string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/health", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/config", nil)
 	if err != nil {
 		return false
 	}
@@ -156,7 +156,7 @@ func (sm *ServerManager) checkHealth(url string) bool {
 }
 
 func (sm *ServerManager) waitHealthy(ctx context.Context, url string) error {
-	healthURL := url + "/health"
+	healthURL := url + "/config"
 	delay := 200 * time.Millisecond
 
 	for i := 0; i < 150; i++ {

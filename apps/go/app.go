@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"relaid/internal/agent"
 	"relaid/internal/config"
+	"relaid/internal/db"
 	opencodeprovider "relaid/internal/providers/opencode"
 	"relaid/internal/relay"
 	"relaid/internal/secrets"
 	"relaid/internal/server"
+	"relaid/internal/workspace"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -25,13 +28,15 @@ var (
 )
 
 type App struct {
-	ctx      context.Context
-	server   *server.Server
-	keychain *secrets.Keychain
-	handler  *relay.Handler
-	client   *relay.Client
-	relayURL string
-	relayMu  sync.Mutex
+	ctx        context.Context
+	server     *server.Server
+	db         *db.Database
+	workspaces *workspace.Service
+	keychain   *secrets.Keychain
+	handler    *relay.Handler
+	client     *relay.Client
+	relayURL   string
+	relayMu    sync.Mutex
 }
 
 func NewApp() *App {
@@ -46,7 +51,29 @@ func (a *App) startup(ctx context.Context) {
 	log.Println("Starting desktop")
 
 	cfg := config.Load()
-	a.server = server.New(cfg)
+	database, err := db.Open(cfg.DBPath)
+	if err != nil {
+		log.Fatalf("database init failed: %v", err)
+	}
+	if err := database.Migrate(ctx); err != nil {
+		log.Fatalf("database migration failed: %v", err)
+	}
+	a.db = database
+	a.workspaces = workspace.NewService(database.Queries())
+	a.server = server.New(cfg, a.workspaces)
+
+	if provider, err := a.server.Registry().Get(agent.ProviderOpencode); err == nil {
+		if err := a.workspaces.SyncOpencodeProjects(ctx, provider); err != nil {
+			log.Printf("workspace sync via provider failed: %v", err)
+			if dbErr := a.workspaces.SyncOpencodeDatabase(ctx, cfg.OpencodeDBPath); dbErr != nil {
+				log.Printf("workspace sync via local opencode db failed: %v", dbErr)
+			}
+		}
+	} else {
+		if err := a.workspaces.SyncOpencodeDatabase(ctx, cfg.OpencodeDBPath); err != nil {
+			log.Printf("workspace sync via local opencode db failed: %v", err)
+		}
+	}
 
 	go func() {
 		log.Println("Starting embedded server")
@@ -98,13 +125,18 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 
 	if a.server == nil {
-		return
+	} else {
+		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := a.server.Shutdown(shutdownCtx); err != nil {
+			wruntime.LogErrorf(ctx, "embedded server shutdown failed: %v", err)
+		}
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := a.server.Shutdown(shutdownCtx); err != nil {
-		wruntime.LogErrorf(ctx, "embedded server shutdown failed: %v", err)
+	if a.db != nil {
+		if err := a.db.Close(); err != nil {
+			wruntime.LogErrorf(ctx, "database shutdown failed: %v", err)
+		}
 	}
 }
 
@@ -264,7 +296,7 @@ func (a *App) configureRelayClient(relayURL string, creds relay.DeviceCredential
 		},
 	})
 
-	handler := relay.NewHandler(client, a.server.Registry(), log.Default())
+	handler := relay.NewHandler(client, a.server.Registry(), a.workspaces, log.Default())
 
 	bridge := relay.NewRelayPermissionBridge(handler)
 	if p, err := a.server.Registry().Get(agent.ProviderOpencode); err == nil {
@@ -286,4 +318,75 @@ func (a *App) configureRelayClient(relayURL string, creds relay.DeviceCredential
 	a.relayMu.Unlock()
 
 	return nil
+}
+
+type WorkspacePayload struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Directory   string `json:"directory"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+}
+
+func (a *App) ListWorkspaces() ([]WorkspacePayload, error) {
+	if a.workspaces == nil {
+		return nil, fmt.Errorf("workspace service unavailable")
+	}
+	items, err := a.workspaces.List(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	result := make([]WorkspacePayload, 0, len(items))
+	for _, item := range items {
+		result = append(result, serializeWorkspace(item))
+	}
+	return result, nil
+}
+
+func (a *App) SelectWorkspaceDirectory() (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("application context is unavailable")
+	}
+	selected, err := wruntime.OpenDirectoryDialog(a.ctx, wruntime.OpenDialogOptions{
+		Title: "Select workspace directory",
+	})
+	if err != nil {
+		return "", err
+	}
+	return selected, nil
+}
+
+func (a *App) CreateWorkspace(directory string) (*WorkspacePayload, error) {
+	if a.workspaces == nil {
+		return nil, fmt.Errorf("workspace service unavailable")
+	}
+
+	item, err := a.workspaces.Create(context.Background(), workspace.CreateInput{
+		Name:      filepath.Base(directory),
+		Directory: directory,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if a.server != nil {
+		if provider, err := a.server.Registry().Get(agent.ProviderOpencode); err == nil {
+			_, _ = a.workspaces.EnsureOpencodeProjectID(context.Background(), provider, item)
+		}
+	}
+
+	payload := serializeWorkspace(*item)
+	return &payload, nil
+}
+
+func serializeWorkspace(item workspace.Workspace) WorkspacePayload {
+	return WorkspacePayload{
+		ID:          item.Key,
+		Name:        item.Name,
+		Description: item.Description,
+		Directory:   item.Directory,
+		CreatedAt:   item.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   item.UpdatedAt.Format(time.RFC3339),
+	}
 }

@@ -17,6 +17,7 @@ import (
 	healthroute "relaid/internal/routes/health"
 	projectsroute "relaid/internal/routes/projects"
 	custommiddleware "relaid/internal/shared/middleware"
+	"relaid/internal/workspace"
 
 	"github.com/labstack/echo/v4"
 )
@@ -24,12 +25,13 @@ import (
 type Server struct {
 	cfg        config.Config
 	registry   *agent.Registry
+	workspaces *workspace.Service
 	echo       *echo.Echo
 	httpServer *http.Server
 	listener   net.Listener
 }
 
-func New(cfg config.Config) *Server {
+func New(cfg config.Config, workspaces *workspace.Service) *Server {
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -50,7 +52,8 @@ func New(cfg config.Config) *Server {
 			opencodeprovider.New(cfg, log.Default()),
 			codexprovider.New(cfg, log.Default()),
 		),
-		echo: e,
+		workspaces: workspaces,
+		echo:       e,
 		httpServer: &http.Server{
 			Addr:    cfg.ServerAddr,
 			Handler: e,
@@ -69,7 +72,7 @@ func New(cfg config.Config) *Server {
 	})
 	agentsroute.Register(protected.Group("/agents"), s.registry)
 	gitroute.Register(protected.Group("/git"), s.registry)
-	projectsroute.Register(protected.Group("/projects"), s.registry)
+	projectsroute.Register(protected.Group("/projects"), s.registry, s.workspaces)
 
 	return s
 }
@@ -109,6 +112,10 @@ func (s *Server) Issues() []string {
 
 func (s *Server) Registry() *agent.Registry {
 	return s.registry
+}
+
+func (s *Server) Workspaces() *workspace.Service {
+	return s.workspaces
 }
 
 func (s *Server) Address() string {

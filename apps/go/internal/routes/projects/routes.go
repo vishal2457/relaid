@@ -1,12 +1,14 @@
 package projects
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
 	"relaid/internal/agent"
 	gitservice "relaid/internal/git"
 	"relaid/internal/shared/httpresponse"
+	"relaid/internal/workspace"
 
 	"github.com/labstack/echo/v4"
 )
@@ -15,28 +17,56 @@ type RegistryProvider interface {
 	Get(id agent.ProviderID) (agent.AgentProvider, error)
 }
 
-func Register(api *echo.Group, registry RegistryProvider) {
-	api.GET("/:projectId/branches", listBranches(registry))
-	api.POST("/:projectId/branches/switch", switchBranch(registry))
-	api.GET("/:projectId/file-search", fileSearch(registry))
+func Register(api *echo.Group, registry RegistryProvider, workspaces *workspace.Service) {
+	api.GET("", listWorkspaces(workspaces))
+	api.GET("/:projectId", getWorkspace(workspaces))
+	api.GET("/:projectId/branches", listBranches(registry, workspaces))
+	api.POST("/:projectId/branches/switch", switchBranch(registry, workspaces))
+	api.GET("/:projectId/file-search", fileSearch(registry, workspaces))
 }
 
-func resolveWorktree(registry RegistryProvider, c echo.Context) (string, error) {
-	projectID := c.Param("projectId")
-	provider, err := registry.Get(agent.ProviderOpencode)
-	if err != nil {
-		return "", echo.NewHTTPError(http.StatusNotFound, "Provider not found")
-	}
-	project, err := provider.Projects().Get(c.Request().Context(), projectID)
-	if err != nil || project == nil {
-		return "", echo.NewHTTPError(http.StatusNotFound, "Project not found")
-	}
-	return project.Worktree, nil
-}
-
-func listBranches(registry RegistryProvider) echo.HandlerFunc {
+func listWorkspaces(workspaces *workspace.Service) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		worktree, err := resolveWorktree(registry, c)
+		items, err := workspaces.List(c.Request().Context())
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		payload := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			payload = append(payload, serializeWorkspace(item))
+		}
+		return httpresponse.Success(c, map[string]any{"projects": payload}, "Projects fetched successfully")
+	}
+}
+
+func getWorkspace(workspaces *workspace.Service) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		item, err := workspaces.GetByKey(c.Request().Context(), c.Param("projectId"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		if item == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "Project not found")
+		}
+		return httpresponse.Success(c, map[string]any{"project": serializeWorkspace(*item)}, "Project fetched successfully")
+	}
+}
+
+func resolveWorkspace(ctx context.Context, workspaces *workspace.Service, key string) (*workspace.Workspace, error) {
+	item, err := workspaces.GetByKey(ctx, key)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if item == nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "Project not found")
+	}
+	return item, nil
+
+}
+
+func listBranches(registry RegistryProvider, workspaces *workspace.Service) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		worktree, err := resolveWorktree(c.Request().Context(), registry, c.Param("projectId"), workspaces)
 		if err != nil {
 			return err
 		}
@@ -64,9 +94,9 @@ func listBranches(registry RegistryProvider) echo.HandlerFunc {
 	}
 }
 
-func switchBranch(registry RegistryProvider) echo.HandlerFunc {
+func switchBranch(registry RegistryProvider, workspaces *workspace.Service) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		worktree, err := resolveWorktree(registry, c)
+		worktree, err := resolveWorktree(c.Request().Context(), registry, c.Param("projectId"), workspaces)
 		if err != nil {
 			return err
 		}
@@ -87,9 +117,13 @@ func switchBranch(registry RegistryProvider) echo.HandlerFunc {
 	}
 }
 
-func fileSearch(registry RegistryProvider) echo.HandlerFunc {
+func fileSearch(registry RegistryProvider, workspaces *workspace.Service) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		projectID := c.Param("projectId")
+		workspaceItem, err := resolveWorkspace(c.Request().Context(), workspaces, c.Param("projectId"))
+		if err != nil {
+			return err
+		}
+
 		provider, err := registry.Get(agent.ProviderOpencode)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusNotFound, "Provider not found")
@@ -107,6 +141,11 @@ func fileSearch(registry RegistryProvider) echo.HandlerFunc {
 			}
 		}
 
+		projectID, err := workspaces.EnsureOpencodeProjectID(c.Request().Context(), provider, workspaceItem)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		}
+
 		matches, err := provider.Projects().FileSearch(c.Request().Context(), projectID, query, limit)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -115,5 +154,37 @@ func fileSearch(registry RegistryProvider) echo.HandlerFunc {
 		return httpresponse.Success(c, map[string]any{
 			"results": matches,
 		}, "File search completed")
+	}
+}
+
+func resolveWorktree(ctx context.Context, registry RegistryProvider, key string, workspaces *workspace.Service) (string, error) {
+	if workspaces != nil {
+		item, err := resolveWorkspace(ctx, workspaces, key)
+		if err != nil {
+			return "", err
+		}
+		return item.Directory, nil
+	}
+
+	provider, err := registry.Get(agent.ProviderOpencode)
+	if err != nil {
+		return "", echo.NewHTTPError(http.StatusNotFound, "Provider not found")
+	}
+	project, err := provider.Projects().Get(ctx, key)
+	if err != nil || project == nil {
+		return "", echo.NewHTTPError(http.StatusNotFound, "Project not found")
+	}
+	return project.Worktree, nil
+}
+
+func serializeWorkspace(item workspace.Workspace) map[string]any {
+	return map[string]any{
+		"id":          item.Key,
+		"name":        item.Name,
+		"description": item.Description,
+		"folder":      item.Directory,
+		"directory":   item.Directory,
+		"createdAt":   item.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
+		"updatedAt":   item.UpdatedAt.Format("2006-01-02T15:04:05.000Z"),
 	}
 }

@@ -58,6 +58,7 @@ type FileMatch struct {
 type ProjectService interface {
 	List(context.Context) ([]Project, error)
 	Get(context.Context, string) (*Project, error)
+	ResolveIDByDirectory(context.Context, string) (string, error)
 	FileSearch(ctx context.Context, projectID string, query string, limit int) ([]FileMatch, error)
 }
 

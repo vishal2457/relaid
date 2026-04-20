@@ -154,6 +154,12 @@ func (s *projectService) Get(ctx context.Context, id string) (*agent.Project, er
 	return s.sdk.GetProject(ctx, id)
 }
 
+func (s *projectService) ResolveIDByDirectory(ctx context.Context, directory string) (string, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
+	return s.sdk.ResolveProjectByDirectory(ctx, directory)
+}
+
 func (s *projectService) FileSearch(ctx context.Context, projectID string, query string, limit int) ([]agent.FileMatch, error) {
 	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
 	defer cancel()
@@ -190,7 +196,11 @@ func (s *skillService) List(ctx context.Context, projectID string, query string)
 	if projectID != "" {
 		project, err := s.sdk.GetProject(ctx, projectID)
 		if err != nil {
-			s.logger.Printf("[skills] project lookup error for %q: %v", projectID, err)
+			if _, statErr := os.Stat(projectID); statErr == nil {
+				worktree = projectID
+			} else {
+				s.logger.Printf("[skills] project lookup error for %q: %v", projectID, err)
+			}
 		} else if project != nil {
 			worktree = project.Worktree
 		}

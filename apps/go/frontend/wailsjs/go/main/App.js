@@ -6,6 +6,10 @@ export function CreatePairingSession() {
   return window['go']['main']['App']['CreatePairingSession']();
 }
 
+export function CreateWorkspace(arg1) {
+  return window['go']['main']['App']['CreateWorkspace'](arg1);
+}
+
 export function GetConnectedClients() {
   return window['go']['main']['App']['GetConnectedClients']();
 }
@@ -18,8 +22,16 @@ export function GetStoredRelayURL() {
   return window['go']['main']['App']['GetStoredRelayURL']();
 }
 
+export function ListWorkspaces() {
+  return window['go']['main']['App']['ListWorkspaces']();
+}
+
 export function PingRelay() {
   return window['go']['main']['App']['PingRelay']();
+}
+
+export function SelectWorkspaceDirectory() {
+  return window['go']['main']['App']['SelectWorkspaceDirectory']();
 }
 
 export function StoreRelayURL(arg1) {

@@ -1,23 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
-)
-
-const (
-	dialect  = "pgx"
-	dbString = "postgres://postdb:password@localhost:5432/derivedgo?sslmode=disable"
+	"relaid/internal/config"
+	"relaid/internal/db"
 )
 
 var (
 	flags = flag.NewFlagSet("migrate", flag.ExitOnError)
-	dir   = flags.String("dir", "./internal/data", "directory with migration files")
 )
 
 func main() {
@@ -32,18 +27,22 @@ func main() {
 
 	command := args[0]
 
-	db, err := goose.OpenDBWithDriver(dialect, dbString)
-	if err != nil {
-		log.Fatalf(err.Error())
+	if command != "up" {
+		log.Fatalf("unsupported command %q: only 'up' is implemented for the embedded sqlite migrations", command)
 	}
 
+	cfg := config.Load()
+	database, err := db.Open(cfg.DBPath)
+	if err != nil {
+		log.Fatalf("open database: %v", err)
+	}
 	defer func() {
-		if err := db.Close(); err != nil {
-			log.Fatalf(err.Error())
+		if err := database.Close(); err != nil {
+			log.Fatalf("close database: %v", err)
 		}
 	}()
 
-	if err := goose.Run(command, db, *dir, args[1:]...); err != nil {
+	if err := database.Migrate(context.Background()); err != nil {
 		log.Fatalf("migrate %v: %v", command, err)
 	}
 }
@@ -62,15 +61,5 @@ Examples:
 
 	usageCommands = `
 Commands:
-    up                   Migrate the DB to the most recent version available
-    up-by-one            Migrate the DB up by 1
-    up-to VERSION        Migrate the DB to a specific VERSION
-    down                 Roll back the version by 1
-    down-to VERSION      Roll back to a specific VERSION
-    redo                 Re-run the latest migration
-    reset                Roll back all migrations
-    status               Dump the migration status for the current DB
-    version              Print the current version of the database
-    create NAME [sql|go] Creates new migration file with the current timestamp
-    fix                  Apply sequential ordering to migrations`
+    up                   Apply embedded sqlite migrations`
 )
