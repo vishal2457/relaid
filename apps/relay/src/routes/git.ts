@@ -250,4 +250,47 @@ router.post("/:projectId/discard", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:projectId/file-content", async (req: Request, res: Response) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    const { projectId } = req.params;
+    const filePath = req.query.filePath as string;
+    const serverId = req.headers["x-server-id"] as string | undefined;
+
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    if (!filePath) {
+      res.status(400).json({ error: "filePath query param is required" });
+      return;
+    }
+
+    const result = await requestConnectedServer<{
+      content: string;
+      truncated: boolean;
+      error?: string;
+    }>(
+      userId,
+      "project_file_content_request",
+      "project_file_content_response",
+      { projectId, path: filePath },
+      serverId,
+    );
+
+    res.json({
+      content: result.response.content,
+      truncated: result.response.truncated ?? false,
+    });
+  } catch (error) {
+    handleRouteError(res, "Failed to get file content", error);
+  }
+});
+
 export { router as gitRouter };

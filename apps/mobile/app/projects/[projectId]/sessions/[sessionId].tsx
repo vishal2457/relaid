@@ -791,50 +791,28 @@ export default function SessionMessagesScreen() {
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={[styles.headerRow, { top: insets.top + 12 }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          onPress={() => router.back()}
-          style={[
-            styles.headerButton,
-            {
-              backgroundColor: backButtonSurface,
-              borderColor,
-            },
-          ]}
-        >
-          <MaterialCommunityIcons
-            name="arrow-left"
-            size={22}
-            color={theme.colors.onSurface}
-          />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Create new session"
-          disabled={createSessionMutation.isPending}
-          onPress={() => void handleCreateSession()}
-          style={[
-            styles.headerButton,
-            {
-              backgroundColor: backButtonSurface,
-              borderColor,
-              opacity: createSessionMutation.isPending ? 0.7 : 1,
-            },
-          ]}
-        >
-          {createSessionMutation.isPending ? (
-            <ActivityIndicator size={18} color={theme.colors.onSurface} />
-          ) : (
-            <MaterialCommunityIcons
-              name="plus"
-              size={22}
-              color={theme.colors.onSurface}
-            />
-          )}
-        </Pressable>
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+        onPress={() => router.back()}
+        style={[
+          styles.headerButton,
+          {
+            backgroundColor: backButtonSurface,
+            borderColor,
+            position: "absolute",
+            top: insets.top + 12,
+            left: 16,
+            zIndex: 10,
+          },
+        ]}
+      >
+        <MaterialCommunityIcons
+          name="arrow-left"
+          size={22}
+          color={theme.colors.onSurface}
+        />
+      </Pressable>
       <View
         style={[
           styles.keyboardContainer,
@@ -941,14 +919,6 @@ const styles = StyleSheet.create({
   },
   keyboardContainer: {
     flex: 1,
-  },
-  headerRow: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    zIndex: 10,
-    flexDirection: "row",
-    justifyContent: "space-between",
   },
   headerButton: {
     width: 44,

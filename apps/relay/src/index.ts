@@ -20,6 +20,7 @@ import { messageQueueRouter } from "./routes/message-queue";
 import { sseRouter } from "./routes/sse";
 import { mobileActionsRouter } from "./routes/mobile-actions";
 import { skillsRouter } from "./routes/skills";
+import { githubRouter } from "./routes/github";
 import { logger, stream } from "./shared/logger";
 import { getDb } from "./db";
 import { expoPushTokens, localServers } from "./db/schema";
@@ -130,6 +131,7 @@ app.use("/api/sessions", sessionsRouter);
 app.use("/api/messages", messagesRouter);
 app.use("/api/message-queue", messageQueueRouter);
 app.use("/api/skills", skillsRouter);
+app.use("/api/github", githubRouter);
 app.use("/api/sse", sseRouter);
 app.use("/api/mobile", mobileActionsRouter);
 

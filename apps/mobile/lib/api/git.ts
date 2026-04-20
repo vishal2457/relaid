@@ -39,6 +39,8 @@ export const gitKeys = {
   fileStatus: (projectId: string) => [...gitKeys.files(), projectId] as const,
   fileDiff: (projectId: string, filePath: string) =>
     [...gitKeys.files(), projectId, "diff", filePath] as const,
+  fileContent: (projectId: string, filePath: string) =>
+    [...gitKeys.files(), projectId, "content", filePath] as const,
 };
 
 export function useGitFileStatus(projectId: string, enabled = true) {
@@ -127,6 +129,32 @@ export function useFileDiff(
         files: response.data.files ?? [],
         success: response.data.success,
         error: response.data.error,
+      };
+    },
+  });
+}
+
+export type FileContentResponse = {
+  content: string;
+  truncated: boolean;
+};
+
+export function useFileContent(
+  projectId: string,
+  filePath: string,
+  enabled = true,
+) {
+  return useQuery<FileContentResponse>({
+    queryKey: gitKeys.fileContent(projectId, filePath),
+    enabled: Boolean(projectId) && Boolean(filePath) && enabled,
+    queryFn: async () => {
+      const response = await baseApi.get<FileContentResponse>(
+        `/git/${projectId}/file-content`,
+        { params: { filePath } },
+      );
+      return {
+        content: response.data.content ?? "",
+        truncated: response.data.truncated ?? false,
       };
     },
   });

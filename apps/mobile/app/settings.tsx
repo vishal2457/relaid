@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -30,6 +30,12 @@ import { disconnectSseClient } from "@/lib/sse";
 import { updateBaseUrl } from "@/lib/axios/base";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useAppTheme } from "@/components/ThemeContext";
+import {
+  loadStoredGithubSession,
+  startGithubOAuth,
+  clearGithubSession,
+  type GithubSession,
+} from "@/lib/api/github";
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -43,6 +49,17 @@ export default function SettingsScreen() {
   >("idle");
   const [showPairingSheet, setShowPairingSheet] = useState(false);
   const [showRelaySheet, setShowRelaySheet] = useState(false);
+  const [githubSession, setGithubSession] = useState<GithubSession | null>(null);
+  const [githubHydrated, setGithubHydrated] = useState(false);
+  const [githubConnecting, setGithubConnecting] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const stored = await loadStoredGithubSession();
+      setGithubSession(stored);
+      setGithubHydrated(true);
+    })();
+  }, []);
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, "");
@@ -88,6 +105,26 @@ export default function SettingsScreen() {
     await clearSession();
     router.replace("/pair" as any);
   }, [clearSession]);
+
+  const handleGithubConnect = useCallback(async () => {
+    if (!isPaired) return;
+    try {
+      setGithubConnecting(true);
+      const session = await startGithubOAuth();
+      if (session) {
+        setGithubSession(session);
+      }
+    } catch (err) {
+      console.error("GitHub OAuth failed", err);
+    } finally {
+      setGithubConnecting(false);
+    }
+  }, [isPaired]);
+
+  const handleGithubDisconnect = useCallback(async () => {
+    await clearGithubSession();
+    setGithubSession(null);
+  }, []);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
   const sheetBg = theme.dark ? "#1E252D" : "#FFFFFF";
@@ -158,6 +195,48 @@ export default function SettingsScreen() {
                   >
                     Relay
                   </Button>
+                </View>
+              </Card.Content>
+            </Card>
+
+            <Card mode="outlined" style={{ borderColor, marginTop: 16 }}>
+              <Card.Content>
+                <Text variant="titleMedium" style={styles.cardTitle}>
+                  GitHub Integration
+                </Text>
+                <View style={styles.settingRow}>
+                  <View style={styles.settingInfo}>
+                    <Text variant="bodyLarge" style={styles.settingTitle}>
+                      {githubSession ? githubSession.username : "Not connected"}
+                    </Text>
+                    <Text variant="bodySmall" style={styles.settingDescription}>
+                      {githubSession
+                        ? "GitHub account linked for PR reviews"
+                        : "Connect your GitHub account to review pull requests"}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.sheetButtonRow}>
+                  {githubSession ? (
+                    <Button
+                      mode="outlined"
+                      onPress={handleGithubDisconnect}
+                      icon="link-off"
+                      textColor={theme.colors.error}
+                    >
+                      Disconnect
+                    </Button>
+                  ) : (
+                    <Button
+                      mode="contained-tonal"
+                      onPress={handleGithubConnect}
+                      loading={githubConnecting}
+                      disabled={githubConnecting || !isPaired}
+                      icon="source-branch"
+                    >
+                      {githubConnecting ? "Connecting..." : "Connect GitHub"}
+                    </Button>
+                  )}
                 </View>
               </Card.Content>
             </Card>

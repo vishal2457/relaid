@@ -1,0 +1,9 @@
+{
+  "name": "dervedgo",
+  "adapter": "postgres",
+  "host": "localhost",
+  "port": 5432,
+  "user": "postdb",
+  "password": "password",
+  "database": "derviedgo"
+}

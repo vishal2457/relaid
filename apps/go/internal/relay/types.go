@@ -15,6 +15,8 @@ const (
 	EventProjectGetResponse          = "project_get_response"
 	EventProjectDirectoryRequest     = "project_directory_request"
 	EventProjectDirectoryResponse    = "project_directory_response"
+	EventProjectFileContentRequest   = "project_file_content_request"
+	EventProjectFileContentResponse  = "project_file_content_response"
 	EventProjectFileSearchRequest    = "project_file_search_request"
 	EventProjectFileSearchResponse   = "project_file_search_response"
 	EventProjectBranchesRequest      = "project_branches_request"
@@ -146,11 +148,24 @@ type ProjectGetResponse struct {
 type ProjectDirectoryRequest struct {
 	RequestID string `json:"requestId"`
 	ProjectID string `json:"projectId"`
+	Path      string `json:"path,omitempty"`
 }
 
 type ProjectDirectoryResponse struct {
 	RequestID string                 `json:"requestId"`
 	Tree      []ProjectDirectoryNode `json:"tree"`
+}
+
+type ProjectFileContentRequest struct {
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Path      string `json:"path"`
+}
+
+type ProjectFileContentResponse struct {
+	RequestID string `json:"requestId"`
+	Content   string `json:"content"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type ProjectFileSearchRequest struct {

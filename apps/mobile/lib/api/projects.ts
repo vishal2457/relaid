@@ -64,7 +64,8 @@ export const projectsKeys = {
   details: () => [...projectsKeys.all, "detail"] as const,
   detail: (id: string) => [...projectsKeys.details(), id] as const,
   directories: () => [...projectsKeys.all, "directory"] as const,
-  directory: (id: string) => [...projectsKeys.directories(), id] as const,
+  directory: (id: string, path = "") =>
+    [...projectsKeys.directories(), id, path] as const,
   searches: () => [...projectsKeys.all, "search"] as const,
   search: (id: string, query: string) =>
     [...projectsKeys.searches(), id, query] as const,
@@ -95,13 +96,20 @@ export function useProject(projectId: string) {
   });
 }
 
-export function useProjectDirectory(projectId: string, enabled = true) {
+export function useProjectDirectory(
+  projectId: string,
+  path = "",
+  enabled = true,
+) {
   return useQuery<ProjectDirectoryNode[]>({
-    queryKey: projectsKeys.directory(projectId),
+    queryKey: projectsKeys.directory(projectId, path),
     enabled: Boolean(projectId) && enabled,
     queryFn: async () => {
       const response = await baseApi.get<{ tree: ProjectDirectoryNode[] }>(
         `/projects/${projectId}/directory`,
+        {
+          params: path ? { path } : undefined,
+        },
       );
       return response.data.tree ?? [];
     },
