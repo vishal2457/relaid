@@ -90,7 +90,7 @@ import type {
   SessionStreamChunkEvent,
 } from "@/lib/sse/events";
 import { GitDrawer } from "@/src/components/GitDrawer";
-import { FileDrawer } from "@/components/FileDrawer";
+import { FileDrawer } from "@/src/components/FileDrawer";
 import { useGitFileStatus } from "@/lib/api/git";
 // Message queue temporarily disabled - will be re-enabled later
 // import { QueueDrawer } from "@/components/QueueDrawer";
