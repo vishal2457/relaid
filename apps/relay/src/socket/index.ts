@@ -333,6 +333,7 @@ async function handleLocalServerConnection(
   pipeResponse("projects_list_response");
   pipeResponse("project_get_response");
   pipeResponse("project_directory_response");
+  pipeResponse("project_file_content_response");
   pipeResponse("project_file_search_response");
   pipeResponse("project_create_response");
   pipeResponse("project_update_response");

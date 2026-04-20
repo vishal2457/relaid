@@ -90,6 +90,7 @@ import type {
   SessionStreamChunkEvent,
 } from "@/lib/sse/events";
 import { GitDrawer } from "@/src/components/GitDrawer";
+import { FileDrawer } from "@/components/FileDrawer";
 import { useGitFileStatus } from "@/lib/api/git";
 // Message queue temporarily disabled - will be re-enabled later
 // import { QueueDrawer } from "@/components/QueueDrawer";
@@ -298,6 +299,7 @@ export default function ChatScreen() {
   );
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showGitDrawer, setShowGitDrawer] = React.useState(false);
+  const [showFileDrawer, setShowFileDrawer] = React.useState(false);
   // Message queue temporarily disabled
   // const [showQueueDrawer, setShowQueueDrawer] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
@@ -305,6 +307,7 @@ export default function ChatScreen() {
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
   const [composerLayoutHeight, setComposerLayoutHeight] = React.useState(0);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [menuExpanded, setMenuExpanded] = React.useState(false);
   const [pendingPermission, setPendingPermission] =
     React.useState<PermissionRequestEvent | null>(null);
   const [pendingQuestion, setPendingQuestion] =
@@ -462,7 +465,7 @@ export default function ChatScreen() {
     if (!hydrated) return;
     if (activeProject) {
       AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => {},
+        () => { },
       );
     }
   }, [activeProject, hydrated]);
@@ -473,7 +476,7 @@ export default function ChatScreen() {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
-      ).catch(() => {});
+      ).catch(() => { });
     }
   }, [activeModel, hydrated]);
 
@@ -503,7 +506,7 @@ export default function ChatScreen() {
           );
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [activeProject, agents, hydrated]);
 
   React.useEffect(() => {
@@ -540,7 +543,7 @@ export default function ChatScreen() {
           JSON.stringify(currentMap),
         );
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [activeAgent, activeProject, hydrated]);
 
   React.useEffect(() => {
@@ -560,7 +563,7 @@ export default function ChatScreen() {
             setActiveModel(savedModel);
           }
         }
-      } catch {}
+      } catch { }
     })();
   }, [hydrated, providers]);
 
@@ -605,18 +608,18 @@ export default function ChatScreen() {
 
     const filtered = normalizedQuery
       ? models
-          .map((model) => ({
-            model,
-            score: getModelSearchScore(model, normalizedQuery),
-          }))
-          .filter((entry) => entry.score >= 0)
-          .sort((a, b) => {
-            if (b.score !== a.score) {
-              return b.score - a.score;
-            }
-            return a.model.name.localeCompare(b.model.name);
-          })
-          .map((entry) => entry.model)
+        .map((model) => ({
+          model,
+          score: getModelSearchScore(model, normalizedQuery),
+        }))
+        .filter((entry) => entry.score >= 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) {
+            return b.score - a.score;
+          }
+          return a.model.name.localeCompare(b.model.name);
+        })
+        .map((entry) => entry.model)
       : models;
 
     if (!activeModel) {
@@ -645,16 +648,16 @@ export default function ChatScreen() {
     const normalizedQuery = normalizeSearchValue(agentSearchQuery);
     const filtered = normalizedQuery
       ? agents.filter((agent) => {
-          const haystacks = [
-            agent.name,
-            agent.description ?? "",
-            agent.model?.providerID ?? "",
-            agent.model?.modelID ?? "",
-          ];
-          return haystacks.some((value) =>
-            normalizeSearchValue(value).includes(normalizedQuery),
-          );
-        })
+        const haystacks = [
+          agent.name,
+          agent.description ?? "",
+          agent.model?.providerID ?? "",
+          agent.model?.modelID ?? "",
+        ];
+        return haystacks.some((value) =>
+          normalizeSearchValue(value).includes(normalizedQuery),
+        );
+      })
       : agents;
 
     const sorted = [...filtered];
@@ -784,6 +787,10 @@ export default function ChatScreen() {
     }
   }, [isRefreshing, refetch, refetchActiveSession]);
 
+  const handleToggleMenu = React.useCallback(() => {
+    setMenuExpanded((prev) => !prev);
+  }, []);
+
   const clearPendingStreamState = React.useCallback(
     (sessionId?: string, requestId?: string) => {
       pendingRequestIdsRef.current = new Map();
@@ -864,7 +871,7 @@ export default function ChatScreen() {
 
   const connectSse = React.useCallback(() => {
     if (!isMountedRef.current) {
-      return () => {};
+      return () => { };
     }
 
     setConnectionState("connecting");
@@ -938,7 +945,7 @@ export default function ChatScreen() {
       setConnectionState("disconnected");
       sseClientRef.current = null;
       unsubscribe();
-      return () => {};
+      return () => { };
     }
 
     sseClientRef.current = client;
@@ -1153,17 +1160,17 @@ export default function ChatScreen() {
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
-        220,
-      ) + 8
+      mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
+      220,
+    ) + 8
     : 0;
   const showSkillSuggestions = Boolean(activeProject && activeSlash);
   const skillSuggestionCount = skillSuggestions?.length ?? 0;
   const skillSuggestionHeight = showSkillSuggestions
     ? Math.min(
-        skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
-        220,
-      ) + 8
+      skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
+      220,
+    ) + 8
     : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
@@ -1276,9 +1283,9 @@ export default function ChatScreen() {
         agent: activeAgent?.name,
         model: activeModel
           ? {
-              providerId: activeModel.providerId,
-              modelId: activeModel.id,
-            }
+            providerId: activeModel.providerId,
+            modelId: activeModel.id,
+          }
           : undefined,
       });
     } catch (error) {
@@ -1528,9 +1535,8 @@ export default function ChatScreen() {
         <View style={[styles.buttonGroup, { borderColor }]}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Refresh session"
-            onPress={handleRefreshPress}
-            disabled={isRefreshing}
+            accessibilityLabel={menuExpanded ? "Collapse menu" : "Expand menu"}
+            onPress={handleToggleMenu}
             style={[
               styles.gitButton,
               {
@@ -1540,68 +1546,99 @@ export default function ChatScreen() {
               },
             ]}
           >
-            {isRefreshing ? (
-              <ActivityIndicator size="small" color={theme.colors.onSurface} />
-            ) : (
-              <MaterialCommunityIcons
-                name="refresh"
-                size={20}
-                color={theme.colors.onSurface}
+            <MaterialCommunityIcons
+              name={menuExpanded ? "chevron-right" : "chevron-left"}
+              size={20}
+              color={theme.colors.onSurface}
+            />
+          </Pressable>
+          {menuExpanded && (
+            <>
+              <View
+                style={[
+                  styles.buttonGroupDivider,
+                  { backgroundColor: borderColor },
+                ]}
               />
-            )}
-          </Pressable>
-          <View
-            style={[
-              styles.buttonGroupDivider,
-              { backgroundColor: borderColor },
-            ]}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open Git drawer"
-            onPress={() => setShowGitDrawer(true)}
-            style={[
-              styles.gitButton,
-              {
-                backgroundColor: theme.dark
-                  ? "rgba(17, 24, 39, 0.92)"
-                  : "rgba(255, 255, 255, 0.96)",
-              },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name="source-branch"
-              size={20}
-              color={theme.colors.onSurface}
-            />
-          </Pressable>
-          <View
-            style={[
-              styles.buttonGroupDivider,
-              { backgroundColor: borderColor },
-            ]}
-          />
-          {/* Message queue temporarily disabled
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open Queue drawer"
-            onPress={() => setShowQueueDrawer(true)}
-            style={[
-              styles.gitButton,
-              {
-                backgroundColor: theme.dark
-                  ? "rgba(17, 24, 39, 0.92)"
-                  : "rgba(255, 255, 255, 0.96)",
-              },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name="playlist-play"
-              size={20}
-              color={theme.colors.onSurface}
-            />
-          </Pressable>
-          */}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Refresh session"
+                onPress={handleRefreshPress}
+                disabled={isRefreshing}
+                style={[
+                  styles.gitButton,
+                  {
+                    backgroundColor: theme.dark
+                      ? "rgba(17, 24, 39, 0.92)"
+                      : "rgba(255, 255, 255, 0.96)",
+                  },
+                ]}
+              >
+                {isRefreshing ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={theme.colors.onSurface}
+                  />
+                ) : (
+                  <MaterialCommunityIcons
+                    name="refresh"
+                    size={20}
+                    color={theme.colors.onSurface}
+                  />
+                )}
+              </Pressable>
+              <View
+                style={[
+                  styles.buttonGroupDivider,
+                  { backgroundColor: borderColor },
+                ]}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open Git drawer"
+                onPress={() => setShowGitDrawer(true)}
+                style={[
+                  styles.gitButton,
+                  {
+                    backgroundColor: theme.dark
+                      ? "rgba(17, 24, 39, 0.92)"
+                      : "rgba(255, 255, 255, 0.96)",
+                  },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="source-branch"
+                  size={20}
+                  color={theme.colors.onSurface}
+                />
+              </Pressable>
+              <View
+                style={[
+                  styles.buttonGroupDivider,
+                  { backgroundColor: borderColor },
+                ]}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open files drawer"
+                onPress={() => setShowFileDrawer(true)}
+                style={[
+                  styles.gitButton,
+                  {
+                    backgroundColor: theme.dark
+                      ? "rgba(17, 24, 39, 0.92)"
+                      : "rgba(255, 255, 255, 0.96)",
+                  },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="file-tree-outline"
+                  size={20}
+                  color={theme.colors.onSurface}
+                />
+              </Pressable>
+            </>
+          )}
           <View
             style={[
               styles.buttonGroupDivider,
@@ -1645,8 +1682,8 @@ export default function ChatScreen() {
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
-          activeSessionId &&
-          displayedMessages.length === 0 ? (
+            activeSessionId &&
+            displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
@@ -1897,6 +1934,15 @@ export default function ChatScreen() {
       <GitDrawer
         visible={showGitDrawer}
         onClose={() => setShowGitDrawer(false)}
+        activeProject={activeProject}
+        borderColor={borderColor}
+        metaColor={metaColor}
+        backgroundColor={sheetBg}
+      />
+
+      <FileDrawer
+        visible={showFileDrawer}
+        onClose={() => setShowFileDrawer(false)}
         activeProject={activeProject}
         borderColor={borderColor}
         metaColor={metaColor}

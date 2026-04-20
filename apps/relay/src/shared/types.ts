@@ -205,6 +205,7 @@ export const ProjectGetResponseSchema = z.object({
 
 export const ProjectDirectoryRequestSchema = z.object({
   projectId: z.string(),
+  path: z.string().optional(),
 });
 
 export const ProjectDirectoryResponseSchema = z.object({

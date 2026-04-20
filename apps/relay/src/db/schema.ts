@@ -72,3 +72,6 @@ export type NewMobileDevice = typeof mobileDevices.$inferInsert;
 
 export type PairingSession = typeof pairingSessions.$inferSelect;
 export type NewPairingSession = typeof pairingSessions.$inferInsert;
+
+export { githubTokens } from "./github-schema";
+export type { GithubToken, NewGithubToken } from "./github-schema";

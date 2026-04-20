@@ -673,9 +673,16 @@ export function adaptMessage(
           type: "tool" as const,
           content: JSON.stringify(part),
           durationSeconds:
-            "time" in part.state && typeof part.state.time === "object"
-              ? "end" in part.state.time
-                ? part.state.time.end - part.state.time.start
+            typeof part.state === "object" &&
+            part.state &&
+            "time" in part.state &&
+            typeof part.state.time === "object" &&
+            part.state.time
+              ? "end" in part.state.time && typeof part.state.time.end === "number"
+                ? part.state.time.end -
+                  (typeof part.state.time.start === "number"
+                    ? part.state.time.start
+                    : 0)
                 : null
               : null,
         },

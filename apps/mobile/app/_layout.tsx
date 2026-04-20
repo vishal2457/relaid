@@ -109,6 +109,10 @@ function RootLayoutInner() {
             options={{ headerShown: false }}
           />
           <Stack.Screen
+            name="file"
+            options={{ headerShown: true, presentation: "card" }}
+          />
+          <Stack.Screen
             name="settings"
             options={{ headerShown: false, presentation: "modal" }}
           />

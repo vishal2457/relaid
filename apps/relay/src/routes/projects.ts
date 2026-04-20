@@ -105,11 +105,12 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.get("/:id/directory", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const path = typeof req.query.path === "string" ? req.query.path : undefined;
     const result = await requestUntilMatch<ProjectDirectoryResponse>(
       userId,
       "project_directory_request",
       "project_directory_response",
-      { projectId: req.params.id },
+      { projectId: req.params.id, path },
       (response) => Array.isArray(response.tree),
     );
 

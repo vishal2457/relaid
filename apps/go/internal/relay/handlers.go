@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"relaid/internal/agent"
+	"relaid/internal/filesystem"
 	gitservice "relaid/internal/git"
 )
 
@@ -18,6 +19,7 @@ type Handler struct {
 	registry *agent.Registry
 	logger   *log.Logger
 
+	dirService         *filesystem.DirectoryService
 	pendingPermissions map[string]chan PermissionReply
 	pendingQuestions   map[string]chan QuestionReply
 	mu                 sync.Mutex
@@ -36,6 +38,7 @@ func NewHandler(client *Client, registry *agent.Registry, logger *log.Logger) *H
 		client:             client,
 		registry:           registry,
 		logger:             logger,
+		dirService:         filesystem.NewDirectoryService(),
 		pendingPermissions: make(map[string]chan PermissionReply),
 		pendingQuestions:   make(map[string]chan QuestionReply),
 	}
@@ -49,6 +52,8 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 		go h.handleProjectGet(args)
 	case EventProjectDirectoryRequest:
 		go h.handleProjectDirectory(args)
+	case EventProjectFileContentRequest:
+		go h.handleProjectFileContent(args)
 	case EventProjectFileSearchRequest:
 		go h.handleProjectFileSearch(args)
 	case EventProjectBranchesRequest:
@@ -146,6 +151,7 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 	case EventProjectsListResponse,
 		EventProjectGetResponse,
 		EventProjectDirectoryResponse,
+		EventProjectFileContentResponse,
 		EventProjectFileSearchResponse,
 		EventProjectBranchesResponse,
 		EventProjectBranchSwitchResponse,
@@ -318,7 +324,60 @@ func (h *Handler) handleProjectDirectory(args []json.RawMessage) {
 		return
 	}
 
-	h.emitError(req.RequestID, "NOT_IMPLEMENTED", "project directory not yet implemented")
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	entries, err := h.dirService.ListDir(worktree, req.Path)
+	if err != nil {
+		h.emitError(req.RequestID, "DIRECTORY_READ_ERROR", err.Error())
+		return
+	}
+
+	nodes := make([]ProjectDirectoryNode, 0, len(entries))
+	for _, e := range entries {
+		nodes = append(nodes, ProjectDirectoryNode{
+			Name: e.Name,
+			Path: e.Path,
+			Type: e.Type,
+		})
+	}
+
+	h.emit(EventProjectDirectoryResponse, ProjectDirectoryResponse{
+		RequestID: req.RequestID,
+		Tree:      nodes,
+	})
+}
+
+func (h *Handler) handleProjectFileContent(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req ProjectFileContentRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse project_file_content_request: %v", err)
+		return
+	}
+
+	worktree, err := h.resolveWorktree(req.ProjectID)
+	if err != nil {
+		h.emitError(req.RequestID, "PROJECT_NOT_FOUND", err.Error())
+		return
+	}
+
+	content, truncated, err := h.dirService.ReadTextFile(worktree, req.Path)
+	if err != nil {
+		h.emitError(req.RequestID, "FILE_CONTENT_ERROR", err.Error())
+		return
+	}
+
+	h.emit(EventProjectFileContentResponse, ProjectFileContentResponse{
+		RequestID: req.RequestID,
+		Content:   content,
+		Truncated: truncated,
+	})
 }
 
 func (h *Handler) handleProjectFileSearch(args []json.RawMessage) {
