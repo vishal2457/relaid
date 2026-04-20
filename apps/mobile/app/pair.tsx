@@ -1,8 +1,12 @@
-import React, { useCallback, useState } from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { claimPairingSession } from "@/lib/api/pairing";
+import { parsePairingUrl } from "@/lib/pairing/url";
+import { usePairingSession } from "@/src/components/PairingSessionContext";
+import { useServerUrl } from "@/src/components/ServerUrlContext";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Device from "expo-device";
 import { router, Stack } from "expo-router";
+import React, { useCallback, useState } from "react";
+import { Platform, StyleSheet, View } from "react-native";
 import {
   ActivityIndicator,
   Button,
@@ -12,28 +16,14 @@ import {
   useTheme,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useServerUrl } from "@/components/ServerUrlContext";
-import { usePairingSession } from "@/components/PairingSessionContext";
-import { claimPairingSession } from "@/lib/api/pairing";
-import { updateBaseUrl } from "@/lib/axios/base";
-import { parsePairingUrl } from "@/lib/pairing/url";
 
 function normalizeUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
 
-function isLoopbackHost(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return ["localhost", "127.0.0.1", "0.0.0.0"].includes(parsed.hostname);
-  } catch {
-    return false;
-  }
-}
-
 export default function PairScreen() {
   const theme = useTheme();
-  const { serverUrl, setServerUrl } = useServerUrl();
+  const { setServerUrl } = useServerUrl();
   const { saveSession } = usePairingSession();
   const [permission, requestPermission] = useCameraPermissions();
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -68,7 +58,6 @@ export default function PairScreen() {
         const parsed = parsePairingUrl(data);
         const qrRelayUrl = normalizeUrl(parsed.relayUrl);
         await setServerUrl(qrRelayUrl);
-        updateBaseUrl(qrRelayUrl);
         try {
           const claimedSession = await claimPairingSession({
             pairingId: parsed.pairingId,
@@ -86,8 +75,6 @@ export default function PairScreen() {
 
           throw error;
         }
-
-
       } catch (error) {
         console.log(error, "error");
 
@@ -98,7 +85,7 @@ export default function PairScreen() {
         setSubmitting(false);
       }
     },
-    [saveSession, serverUrl, setServerUrl, submitting],
+    [saveSession, setServerUrl, submitting],
   );
 
   const borderColor = theme.dark ? "#243244" : "#D8E2EC";

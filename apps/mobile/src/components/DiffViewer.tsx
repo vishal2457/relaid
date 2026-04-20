@@ -13,7 +13,7 @@ import {
   type FileDiff,
   type DiffHunk,
   type DiffLine,
-} from "../lib/api/git";
+} from "@/lib/api/git";
 
 const DiffLineItem = ({
   line,

@@ -58,9 +58,9 @@ import {
   QuestionCard,
   type PermissionRequest,
   type QuestionRequest,
-} from "@/components/PermissionCard";
-import { MessageRow, TypingIndicator } from "@/components/Message";
-import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
+} from "@/src/components/PermissionCard";
+import { MessageRow, TypingIndicator } from "@/src/components/Message";
+import { getAssistantResponseSummaryContext } from "@/src/components/Message/getAssistantResponseSummary";
 
 const MIN_INPUT_HEIGHT = 44;
 const MAX_INPUT_HEIGHT = 150;

@@ -26,8 +26,9 @@ import {
   KEYBOARD_ADDITIONAL_PADDING,
   MAX_INPUT_HEIGHT,
   MIN_INPUT_HEIGHT,
-} from "@/components/ChatComposer";
-import { SessionDrawer } from "@/components/SessionDrawer";
+} from "@/src/components/ChatComposer";
+import { SessionDrawer } from "@/src/components/SessionDrawer";
+import { SelectionSheet } from "@/src/components/SelectionSheet";
 import { Stack } from "expo-router";
 import {
   ActivityIndicator,
@@ -90,18 +91,18 @@ import type {
   SessionPromptResponseEvent,
   SessionStreamChunkEvent,
 } from "@/lib/sse/events";
-import { GitDrawer } from "@/components/GitDrawer";
+import { GitDrawer } from "@/src/components/GitDrawer";
 import { useGitFileStatus } from "@/lib/api/git";
 // Message queue temporarily disabled - will be re-enabled later
 // import { QueueDrawer } from "@/components/QueueDrawer";
-import { MessageRow, TypingIndicator } from "@/components/Message";
-import { getAssistantResponseSummaryContext } from "@/components/Message/getAssistantResponseSummary";
+import { MessageRow, TypingIndicator } from "@/src/components/Message";
+import { getAssistantResponseSummaryContext } from "@/src/components/Message/getAssistantResponseSummary";
 import {
   PermissionCard,
   QuestionCard,
   type PermissionRequest,
   type QuestionRequest,
-} from "@/components/PermissionCard";
+} from "@/src/components/PermissionCard";
 
 type ComposerSelection = {
   start: number;
@@ -462,7 +463,7 @@ export default function ChatScreen() {
     if (!hydrated) return;
     if (activeProject) {
       AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => { },
+        () => {},
       );
     }
   }, [activeProject, hydrated]);
@@ -473,7 +474,7 @@ export default function ChatScreen() {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
-      ).catch(() => { });
+      ).catch(() => {});
     }
   }, [activeModel, hydrated]);
 
@@ -503,7 +504,7 @@ export default function ChatScreen() {
           );
         }
       })
-      .catch(() => { });
+      .catch(() => {});
   }, [activeProject, agents, hydrated]);
 
   React.useEffect(() => {
@@ -540,7 +541,7 @@ export default function ChatScreen() {
           JSON.stringify(currentMap),
         );
       })
-      .catch(() => { });
+      .catch(() => {});
   }, [activeAgent, activeProject, hydrated]);
 
   React.useEffect(() => {
@@ -560,7 +561,7 @@ export default function ChatScreen() {
             setActiveModel(savedModel);
           }
         }
-      } catch { }
+      } catch {}
     })();
   }, [hydrated, providers]);
 
@@ -605,18 +606,18 @@ export default function ChatScreen() {
 
     const filtered = normalizedQuery
       ? models
-        .map((model) => ({
-          model,
-          score: getModelSearchScore(model, normalizedQuery),
-        }))
-        .filter((entry) => entry.score >= 0)
-        .sort((a, b) => {
-          if (b.score !== a.score) {
-            return b.score - a.score;
-          }
-          return a.model.name.localeCompare(b.model.name);
-        })
-        .map((entry) => entry.model)
+          .map((model) => ({
+            model,
+            score: getModelSearchScore(model, normalizedQuery),
+          }))
+          .filter((entry) => entry.score >= 0)
+          .sort((a, b) => {
+            if (b.score !== a.score) {
+              return b.score - a.score;
+            }
+            return a.model.name.localeCompare(b.model.name);
+          })
+          .map((entry) => entry.model)
       : models;
 
     if (!activeModel) {
@@ -645,16 +646,16 @@ export default function ChatScreen() {
     const normalizedQuery = normalizeSearchValue(agentSearchQuery);
     const filtered = normalizedQuery
       ? agents.filter((agent) => {
-        const haystacks = [
-          agent.name,
-          agent.description ?? "",
-          agent.model?.providerID ?? "",
-          agent.model?.modelID ?? "",
-        ];
-        return haystacks.some((value) =>
-          normalizeSearchValue(value).includes(normalizedQuery),
-        );
-      })
+          const haystacks = [
+            agent.name,
+            agent.description ?? "",
+            agent.model?.providerID ?? "",
+            agent.model?.modelID ?? "",
+          ];
+          return haystacks.some((value) =>
+            normalizeSearchValue(value).includes(normalizedQuery),
+          );
+        })
       : agents;
 
     const sorted = [...filtered];
@@ -864,7 +865,7 @@ export default function ChatScreen() {
 
   const connectSse = React.useCallback(() => {
     if (!isMountedRef.current) {
-      return () => { };
+      return () => {};
     }
 
     setConnectionState("connecting");
@@ -938,7 +939,7 @@ export default function ChatScreen() {
       setConnectionState("disconnected");
       sseClientRef.current = null;
       unsubscribe();
-      return () => { };
+      return () => {};
     }
 
     sseClientRef.current = client;
@@ -1153,17 +1154,17 @@ export default function ChatScreen() {
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-      mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
-      220,
-    ) + 8
+        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
+        220,
+      ) + 8
     : 0;
   const showSkillSuggestions = Boolean(activeProject && activeSlash);
   const skillSuggestionCount = skillSuggestions?.length ?? 0;
   const skillSuggestionHeight = showSkillSuggestions
     ? Math.min(
-      skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
-      220,
-    ) + 8
+        skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
+        220,
+      ) + 8
     : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
@@ -1275,9 +1276,9 @@ export default function ChatScreen() {
         agent: activeAgent?.name,
         model: activeModel
           ? {
-            providerId: activeModel.providerId,
-            modelId: activeModel.id,
-          }
+              providerId: activeModel.providerId,
+              modelId: activeModel.id,
+            }
           : undefined,
       });
     } catch (error) {
@@ -1637,8 +1638,8 @@ export default function ChatScreen() {
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
-            activeSessionId &&
-            displayedMessages.length === 0 ? (
+          activeSessionId &&
+          displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
@@ -1793,104 +1794,85 @@ export default function ChatScreen() {
         </Pressable>
       )}
 
-      <Modal
+      <SelectionSheet
         visible={showProjectSheet}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowProjectSheet(false)}
-      >
-        <Pressable
-          style={styles.sheetOverlay}
-          onPress={() => setShowProjectSheet(false)}
-        >
-          <View style={[styles.sheetContainer, { backgroundColor: sheetBg }]}>
-            <View style={styles.sheetHandle} />
-            <Text variant="titleMedium" style={styles.sheetTitle}>
-              Select Project
-            </Text>
-            {projectsLoading ? (
-              <View style={styles.sheetLoading}>
-                <ActivityIndicator />
-              </View>
-            ) : (
-              <FlatList
-                data={sortedProjects}
-                keyExtractor={(item) => item.id}
-                style={styles.sheetList}
-                renderItem={({ item }) => {
-                  const isActiveProject = activeProject?.id === item.id;
-                  return (
-                    <Pressable
-                      onPress={() => {
-                        if (item.id !== activeProject?.id) {
-                          activeSessionIdRef.current = null;
-                          clearPendingStreamState();
-                          setActiveProject(item);
-                          setActiveSessionId(null);
-                          setOptimisticMessage(null);
-                          hasScrolledToBottom.current = false;
-                        }
-                        setShowProjectSheet(false);
-                      }}
-                      style={[
-                        styles.sheetItem,
-                        {
-                          backgroundColor: isActiveProject
-                            ? "rgba(150,150,150,0.12)"
-                            : "transparent",
-                          borderColor,
-                        },
-                      ]}
-                    >
-                      <View style={styles.sheetItemRow}>
-                        <View
-                          style={[
-                            styles.statusDot,
-                            {
-                              backgroundColor: isActiveProject
-                                ? "#00FF41"
-                                : "#F2A900",
-                            },
-                          ]}
-                        />
-                        <View style={styles.sheetItemContent}>
-                          <Text
-                            variant="bodyLarge"
-                            style={{
-                              fontWeight: isActiveProject ? "600" : "500",
-                              color: theme.colors.onSurface,
-                            }}
-                            numberOfLines={1}
-                          >
-                            {item.name}
-                          </Text>
-                          <Text
-                            variant="bodySmall"
-                            style={{ color: metaColor, marginTop: 2 }}
-                            numberOfLines={1}
-                          >
-                            {item.folder || "No folder path"}
-                          </Text>
-                        </View>
-                      </View>
-                    </Pressable>
-                  );
-                }}
-                ListEmptyComponent={
-                  <View style={styles.sheetEmpty}>
-                    <Text
-                      variant="bodyMedium"
-                      style={{ color: theme.colors.onSurfaceVariant }}
-                    >
-                      No projects found
-                    </Text>
-                  </View>
+        title="Select Project"
+        data={sortedProjects}
+        onItemPress={(item) => {
+          if (item.id !== activeProject?.id) {
+            activeSessionIdRef.current = null;
+            clearPendingStreamState();
+            setActiveProject(item);
+            setActiveSessionId(null);
+            setOptimisticMessage(null);
+            hasScrolledToBottom.current = false;
+          }
+        }}
+        onClose={() => setShowProjectSheet(false)}
+        isLoading={projectsLoading}
+        emptyText="No projects found"
+        selectedId={activeProject?.id}
+        getItemId={(item) => item.id}
+        renderItem={(item, isSelected) => {
+          const borderColor = theme.dark
+            ? "rgba(255,255,255,0.1)"
+            : "rgba(0,0,0,0.08)";
+          return (
+            <Pressable
+              onPress={() => {
+                if (item.id !== activeProject?.id) {
+                  activeSessionIdRef.current = null;
+                  clearPendingStreamState();
+                  setActiveProject(item);
+                  setActiveSessionId(null);
+                  setOptimisticMessage(null);
+                  hasScrolledToBottom.current = false;
                 }
-              />
-            )}
-          </View>
-        </Pressable>
-      </Modal>
+                setShowProjectSheet(false);
+              }}
+              style={[
+                styles.sheetItem,
+                {
+                  backgroundColor: isSelected
+                    ? "rgba(150,150,150,0.12)"
+                    : "transparent",
+                  borderColor,
+                },
+              ]}
+            >
+              <View style={styles.sheetItemRow}>
+                <View
+                  style={[
+                    styles.statusDot,
+                    {
+                      backgroundColor: isSelected ? "#00FF41" : "#F2A900",
+                    },
+                  ]}
+                />
+                <View style={styles.sheetItemContent}>
+                  <Text
+                    variant="bodyLarge"
+                    style={{
+                      fontWeight: isSelected ? "600" : "500",
+                      color: theme.colors.onSurface,
+                    }}
+                    numberOfLines={1}
+                  >
+                    {item.name}
+                  </Text>
+                  <Text
+                    variant="bodySmall"
+                    style={{ color: metaColor, marginTop: 2 }}
+                    numberOfLines={1}
+                  >
+                    {item.folder || "No folder path"}
+                  </Text>
+                </View>
+              </View>
+            </Pressable>
+          );
+        }}
+      />
 
       <Modal
         visible={showProviderSheet}

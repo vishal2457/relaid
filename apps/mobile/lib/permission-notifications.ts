@@ -1,6 +1,6 @@
 import * as Notifications from "expo-notifications";
+import { formatPermissionType } from "../src/components/PermissionCard";
 import { sendPermissionResponse } from "./sse/manager";
-import { formatPermissionType } from "../components/PermissionCard";
 
 const PERMISSION_CATEGORY = "PERMISSION_REQUEST";
 
@@ -103,11 +103,9 @@ export async function registerPermissionNotificationCategories(): Promise<void> 
     },
   ]);
 
-  Notifications.addNotificationResponseReceivedListener(
-    (response) => {
-      void processPermissionNotificationResponse(response);
-    },
-  );
+  Notifications.addNotificationResponseReceivedListener((response) => {
+    void processPermissionNotificationResponse(response);
+  });
 }
 
 export async function processLastPermissionNotificationResponse(): Promise<void> {
