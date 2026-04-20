@@ -58,6 +58,7 @@ export const ServerUrlProvider: React.FC<ServerUrlProviderProps> = ({
   const setServerUrl = useCallback(async (url: string) => {
     const trimmed = url.trim().replace(/\/+$/, "");
     setServerUrlState(trimmed);
+    updateBaseUrl(trimmed);
     try {
       await SecureStore.setItemAsync(SERVER_URL_KEY, trimmed);
     } catch {

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { Stack, useLocalSearchParams, router } from "expo-router";
 import { IconButton, useTheme, ActivityIndicator } from "react-native-paper";
-import DiffViewer from "@/components/DiffViewer";
+import DiffViewer from "@/src/components/DiffViewer";
 import { useGitDiscardFile } from "@/lib/api/git";
 
 export default function FileDiffScreen() {

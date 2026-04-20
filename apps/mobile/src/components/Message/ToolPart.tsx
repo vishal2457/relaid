@@ -8,7 +8,7 @@ import type {
   SessionAssistantActivityItem,
 } from "@/lib/api/messages";
 import { RawDiffViewer } from "./MessageSummaryDiffs";
-import { toUnifiedDiffSmart } from "../../lib/diff/to-unified-diff";
+import { toUnifiedDiffSmart } from "@/lib/diff/to-unified-diff";
 
 interface ToolPartProps {
   activity: SessionAssistantActivity;
@@ -255,13 +255,13 @@ export const ToolPart: React.FC<ToolPartProps> = React.memo(
           >
             {expandedItems.length > 0
               ? expandedItems.map((item) => (
-                <ExpandedItemRow
-                  key={item.id}
-                  item={item}
-                  metaColor={metaColor}
-                  textColor={textColor}
-                />
-              ))
+                  <ExpandedItemRow
+                    key={item.id}
+                    item={item}
+                    metaColor={metaColor}
+                    textColor={textColor}
+                  />
+                ))
               : null}
             {hasShellOutput ? (
               <View
@@ -285,7 +285,13 @@ export const ToolPart: React.FC<ToolPartProps> = React.memo(
               </View>
             ) : null}
             {hasDiffContent && isExpanded ? (
-              <RawDiffViewer diff={toUnifiedDiffSmart({ fileName: activity.filename ?? "", oldContent: activity.oldContent ?? "", newContent: activity.newContent ?? "" })} />
+              <RawDiffViewer
+                diff={toUnifiedDiffSmart({
+                  fileName: activity.filename ?? "",
+                  oldContent: activity.oldContent ?? "",
+                  newContent: activity.newContent ?? "",
+                })}
+              />
             ) : null}
           </View>
         ) : null}

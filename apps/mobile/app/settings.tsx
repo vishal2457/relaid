@@ -1,35 +1,33 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import { usePairingSession } from "@/src/components/PairingSessionContext";
 import {
-  StyleSheet,
-  View,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  TouchableWithoutFeedback,
+  DEFAULT_SERVER_URL,
+  useServerUrl,
+} from "@/src/components/ServerUrlContext";
+import { useAppTheme } from "@/src/components/ThemeContext";
+import ThemeSelector from "@/src/components/ThemeSelector";
+import { disconnectSseClient } from "@/lib/sse";
+import { router } from "expo-router";
+import React, { useCallback, useState, useEffect } from "react";
+import {
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
-  FlatList,
+  ScrollView,
+  StyleSheet,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import {
-  Text,
-  useTheme,
-  TextInput,
   Button,
   Card,
   IconButton,
+  Text,
+  TextInput,
+  useTheme,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router } from "expo-router";
-import {
-  useServerUrl,
-  DEFAULT_SERVER_URL,
-} from "@/components/ServerUrlContext";
-import { usePairingSession } from "@/components/PairingSessionContext";
-import { disconnectSseClient } from "@/lib/sse";
-import { updateBaseUrl } from "@/lib/axios/base";
-import ThemeSelector from "@/components/ThemeSelector";
-import { useAppTheme } from "@/components/ThemeContext";
 import {
   loadStoredGithubSession,
   startGithubOAuth,
@@ -66,7 +64,6 @@ export default function SettingsScreen() {
     if (!trimmed) return;
 
     await setServerUrl(trimmed);
-    updateBaseUrl(trimmed);
     disconnectSseClient();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
