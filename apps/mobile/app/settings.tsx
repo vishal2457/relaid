@@ -29,6 +29,8 @@ import {
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  checkGithubStatus,
+  disconnectGithub,
   loadStoredGithubSession,
   startGithubOAuth,
   clearGithubSession,
@@ -52,12 +54,43 @@ export default function SettingsScreen() {
   const [githubConnecting, setGithubConnecting] = useState(false);
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    const hydrateGithubSession = async () => {
+      setGithubHydrated(false);
+
       const stored = await loadStoredGithubSession();
+      if (cancelled) return;
       setGithubSession(stored);
-      setGithubHydrated(true);
-    })();
-  }, []);
+
+      if (!isPaired) {
+        setGithubHydrated(true);
+        return;
+      }
+
+      try {
+        const status = await checkGithubStatus();
+        if (cancelled) return;
+        setGithubSession(
+          status.connected && status.username
+            ? { username: status.username }
+            : null,
+        );
+      } catch (error) {
+        console.error("Failed to load GitHub status", error);
+      } finally {
+        if (!cancelled) {
+          setGithubHydrated(true);
+        }
+      }
+    };
+
+    void hydrateGithubSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPaired]);
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, "");
@@ -99,6 +132,7 @@ export default function SettingsScreen() {
   }, [urlInput]);
 
   const handleForgetDevice = useCallback(async () => {
+    await clearGithubSession();
     await clearSession();
     router.replace("/pair" as any);
   }, [clearSession]);
@@ -119,8 +153,15 @@ export default function SettingsScreen() {
   }, [isPaired]);
 
   const handleGithubDisconnect = useCallback(async () => {
-    await clearGithubSession();
-    setGithubSession(null);
+    try {
+      setGithubConnecting(true);
+      await disconnectGithub();
+      setGithubSession(null);
+    } catch (err) {
+      console.error("GitHub disconnect failed", err);
+    } finally {
+      setGithubConnecting(false);
+    }
   }, []);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
@@ -204,10 +245,18 @@ export default function SettingsScreen() {
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
                     <Text variant="bodyLarge" style={styles.settingTitle}>
-                      {githubSession ? githubSession.username : "Not connected"}
+                      {!githubHydrated
+                        ? "Checking connection..."
+                        : githubSession
+                          ? githubSession.username
+                          : "Not connected"}
                     </Text>
                     <Text variant="bodySmall" style={styles.settingDescription}>
-                      {githubSession
+                      {!isPaired
+                        ? "Pair this phone with your relay before connecting GitHub"
+                        : !githubHydrated
+                          ? "Syncing GitHub connection status"
+                          : githubSession
                         ? "GitHub account linked for PR reviews"
                         : "Connect your GitHub account to review pull requests"}
                     </Text>
@@ -219,6 +268,8 @@ export default function SettingsScreen() {
                       mode="outlined"
                       onPress={handleGithubDisconnect}
                       icon="link-off"
+                      loading={githubConnecting}
+                      disabled={githubConnecting || !githubHydrated}
                       textColor={theme.colors.error}
                     >
                       Disconnect
@@ -228,7 +279,7 @@ export default function SettingsScreen() {
                       mode="contained-tonal"
                       onPress={handleGithubConnect}
                       loading={githubConnecting}
-                      disabled={githubConnecting || !isPaired}
+                      disabled={githubConnecting || !isPaired || !githubHydrated}
                       icon="source-branch"
                     >
                       {githubConnecting ? "Connecting..." : "Connect GitHub"}

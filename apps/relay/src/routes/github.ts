@@ -27,6 +27,14 @@ const GITHUB_OAUTH_TOKEN_URL =
 const GITHUB_SCOPE = "repo";
 const APP_DEEP_LINK_SCHEME = process.env.APP_DEEP_LINK_SCHEME || "relaid";
 
+function assertGithubOAuthConfig(): void {
+  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET) {
+    throw Object.assign(new Error("GitHub OAuth is not configured"), {
+      statusCode: 500,
+    });
+  }
+}
+
 function buildAuthRedirect(
   mobileRedirectUri: string | null,
   params: Record<string, string>,
@@ -108,6 +116,7 @@ async function upsertGithubToken(
 
 router.get("/auth", async (req: Request, res: Response) => {
   try {
+    assertGithubOAuthConfig();
     const userId = requireUserId(req);
     const state = encrypt(userId);
     const mobileRedirectUri = req.query.redirect_uri as string | undefined;
@@ -144,6 +153,7 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
   let mobileRedirectUri: string | null = null;
 
   try {
+    assertGithubOAuthConfig();
     const { code, state, error: oauthError } = req.query as Record<
       string,
       string
@@ -189,6 +199,7 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
         client_id: GITHUB_CLIENT_ID,
         client_secret: GITHUB_CLIENT_SECRET,
         code,
+        ...(GITHUB_REDIRECT_URI ? { redirect_uri: GITHUB_REDIRECT_URI } : {}),
       }),
     });
 
@@ -252,6 +263,45 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
         error: message,
       }),
     );
+  }
+});
+
+router.get("/status", async (req: Request, res: Response) => {
+  try {
+    const userId = requireUserId(req);
+    const db = getDb();
+    const [row] = await db
+      .select({ githubUsername: githubTokens.githubUsername })
+      .from(githubTokens)
+      .where(eq(githubTokens.userId, userId))
+      .limit(1);
+
+    res.json({
+      connected: Boolean(row),
+      username: row?.githubUsername ?? null,
+    });
+  } catch (error) {
+    const statusCode = (error as any).statusCode || 500;
+    const message =
+      error instanceof Error ? error.message : String(error);
+    res.status(statusCode).json({ error: message, status: statusCode });
+  }
+});
+
+router.delete("/session", async (req: Request, res: Response) => {
+  try {
+    const userId = requireUserId(req);
+    const db = getDb();
+
+    await db.delete(githubTokens).where(eq(githubTokens.userId, userId));
+
+    logger.info("GitHub account disconnected", { userId });
+    res.status(204).send();
+  } catch (error) {
+    const statusCode = (error as any).statusCode || 500;
+    const message =
+      error instanceof Error ? error.message : String(error);
+    res.status(statusCode).json({ error: message, status: statusCode });
   }
 });
 

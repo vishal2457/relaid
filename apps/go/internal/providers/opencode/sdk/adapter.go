@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -406,9 +407,27 @@ func (a *Adapter) EnsureProjectDirectory(ctx context.Context, projectID, working
 		}
 		return a.cwd, nil
 	}
+	if stat, err := os.Stat(projectID); err == nil && stat.IsDir() {
+		abs, err := filepath.Abs(projectID)
+		if err != nil {
+			return projectID, nil
+		}
+		return abs, nil
+	}
 	project, err := a.GetProject(ctx, projectID)
 	if err != nil {
 		return "", err
+	}
+	if project == nil {
+		if strings.ContainsRune(projectID, filepath.Separator) {
+			cleaned := filepath.Clean(projectID)
+			if resolvedID, err := a.ResolveProjectByDirectory(ctx, cleaned); err == nil && resolvedID != "" {
+				project, err = a.GetProject(ctx, resolvedID)
+				if err != nil {
+					return "", err
+				}
+			}
+		}
 	}
 	if project == nil {
 		return "", fmt.Errorf("project %q not found", projectID)
