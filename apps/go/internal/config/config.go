@@ -31,7 +31,7 @@ func Load() Config {
 	}
 
 	cfg := Config{
-		ServerAddr:              getEnv("SERVER_ADDR", DefaultServerAddr),
+		ServerAddr:              DefaultServerAddr,
 		Runtime:                 getEnv("APP_RUNTIME", "desktop"),
 		OpencodeBin:             getEnv("OPENCODE_BIN", "opencode"),
 		OpencodeCwd:             getWorkingDir(),

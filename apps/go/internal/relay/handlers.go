@@ -512,6 +512,8 @@ func (h *Handler) handleSessionsList(args []json.RawMessage) {
 		return
 	}
 
+	h.logger.Printf("[sessions-debug] sessions list request: %v", req.Cwd)
+
 	filters := agent.SessionFilters{
 		Cwd:    req.Cwd,
 		Status: req.Status,
@@ -616,13 +618,14 @@ func (h *Handler) handleSessionCreate(args []json.RawMessage) {
 		return
 	}
 
-	_, opencodeProjectID, err := h.resolveOpencodeProjectID(req.ProjectID)
-	if err != nil {
-		h.emitError(req.RequestID, "SESSION_CREATE_ERROR", err.Error())
-		return
+	directory := ""
+	if req.ProjectID != "" {
+		if workspaceItem, err := h.resolveWorkspace(req.ProjectID); err == nil && workspaceItem != nil {
+			directory = workspaceItem.Directory
+		}
 	}
 
-	session, err := provider.Sessions().Create(context.Background(), opencodeProjectID)
+	session, err := provider.Sessions().Create(context.Background(), directory)
 	if err != nil {
 		h.emitError(req.RequestID, "SESSION_CREATE_ERROR", err.Error())
 		return
@@ -738,25 +741,19 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		return
 	}
 
-	_, opencodeProjectID, err := h.resolveOpencodeProjectID(req.ProjectID)
-	if err != nil {
-		h.emit(EventSessionPromptResponse, SessionPromptResponsePayload{
-			RequestID: req.RequestID,
-			ProjectID: req.ProjectID,
-			SessionID: req.SessionID,
-			Success:   false,
-			Error:     err.Error(),
-			ExitCode:  -1,
-			Duration:  0,
-		})
-		return
+	directory := ""
+	if req.ProjectID != "" {
+		if workspaceItem, err := h.resolveWorkspace(req.ProjectID); err == nil && workspaceItem != nil {
+			directory = workspaceItem.Directory
+		}
 	}
 
 	runInput := agent.RunInput{
-		Prompt:    req.Prompt,
-		SessionID: req.SessionID,
-		ProjectID: opencodeProjectID,
-		Agent:     req.Agent,
+		Prompt:     req.Prompt,
+		SessionID:  req.SessionID,
+		ProjectID:  req.ProjectID,
+		WorkingDir: directory,
+		Agent:      req.Agent,
 	}
 	if req.Model != nil {
 		runInput.Model = &agent.ModelRef{
@@ -1947,20 +1944,9 @@ func (h *Handler) RequestQuestion(payload QuestionRequestPayload) ([][]string, e
 }
 
 func (h *Handler) convertSession(s agent.Session) SessionPayload {
-	projectKey := s.ProjectID
-	if s.Directory != "" {
-		if workspaceItem, err := h.workspaces.GetByDirectory(context.Background(), s.Directory); err == nil && workspaceItem != nil {
-			projectKey = workspaceItem.Key
-		}
-	} else if s.ProjectID != "" {
-		if workspaceItem, err := h.workspaces.GetByOpencodeProjectID(context.Background(), s.ProjectID); err == nil && workspaceItem != nil {
-			projectKey = workspaceItem.Key
-		}
-	}
-
 	sp := SessionPayload{
 		ID:        s.ID,
-		ProjectID: projectKey,
+		ProjectID: s.ProjectID,
 		Directory: s.Directory,
 		Prompt:    s.Title,
 		Status:    string(s.Status),

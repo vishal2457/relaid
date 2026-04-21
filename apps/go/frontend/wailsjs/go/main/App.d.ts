@@ -11,6 +11,8 @@ export function GetConnectedClients():Promise<Array<relay.MobileClient>>;
 
 export function GetDeviceCredentials():Promise<relay.DeviceCredentials>;
 
+export function GetServerBaseURL():Promise<string>;
+
 export function GetStoredRelayURL():Promise<string>;
 
 export function ListWorkspaces():Promise<Array<main.WorkspacePayload>>;

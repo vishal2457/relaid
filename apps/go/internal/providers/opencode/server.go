@@ -142,7 +142,7 @@ func (sm *ServerManager) checkHealth(url string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/config", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/health", nil)
 	if err != nil {
 		return false
 	}

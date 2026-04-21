@@ -18,6 +18,10 @@ export function GetDeviceCredentials() {
   return window['go']['main']['App']['GetDeviceCredentials']();
 }
 
+export function GetServerBaseURL() {
+  return window['go']['main']['App']['GetServerBaseURL']();
+}
+
 export function GetStoredRelayURL() {
   return window['go']['main']['App']['GetStoredRelayURL']();
 }

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 
 	"relaid/internal/agent"
 	"relaid/internal/config"
@@ -29,6 +30,7 @@ type Server struct {
 	echo       *echo.Echo
 	httpServer *http.Server
 	listener   net.Listener
+	mu         sync.RWMutex
 }
 
 func New(cfg config.Config, workspaces *workspace.Service) *Server {
@@ -83,14 +85,18 @@ func (s *Server) Start() error {
 		return fmt.Errorf("listen on %s: %w", s.cfg.ServerAddr, err)
 	}
 
+	s.mu.Lock()
 	s.listener = listener
+	s.mu.Unlock()
 	log.Printf("Embedded server listening on http://%s", listener.Addr().String())
 
-	err = s.httpServer.Serve(listener)
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
-	return err
+	go func() {
+		if err := s.httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("embedded server stopped: %v", err)
+		}
+	}()
+
+	return nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
@@ -119,5 +125,11 @@ func (s *Server) Workspaces() *workspace.Service {
 }
 
 func (s *Server) Address() string {
+	s.mu.RLock()
+	listener := s.listener
+	s.mu.RUnlock()
+	if listener != nil {
+		return listener.Addr().String()
+	}
 	return s.cfg.ServerAddr
 }

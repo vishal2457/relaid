@@ -210,11 +210,9 @@ func (s *skillService) List(ctx context.Context, projectID string, query string)
 		worktree = s.sdk.Cwd()
 	}
 
-	s.logger.Printf("[skills-debug] skillService.List: projectID=%q worktree=%q query=%q", projectID, worktree, query)
-
 	skills, err := skillpkg.LoadAll(skillpkg.OpenCode, worktree)
 	if err != nil {
-		s.logger.Printf("[skills-debug] skillService.List: LoadAll error: %v", err)
+		s.logger.Printf("skillService.List: LoadAll error: %v", err)
 		return nil, err
 	}
 
@@ -230,7 +228,6 @@ func (s *skillService) List(ctx context.Context, projectID string, query string)
 				})
 			}
 		}
-		s.logger.Printf("[skills-debug] skillService.List: %d skills after filter (query=%q)", len(filtered), query)
 		return filtered, nil
 	}
 
@@ -243,7 +240,6 @@ func (s *skillService) List(ctx context.Context, projectID string, query string)
 		})
 	}
 
-	s.logger.Printf("[skills-debug] skillService.List: %d skills total", len(result))
 	return result, nil
 }
 
@@ -266,43 +262,18 @@ func (s *sessionService) List(ctx context.Context, filters agent.SessionFilters)
 	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
 	defer cancel()
 
-	if filters.Cwd != "" {
-		if _, err := os.Stat(filters.Cwd); err != nil {
-			return nil, "", fmt.Errorf("invalid cwd: %w", err)
-		}
-	}
-
-	conn, err := s.acpClient.Start(ctx, s.clientInfo, s.protocol, nil)
+	sessions, err := s.sdk.ListSessions(ctx, filters.Cwd)
 	if err != nil {
 		return nil, "", err
-	}
-	defer conn.Close()
-
-	result, err := conn.ListSessions(ctx, filters.Cwd, "")
-	if err != nil {
-		return nil, "", err
-	}
-
-	sessions := make([]agent.Session, 0, len(result.Sessions))
-	for _, info := range result.Sessions {
-		session := agent.Session{
-			ID:        info.SessionID,
-			Directory: info.Cwd,
-			Title:     info.Title,
-			Status:    agent.SessionCompleted,
-			CreatedAt: parseTime(info.UpdatedAt),
-			UpdatedAt: parseTime(info.UpdatedAt),
-		}
-		if s.active.Has(session.ID) {
-			session.Status = agent.SessionRunning
-		}
-		sessions = append(sessions, session)
 	}
 
 	filtered := make([]agent.Session, 0, len(sessions))
 	for _, session := range sessions {
 		if filters.Status != "" && string(session.Status) != filters.Status {
 			continue
+		}
+		if s.active.Has(session.ID) {
+			session.Status = agent.SessionRunning
 		}
 		filtered = append(filtered, session)
 	}

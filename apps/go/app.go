@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -75,13 +76,11 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}
 
-	go func() {
-		log.Println("Starting embedded server")
-		if err := a.server.Start(); err != nil {
-			log.Printf("embedded server stopped: %v", err)
-			wruntime.LogErrorf(ctx, "embedded server stopped: %v", err)
-		}
-	}()
+	log.Println("Starting embedded server")
+	if err := a.server.Start(); err != nil {
+		log.Printf("embedded server stopped: %v", err)
+		wruntime.LogErrorf(ctx, "embedded server stopped: %v", err)
+	}
 
 	a.startRelayClient()
 }
@@ -255,6 +254,27 @@ func (a *App) GetConnectedClients() ([]relay.MobileClient, error) {
 	}
 
 	return response.MobileClients, nil
+}
+
+func (a *App) GetServerBaseURL() string {
+	if a.server == nil {
+		return ""
+	}
+
+	addr := a.server.Address()
+	if addr == "" {
+		return ""
+	}
+
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	if host == "" || host == "::" {
+		host = "127.0.0.1"
+	}
+
+	return fmt.Sprintf("http://%s:%s", host, port)
 }
 
 func (a *App) configureRelayClient(relayURL string, creds relay.DeviceCredentials) error {
