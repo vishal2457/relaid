@@ -3,7 +3,6 @@ package sdk
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -270,18 +269,6 @@ func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.Age
 	}
 	if err := httpClient.get(ctx, "agent", query, &response); err != nil {
 		return nil, err
-	}
-
-	log.Printf("[skills-debug] ListAgents: directory=%q agents_count=%d", directory, len(response))
-	for i, item := range response {
-		toolNames := make([]string, 0, len(item.Tools))
-		for k, v := range item.Tools {
-			if v {
-				toolNames = append(toolNames, k)
-			}
-		}
-		sort.Strings(toolNames)
-		log.Printf("[skills-debug] agent[%d]: name=%q mode=%q builtIn=%v hidden=%v tools=%v prompt_len=%d", i, item.Name, item.Mode, item.BuiltIn, item.Hidden, toolNames, len(item.Prompt))
 	}
 
 	result := make([]agent.AgentConfig, 0, len(response))

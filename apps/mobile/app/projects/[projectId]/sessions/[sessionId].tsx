@@ -404,6 +404,7 @@ export default function SessionMessagesScreen() {
       if (!isAppInForeground()) {
         showPermissionNotification({
           requestId: payload.requestId,
+          projectId: payload.projectId,
           sessionId: payload.sessionId,
           jobId: payload.jobId,
           permission: payload.permission,

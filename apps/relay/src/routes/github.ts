@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { getDb } from "../db";
+import { ensureGithubSchema, getDb } from "../db";
 import { githubTokens } from "../db/github-schema";
 import { encrypt, decrypt } from "../utils/crypto";
 import { logger } from "../shared/logger";
@@ -16,19 +16,30 @@ import {
 
 const router: Router = Router();
 
-const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || "";
-const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || "";
-const GITHUB_REDIRECT_URI =
-  process.env.GITHUB_REDIRECT_URI || "";
 const GITHUB_OAUTH_AUTHORIZE_URL =
   "https://github.com/login/oauth/authorize";
 const GITHUB_OAUTH_TOKEN_URL =
   "https://github.com/login/oauth/access_token";
 const GITHUB_SCOPE = "repo";
-const APP_DEEP_LINK_SCHEME = process.env.APP_DEEP_LINK_SCHEME || "relaid";
+
+function getGithubClientId(): string {
+  return process.env.GITHUB_CLIENT_ID || "";
+}
+
+function getGithubClientSecret(): string {
+  return process.env.GITHUB_CLIENT_SECRET || "";
+}
+
+function getGithubRedirectUri(): string {
+  return process.env.GITHUB_REDIRECT_URI || "";
+}
+
+function getAppDeepLinkScheme(): string {
+  return process.env.APP_DEEP_LINK_SCHEME || "relaid";
+}
 
 function assertGithubOAuthConfig(): void {
-  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET) {
+  if (!getGithubClientId() || !getGithubClientSecret()) {
     throw Object.assign(new Error("GitHub OAuth is not configured"), {
       statusCode: 500,
     });
@@ -39,7 +50,7 @@ function buildAuthRedirect(
   mobileRedirectUri: string | null,
   params: Record<string, string>,
 ): string {
-  const base = mobileRedirectUri || `${APP_DEEP_LINK_SCHEME}://auth`;
+  const base = mobileRedirectUri || `${getAppDeepLinkScheme()}://auth`;
   const qs = new URLSearchParams(params).toString();
   const separator = base.includes("?") ? "&" : "?";
   return `${base}${separator}${qs}`;
@@ -58,6 +69,7 @@ function requireUserId(req: Request): string {
 async function getDecryptedGithubToken(
   userId: string,
 ): Promise<string> {
+  await ensureGithubSchema();
   const db = getDb();
   const [row] = await db
     .select()
@@ -81,6 +93,7 @@ async function upsertGithubToken(
   username: string,
   scope: string,
 ): Promise<void> {
+  await ensureGithubSchema();
   const db = getDb();
   const now = new Date();
   const encryptedToken = encrypt(accessToken);
@@ -118,15 +131,17 @@ router.get("/auth", async (req: Request, res: Response) => {
   try {
     assertGithubOAuthConfig();
     const userId = requireUserId(req);
+    const githubClientId = getGithubClientId();
+    const githubRedirectUri = getGithubRedirectUri();
     const state = encrypt(userId);
     const mobileRedirectUri = req.query.redirect_uri as string | undefined;
     const params = new URLSearchParams({
-      client_id: GITHUB_CLIENT_ID,
+      client_id: githubClientId,
       scope: GITHUB_SCOPE,
       state,
     });
-    if (GITHUB_REDIRECT_URI) {
-      params.set("redirect_uri", GITHUB_REDIRECT_URI);
+    if (githubRedirectUri) {
+      params.set("redirect_uri", githubRedirectUri);
     }
     const url = `${GITHUB_OAUTH_AUTHORIZE_URL}?${params.toString()}`;
 
@@ -154,6 +169,9 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
 
   try {
     assertGithubOAuthConfig();
+    const githubClientId = getGithubClientId();
+    const githubClientSecret = getGithubClientSecret();
+    const githubRedirectUri = getGithubRedirectUri();
     const { code, state, error: oauthError } = req.query as Record<
       string,
       string
@@ -196,10 +214,10 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        client_id: GITHUB_CLIENT_ID,
-        client_secret: GITHUB_CLIENT_SECRET,
+        client_id: githubClientId,
+        client_secret: githubClientSecret,
         code,
-        ...(GITHUB_REDIRECT_URI ? { redirect_uri: GITHUB_REDIRECT_URI } : {}),
+        ...(githubRedirectUri ? { redirect_uri: githubRedirectUri } : {}),
       }),
     });
 
@@ -269,6 +287,7 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
 router.get("/status", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req);
+    await ensureGithubSchema();
     const db = getDb();
     const [row] = await db
       .select({ githubUsername: githubTokens.githubUsername })
@@ -291,6 +310,7 @@ router.get("/status", async (req: Request, res: Response) => {
 router.delete("/session", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req);
+    await ensureGithubSchema();
     const db = getDb();
 
     await db.delete(githubTokens).where(eq(githubTokens.userId, userId));

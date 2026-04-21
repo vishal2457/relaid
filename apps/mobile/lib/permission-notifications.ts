@@ -1,8 +1,10 @@
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 import { formatPermissionType } from "../src/components/PermissionCard";
 import { sendPermissionResponse } from "./sse/manager";
 
 const PERMISSION_CATEGORY = "PERMISSION_REQUEST";
+const DEFAULT_ANDROID_NOTIFICATION_CHANNEL_ID = "default";
 
 const ACTION_REJECT = "reject";
 const ACTION_ONCE = "once";
@@ -20,11 +22,11 @@ function getResponseKey(
 
 async function processPermissionNotificationResponse(
   response: Notifications.NotificationResponse,
-): Promise<void> {
+): Promise<boolean> {
   const category = response.notification.request.content.categoryIdentifier;
 
   if (category !== PERMISSION_CATEGORY) {
-    return;
+    return false;
   }
 
   const actionId = response.actionIdentifier as string;
@@ -35,7 +37,7 @@ async function processPermissionNotificationResponse(
     !data?.requestId ||
     !data?.sessionId
   ) {
-    return;
+    return false;
   }
 
   const reply =
@@ -48,13 +50,13 @@ async function processPermissionNotificationResponse(
           : null;
 
   if (!reply) {
-    return;
+    return false;
   }
 
   const responseKey = getResponseKey(response, reply);
 
   if (handledResponseKeys.has(responseKey)) {
-    return;
+    return true;
   }
 
   handledResponseKeys.add(responseKey);
@@ -66,9 +68,11 @@ async function processPermissionNotificationResponse(
       jobId: (data.jobId as string) || "",
       reply,
     });
+    return true;
   } catch (error) {
     handledResponseKeys.delete(responseKey);
     console.error("[PermissionNotification] Failed to send response:", error);
+    return false;
   }
 }
 
@@ -115,12 +119,15 @@ export async function processLastPermissionNotificationResponse(): Promise<void>
     return;
   }
 
-  await processPermissionNotificationResponse(response);
-  Notifications.clearLastNotificationResponse();
+  const handled = await processPermissionNotificationResponse(response);
+  if (handled) {
+    Notifications.clearLastNotificationResponse();
+  }
 }
 
 export async function showPermissionNotification(params: {
   requestId: string;
+  projectId: string;
   sessionId: string;
   jobId: string;
   permission: string;
@@ -152,11 +159,15 @@ export async function showPermissionNotification(params: {
       data: {
         type: "permission_request",
         requestId,
+        projectId: params.projectId,
         sessionId,
         jobId,
         permission,
       },
       categoryIdentifier: PERMISSION_CATEGORY,
+      ...(Platform.OS === "android"
+        ? { channelId: DEFAULT_ANDROID_NOTIFICATION_CHANNEL_ID }
+        : {}),
     },
     trigger: null,
   });
