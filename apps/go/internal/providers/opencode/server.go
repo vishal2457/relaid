@@ -156,7 +156,7 @@ func (sm *ServerManager) checkHealth(url string) bool {
 }
 
 func (sm *ServerManager) waitHealthy(ctx context.Context, url string) error {
-	healthURL := url + "/health"
+	healthURL := url + "/config"
 	delay := 200 * time.Millisecond
 
 	for i := 0; i < 150; i++ {

@@ -3,15 +3,13 @@ import { AppStorage } from "../utils/storage";
 import { toast } from "sonner";
 import { getApiBaseUrl } from "../utils/runtime-config";
 
-export const API_URL = getApiBaseUrl();
-
 const axiosInstance = axios.create({
-  baseURL: `${API_URL}/api`,
   timeout: 10000,
 });
 
 axiosInstance.interceptors.request.use(
   (config) => {
+    config.baseURL = `${getApiBaseUrl()}/api`;
     const token = AppStorage.getItem("AUTH_TOKEN");
     if (token) {
       config.headers["Authorization"] = `${token}`;

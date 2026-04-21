@@ -76,6 +76,9 @@ router.get("/", async (req: Request, res: Response) => {
     const userId = requireUserId(req.headers["x-user-id"]);
     const cwd = typeof req.query.cwd === "string" ? req.query.cwd : undefined;
 
+    console.log(userId, "user id");
+    console.log(cwd, "cwd");
+
     const results = await requestAllConnectedServers<SessionsListResponse>(
       userId,
       "sessions_list_request",

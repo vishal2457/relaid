@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Home } from "lucide-react";
+import { Home, FolderOpen } from "lucide-react";
 
 import {
   NavigationMenu,
@@ -47,6 +47,24 @@ export default function BaseLayout({
                   >
                     <Home className="mr-2 h-4 w-4" />
                     Home
+                  </Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+            <NavigationMenuItem>
+                <NavigationMenuLink
+                  asChild
+                  className={navigationMenuTriggerStyle()}
+                >
+                  <Link
+                    to={ROUTES_PATH.Workspaces}
+                    className={cn(
+                      navigationMenuTriggerStyle(),
+                      location.pathname === ROUTES_PATH.Workspaces &&
+                        "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    <FolderOpen className="mr-2 h-4 w-4" />
+                    Workspaces
                   </Link>
                 </NavigationMenuLink>
               </NavigationMenuItem>

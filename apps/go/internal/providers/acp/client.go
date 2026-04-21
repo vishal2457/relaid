@@ -166,18 +166,12 @@ func (c *Connection) NewSession(ctx context.Context, cwd string) (*SessionCreate
 		return nil, err
 	}
 
-	c.logf("[skills-debug] ACP new session RAW response: %s", string(raw))
-
 	var result SessionCreateResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
 
 	c.configOptions = result.ConfigOptions
-	c.logf("[skills-debug] ACP new session: sessionId=%s configOptions_count=%d", result.SessionID, len(result.ConfigOptions))
-	for i, opt := range result.ConfigOptions {
-		c.logf("[skills-debug] ACP new session configOption[%d]: id=%q currentValue=%v", i, opt.ID, opt.CurrentValue)
-	}
 	return &result, nil
 }
 
@@ -189,18 +183,12 @@ func (c *Connection) LoadSession(ctx context.Context, sessionID, cwd string) (*S
 		return nil, err
 	}
 
-	c.logf("[skills-debug] ACP load session RAW response: %s", string(raw))
-
 	var result SessionLoadResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
 
 	c.configOptions = result.ConfigOptions
-	c.logf("[skills-debug] ACP load session: sessionId=%s configOptions_count=%d", result.SessionID, len(result.ConfigOptions))
-	for i, opt := range result.ConfigOptions {
-		c.logf("[skills-debug] ACP load session configOption[%d]: id=%q currentValue=%v", i, opt.ID, opt.CurrentValue)
-	}
 	return &result, nil
 }
 

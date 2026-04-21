@@ -5,13 +5,17 @@ import { Toaster } from "sonner";
 import { AppRouter } from "./routes/router";
 import { TooltipProvider } from "./shared/components/ui/tooltip";
 import { healthApi } from "./shared/api/features/health.api";
-import { getApiBaseUrl } from "./shared/utils/runtime-config";
+import {
+  getApiBaseUrl,
+  initializeApiBaseUrl,
+} from "./shared/utils/runtime-config";
 import { queryClient } from "./shared/utils/query-client";
 
 function App() {
   const [healthState, setHealthState] = useState<
     "loading" | "ready" | "failed"
   >("loading");
+  const [apiBaseUrl, setApiBaseUrl] = useState(getApiBaseUrl());
   const [healthMessage, setHealthMessage] = useState(
     "Starting desktop services...",
   );
@@ -22,14 +26,19 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    const apiBaseUrl = getApiBaseUrl();
     const maxAttempts = 20;
     const retryDelayMs = 500;
 
     const check = async () => {
+      const resolvedApiBaseUrl = await initializeApiBaseUrl();
+      if (cancelled) {
+        return;
+      }
+      setApiBaseUrl(resolvedApiBaseUrl);
+
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
-          const response = await healthApi.checkHealth(apiBaseUrl);
+          const response = await healthApi.checkHealth(resolvedApiBaseUrl);
           const payload = await response.json();
           if (cancelled) {
             return;
@@ -62,7 +71,7 @@ function App() {
           }
 
           setHealthMessage(
-            `Waiting for local API (${attempt}/${maxAttempts}) at ${apiBaseUrl}...`,
+            `Waiting for local API (${attempt}/${maxAttempts}) at ${resolvedApiBaseUrl}...`,
           );
         }
 
@@ -71,7 +80,7 @@ function App() {
 
       if (!cancelled) {
         setHealthMessage(
-          `Unable to reach the embedded server at ${apiBaseUrl}.`,
+          `Unable to reach the embedded server at ${resolvedApiBaseUrl}.`,
         );
         setHealthState("failed");
       }
@@ -100,7 +109,7 @@ function App() {
             {healthMessage}
           </p>
           <p className="mt-8 text-sm text-muted-foreground">
-            Expected API base: {getApiBaseUrl()}
+            Expected API base: {apiBaseUrl}
           </p>
         </div>
       </div>

@@ -6,7 +6,7 @@ import type {
   ProjectFileMatch as OpenCodeFileMatch,
 } from "../opencode-types";
 
-// Mobile app representation of a project
+// Mobile app representation of a workspace/project exposed by relay.
 export interface Project {
   id: string;
   name: string;
@@ -17,10 +17,10 @@ export interface Project {
   updatedAt?: number;
 }
 
-// Convert relay ProjectPayload to mobile Project
+// Convert relay workspace payload to the mobile project shape.
 export function adaptProject(project: OpenCodeProject): Project {
-  // Relay sends: { id, name, description, folder, createdAt, updatedAt }
-  // OpenCode SDK sends: { id, worktree, time: { created, initialized } }
+  // Relay now serves DB-backed workspaces and still preserves the older
+  // OpenCode-shaped fields where useful for compatibility.
   const folder = project.folder ?? project.worktree ?? "";
 
   let createdAt: number | undefined;

@@ -10,6 +10,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
+import { Link } from "react-router-dom";
 import { Button } from "../../shared/components/ui/button";
 import { Input } from "../../shared/components/ui/input";
 import {
@@ -27,6 +28,7 @@ import {
   useRelayHooks,
   useConnectedClients,
 } from "../../shared/api/features/relay.api";
+import { ROUTES_PATH } from "../../routes/routes";
 
 export const HomePage = () => {
   const [relayUrl, setRelayUrl] = useState("");
@@ -137,6 +139,8 @@ export const HomePage = () => {
             </div>
           </div>
         </section>
+
+        
 
         {isConnected && (
           <section className="rounded-lg border p-5">
