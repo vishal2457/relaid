@@ -3,6 +3,7 @@ import * as Device from "expo-device";
 import { AppState, AppStateStatus, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
+import { router } from "expo-router";
 import { registerPushToken } from "./sse/manager";
 import { getCurrentAccessToken } from "./pairing/session";
 import {
@@ -19,6 +20,82 @@ const isNotificationsEnabled =
 
 let isAppForeground = true;
 let initialized = false;
+const handledNavigationResponseKeys = new Set<string>();
+
+function getNavigationResponseKey(
+  response: Notifications.NotificationResponse,
+): string {
+  return `${response.notification.request.identifier}:${response.actionIdentifier}`;
+}
+
+function getSessionRouteFromNotificationData(data: unknown): {
+  projectId: string;
+  sessionId: string;
+} | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const candidate = data as Record<string, unknown>;
+  const projectId = candidate.projectId;
+  const sessionId = candidate.sessionId;
+
+  if (typeof projectId !== "string" || typeof sessionId !== "string") {
+    return null;
+  }
+
+  switch (candidate.type) {
+    case "new_message":
+    case "permission_request":
+    case "question_request":
+    case "request_completed":
+      return { projectId, sessionId };
+    default:
+      return null;
+  }
+}
+
+function handleNotificationNavigation(
+  response: Notifications.NotificationResponse,
+): boolean {
+  if (
+    response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER
+  ) {
+    return false;
+  }
+
+  const route = getSessionRouteFromNotificationData(
+    response.notification.request.content.data,
+  );
+
+  if (!route) {
+    return false;
+  }
+
+  const responseKey = getNavigationResponseKey(response);
+  if (handledNavigationResponseKeys.has(responseKey)) {
+    return true;
+  }
+
+  handledNavigationResponseKeys.add(responseKey);
+  router.push({
+    pathname: "/projects/[projectId]/sessions/[sessionId]",
+    params: route,
+  });
+  return true;
+}
+
+async function processLastNotificationNavigationResponse(): Promise<void> {
+  const response = Notifications.getLastNotificationResponse();
+
+  if (!response) {
+    return;
+  }
+
+  if (handleNotificationNavigation(response)) {
+    Notifications.clearLastNotificationResponse();
+  }
+}
 
 export function initializeNotifications(): void {
   if (initialized || !isNotificationsEnabled) {
@@ -43,6 +120,10 @@ export function initializeNotifications(): void {
     );
   });
 
+  processLastNotificationNavigationResponse().catch((err) => {
+    console.error("Failed to process last notification navigation response:", err);
+  });
+
   processLastPermissionNotificationResponse().catch((err) => {
     console.error("Failed to process last permission notification response:", err);
   });
@@ -52,10 +133,7 @@ export function initializeNotifications(): void {
   });
 
   Notifications.addNotificationResponseReceivedListener((response) => {
-    const data = response.notification.request.content.data;
-    if (data?.type === "request_completed") {
-      // Navigate or refresh handled by the app
-    }
+    handleNotificationNavigation(response);
   });
 }
 
@@ -171,6 +249,10 @@ export async function registerPushTokenWithServer(): Promise<boolean> {
 export async function showNewMessageNotification(
   title: string,
   body: string,
+  params: {
+    projectId: string;
+    sessionId: string;
+  },
 ): Promise<void> {
   if (!isNotificationsEnabled) {
     return;
@@ -185,7 +267,14 @@ export async function showNewMessageNotification(
       content: {
         title,
         body,
-        data: { type: "new_message" },
+        data: {
+          type: "new_message",
+          projectId: params.projectId,
+          sessionId: params.sessionId,
+        },
+        ...(Platform.OS === "android"
+          ? { channelId: DEFAULT_ANDROID_NOTIFICATION_CHANNEL_ID }
+          : {}),
       },
       trigger: null,
     });

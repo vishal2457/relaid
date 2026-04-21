@@ -1,10 +1,12 @@
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
-import baseApi from "../axios/base";
-import { chatServerApiUrl } from "../axios/base";
+import baseApi, { chatServerApiUrl } from "../axios/base";
+import { getCurrentPairingSession } from "../pairing/session";
 
 const GITHUB_SESSION_KEY = "GITHUB_SESSION";
+
+WebBrowser.maybeCompleteAuthSession();
 
 export type GithubSession = {
   username: string;
@@ -13,19 +15,6 @@ export type GithubSession = {
 export type GithubStatusResponse = {
   connected: boolean;
   username: string | null;
-};
-
-export type GithubReposResponse = {
-  repos: Array<{
-    id: number;
-    name: string;
-    full_name: string;
-    owner: { login: string };
-    private: boolean;
-    html_url: string;
-    description: string | null;
-    updated_at: string;
-  }>;
 };
 
 let currentGithubSession: GithubSession | null = null;
@@ -70,21 +59,40 @@ export async function clearGithubSession(): Promise<void> {
 }
 
 export async function checkGithubStatus(): Promise<GithubStatusResponse> {
-  try {
-    const response = await baseApi.get<GithubReposResponse>("/github/repos", {
-      timeout: 8000,
-    });
-    const username = currentGithubSession?.username ?? null;
-    return { connected: true, username };
-  } catch {
-    return { connected: false, username: null };
+  const response = await baseApi.get<GithubStatusResponse>("/github/status", {
+    timeout: 8000,
+  });
+  const status = response.data;
+
+  if (status.connected && status.username) {
+    const session: GithubSession = { username: status.username };
+    await saveGithubSession(session);
+    return status;
   }
+
+  await clearGithubSession();
+  return { connected: false, username: null };
+}
+
+export async function disconnectGithub(): Promise<void> {
+  if (getCurrentPairingSession()) {
+    await baseApi.delete("/github/session", { timeout: 8000 });
+  }
+
+  await clearGithubSession();
 }
 
 export async function startGithubOAuth(): Promise<GithubSession | null> {
   const baseUrl = chatServerApiUrl.replace(/\/+$/, "");
   const redirectUrl = Linking.createURL("auth");
-  const authUrl = `${baseUrl}/api/github/auth?redirect_uri=${encodeURIComponent(redirectUrl)}`;
+  const session = getCurrentPairingSession();
+  const userId = session?.serverId;
+
+  if (!userId) {
+    throw new Error("Device must be paired before connecting GitHub");
+  }
+
+  const authUrl = `${baseUrl}/api/github/auth?redirect_uri=${encodeURIComponent(redirectUrl)}${userId ? `&x_user_id=${encodeURIComponent(userId)}` : ""}`;
 
   const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
 
@@ -94,16 +102,19 @@ export async function startGithubOAuth(): Promise<GithubSession | null> {
     return null;
   }
 
-  const url = new URL(result.url);
-  const success = url.searchParams.get("success");
-  const username = url.searchParams.get("username");
-  const error = url.searchParams.get("error");
+  const { queryParams } = Linking.parse(result.url);
+  const success =
+    typeof queryParams?.success === "string" ? queryParams.success : null;
+  const username =
+    typeof queryParams?.username === "string" ? queryParams.username : null;
+  const error =
+    typeof queryParams?.error === "string" ? queryParams.error : null;
 
   if (success !== "true" || !username) {
     throw new Error(error || "GitHub authentication failed");
   }
 
-  const session: GithubSession = { username };
-  await saveGithubSession(session);
-  return session;
+  const githubSession: GithubSession = { username };
+  await saveGithubSession(githubSession);
+  return githubSession;
 }

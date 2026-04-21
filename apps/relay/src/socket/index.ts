@@ -385,6 +385,7 @@ async function handleLocalServerConnection(
     void sendPushNotification(userId, "Permission Required", body, {
       type: "permission_request",
       requestId: payload.requestId,
+      projectId: payload.projectId,
       sessionId: payload.sessionId,
       jobId: payload.jobId,
       permission: payload.permission,
@@ -414,6 +415,7 @@ async function handleLocalServerConnection(
     void sendPushNotification(userId, "Question Required", body, {
       type: "question_request",
       requestId: payload.requestId,
+      projectId: payload.projectId,
       sessionId: payload.sessionId,
       jobId: payload.jobId,
     });

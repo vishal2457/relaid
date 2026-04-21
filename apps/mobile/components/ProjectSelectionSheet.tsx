@@ -53,13 +53,18 @@ export function ProjectSelectionSheet({
     });
   }, [normalizedSearchQuery, projects]);
 
+  const handleSelect = (project: Project) => {
+    onSelectProject(project);
+    onClose();
+  };
+
   return (
     <SelectionSheet
       visible={visible}
       title="Select Project"
       data={filteredProjects}
       onClose={onClose}
-      onItemPress={onSelectProject}
+      onItemPress={handleSelect}
       searchPlaceholder="Search projects"
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
@@ -70,7 +75,7 @@ export function ProjectSelectionSheet({
       renderItem={(item, isSelected) => {
         return (
           <Pressable
-            onPress={() => onSelectProject(item)}
+            onPress={() => handleSelect(item)}
             style={[
               styles.item,
               {

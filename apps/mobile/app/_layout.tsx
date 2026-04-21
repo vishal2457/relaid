@@ -71,7 +71,12 @@ function RootLayoutInner() {
       return;
     }
 
-    if (!isPaired && pathname !== "/pair" && pathname !== "/settings") {
+    if (
+      !isPaired &&
+      pathname !== "/pair" &&
+      pathname !== "/settings" &&
+      pathname !== "/auth"
+    ) {
       router.replace("/pair" as any);
       return;
     }
@@ -116,10 +121,12 @@ function RootLayoutInner() {
             name="settings"
             options={{ headerShown: false, presentation: "modal" }}
           />
+          <Stack.Screen name="auth" options={{ headerShown: false }} />
           <Stack.Screen name="pair" options={{ headerShown: false }} />
         </Stack>
       ) : (
         <Stack>
+          <Stack.Screen name="auth" options={{ headerShown: false }} />
           <Stack.Screen name="pair" options={{ headerShown: false }} />
           <Stack.Screen
             name="diff"

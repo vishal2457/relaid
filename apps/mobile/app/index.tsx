@@ -1020,6 +1020,10 @@ export default function ChatScreen() {
         void showNewMessageNotification(
           "New Message",
           lastMessage.content.slice(0, 100),
+          {
+            projectId: payload.projectId,
+            sessionId: payload.sessionId,
+          },
         );
       }
     },
@@ -1070,6 +1074,7 @@ export default function ChatScreen() {
       if (!isAppInForeground()) {
         showPermissionNotification({
           requestId: payload.requestId,
+          projectId: payload.projectId,
           sessionId: payload.sessionId,
           jobId: payload.jobId,
           permission: payload.permission,

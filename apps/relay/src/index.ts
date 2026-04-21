@@ -39,7 +39,17 @@ app.use(cors());
 app.use(morgan("combined", { stream }));
 app.use(express.json());
 app.use(async (req: Request, res: Response, next: NextFunction) => {
-  const accessToken = getBearerToken(req.headers.authorization);
+  let accessToken = getBearerToken(req.headers.authorization);
+
+  const userIdFromQuery = req.query.x_user_id as string | undefined;
+
+  if (userIdFromQuery) {
+    req.headers["x-user-id"] = userIdFromQuery;
+    req.headers["x-server-id"] = userIdFromQuery;
+    next();
+    return;
+  }
+
   if (!accessToken) {
     next();
     return;

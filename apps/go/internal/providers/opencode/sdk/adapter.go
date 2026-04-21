@@ -3,11 +3,11 @@ package sdk
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -271,18 +271,6 @@ func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.Age
 		return nil, err
 	}
 
-	log.Printf("[skills-debug] ListAgents: directory=%q agents_count=%d", directory, len(response))
-	for i, item := range response {
-		toolNames := make([]string, 0, len(item.Tools))
-		for k, v := range item.Tools {
-			if v {
-				toolNames = append(toolNames, k)
-			}
-		}
-		sort.Strings(toolNames)
-		log.Printf("[skills-debug] agent[%d]: name=%q mode=%q builtIn=%v hidden=%v tools=%v prompt_len=%d", i, item.Name, item.Mode, item.BuiltIn, item.Hidden, toolNames, len(item.Prompt))
-	}
-
 	result := make([]agent.AgentConfig, 0, len(response))
 	for _, item := range response {
 		var model *agent.ModelRef
@@ -406,9 +394,27 @@ func (a *Adapter) EnsureProjectDirectory(ctx context.Context, projectID, working
 		}
 		return a.cwd, nil
 	}
+	if stat, err := os.Stat(projectID); err == nil && stat.IsDir() {
+		abs, err := filepath.Abs(projectID)
+		if err != nil {
+			return projectID, nil
+		}
+		return abs, nil
+	}
 	project, err := a.GetProject(ctx, projectID)
 	if err != nil {
 		return "", err
+	}
+	if project == nil {
+		if strings.ContainsRune(projectID, filepath.Separator) {
+			cleaned := filepath.Clean(projectID)
+			if resolvedID, err := a.ResolveProjectByDirectory(ctx, cleaned); err == nil && resolvedID != "" {
+				project, err = a.GetProject(ctx, resolvedID)
+				if err != nil {
+					return "", err
+				}
+			}
+		}
 	}
 	if project == nil {
 		return "", fmt.Errorf("project %q not found", projectID)

@@ -861,13 +861,6 @@ func (h *Handler) handleProvidersList(args []json.RawMessage) {
 		return
 	}
 
-	h.logger.Printf("relay: providers fetched: %d providers", len(providers))
-	for _, p := range providers {
-		for _, m := range p.Models {
-			h.logger.Printf("relay: provider=%s model=%s (%s)", p.ID, m.ID, m.Name)
-		}
-	}
-
 	payload := ProvidersListResponse{
 		RequestID: req.RequestID,
 		Providers: make([]ProviderPayload, 0, len(providers)),
@@ -925,11 +918,6 @@ func (h *Handler) handleAgentsList(args []json.RawMessage) {
 			Agents:    []AgentPayload{},
 		})
 		return
-	}
-
-	h.logger.Printf("[skills-debug] handleAgentsList: projectID=%q directory=%q agents_count=%d", req.ProjectID, directory, len(agents))
-	for i, a := range agents {
-		h.logger.Printf("[skills-debug] handleAgentsList: agent[%d] name=%q mode=%q builtIn=%v hidden=%v", i, a.Name, a.Mode, a.BuiltIn, a.Hidden)
 	}
 
 	payload := AgentsListResponse{
@@ -2005,11 +1993,8 @@ func (h *Handler) handleSkillsList(args []json.RawMessage) {
 		return
 	}
 
-	h.logger.Printf("[skills-debug] handleSkillsList: projectID=%q query=%q", req.ProjectID, req.Query)
-
 	skillsSvc, err := h.getSkillsService()
 	if err != nil {
-		h.logger.Printf("[skills-debug] handleSkillsList: skills service error: %v", err)
 		h.emitError(req.RequestID, "SKILLS_ERROR", err.Error())
 		return
 	}
@@ -2024,7 +2009,6 @@ func (h *Handler) handleSkillsList(args []json.RawMessage) {
 
 	skills, err := skillsSvc.List(context.Background(), directory, req.Query)
 	if err != nil {
-		h.logger.Printf("[skills-debug] handleSkillsList: skills list error: %v", err)
 		h.emit(EventSkillsListResponse, SkillsListResponse{
 			RequestID: req.RequestID,
 			Skills:    []SkillPayload{},
@@ -2044,6 +2028,5 @@ func (h *Handler) handleSkillsList(args []json.RawMessage) {
 		})
 	}
 
-	h.logger.Printf("[skills-debug] handleSkillsList: returning %d skills", len(payload.Skills))
 	h.emit(EventSkillsListResponse, payload)
 }
