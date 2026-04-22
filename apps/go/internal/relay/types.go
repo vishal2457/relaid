@@ -612,6 +612,7 @@ type GitCommitRequest struct {
 	RequestID string `json:"requestId"`
 	ProjectID string `json:"projectId"`
 	Message   string `json:"message"`
+	Files     []string `json:"files,omitempty"`
 }
 
 type GitCommitResponse struct {

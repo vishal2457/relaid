@@ -351,24 +351,31 @@ func (s *Service) GetFileContent(filePath string) Result[string] {
 // Commit
 // =====================
 
-func (s *Service) Commit(message string) Result[string] {
-	repo, err := git.PlainOpen(s.cwd)
+func (s *Service) Commit(message string, files []string) Result[string] {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return fail[string]("Commit message is required")
+	}
+
+	args := []string{"commit", "-m", message}
+	if len(files) > 0 {
+		args = append(args, "--")
+		args = append(args, files...)
+	}
+
+	if _, err := runGit(s.cwd, args...); err != nil {
+		s.handleError("commit", err)
+		return fail[string](err.Error())
+	}
+
+	hash, err := runGit(s.cwd, "rev-parse", "HEAD")
 	if err != nil {
 		s.handleError("commit", err)
 		return fail[string](err.Error())
 	}
-	w, err := repo.Worktree()
-	if err != nil {
-		s.handleError("commit", err)
-		return fail[string](err.Error())
-	}
-	hash, err := w.Commit(message, &git.CommitOptions{})
-	if err != nil {
-		s.handleError("commit", err)
-		return fail[string](err.Error())
-	}
-	log.Printf("Created commit %s (cwd=%s)", hash.String(), s.cwd)
-	return ok(hash.String())
+
+	log.Printf("Created commit %s (cwd=%s)", hash, s.cwd)
+	return ok(hash)
 }
 
 // =====================

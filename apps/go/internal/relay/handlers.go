@@ -1326,7 +1326,7 @@ func (h *Handler) handleGitCommit(args []json.RawMessage) {
 	}
 
 	svc := gitservice.NewService(worktree)
-	result := svc.Commit(req.Message)
+	result := svc.Commit(req.Message, req.Files)
 
 	h.emit(EventGitCommitResponse, GitCommitResponse{
 		RequestID: req.RequestID,

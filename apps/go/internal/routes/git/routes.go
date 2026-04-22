@@ -317,12 +317,13 @@ func commit(registry RegistryProvider) echo.HandlerFunc {
 		}
 		var body struct {
 			Message string `json:"message"`
+			Files   []string `json:"files"`
 		}
 		if err := c.Bind(&body); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		svc := gitservice.NewService(worktree)
-		result := svc.Commit(body.Message)
+		result := svc.Commit(body.Message, body.Files)
 		if !result.Success {
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}

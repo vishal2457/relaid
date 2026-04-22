@@ -1,5 +1,13 @@
 import React, { useState, useCallback } from "react";
-import { FlatList, Pressable, StyleSheet, View } from "react-native";
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import {
@@ -227,6 +235,8 @@ export function GitDrawer({
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<Section>("none");
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [commitMessage, setCommitMessage] = useState("");
+  const [isCommitting, setIsCommitting] = useState(false);
 
   const { data, isLoading, error, refetch, isRefetching } = useGitFileStatus(
     activeProject?.id ?? "",
@@ -309,6 +319,24 @@ export function GitDrawer({
     unstageFiles.mutate(files);
   };
 
+  const handleCommit = useCallback(async () => {
+    if (!activeProject || selectedFiles.size === 0) return;
+    
+    const files = Array.from(selectedFiles);
+    setIsCommitting(true);
+    
+    try {
+      await stageFiles.mutateAsync(files);
+      setCommitMessage("");
+      setIsCommitting(false);
+      setSelectedFiles(new Set());
+      setActiveSection("none");
+    } catch (error) {
+      console.error("Commit failed:", error);
+      setIsCommitting(false);
+    }
+  }, [activeProject, selectedFiles, stageFiles]);
+
   if (!visible) {
     return null;
   }
@@ -316,17 +344,24 @@ export function GitDrawer({
   return (
     <>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View
+      <KeyboardAvoidingView
         style={[
           styles.drawer,
-          {
-            backgroundColor,
-            borderLeftWidth: 1,
-            borderColor,
-          },
         ]}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
       >
-        <View style={[styles.header, { borderBottomColor: borderColor }]}>
+        <View
+          style={[
+            styles.drawerContent,
+            {
+              backgroundColor,
+              borderLeftWidth: 1,
+              borderColor,
+            },
+          ]}
+        >
+        <View style={[styles.header, { borderBottomColor: borderColor }]}> 
           {activeSection !== "none" ? (
             <View style={styles.selectionHeader}>
               <Pressable onPress={clearSelection} style={styles.backButton}>
@@ -419,6 +454,7 @@ export function GitDrawer({
             keyExtractor={() => "empty"}
             renderItem={() => null}
             style={styles.list}
+            keyboardShouldPersistTaps="handled"
             ListHeaderComponent={
               <>
                 <CollapsibleSection
@@ -502,7 +538,7 @@ export function GitDrawer({
                 disabled={stageFiles.isPending || unstageFiles.isPending}
               >
                 {(activeSection === "changes" && stageFiles.isPending) ||
-                  (activeSection === "staged" && unstageFiles.isPending) ? (
+                (activeSection === "staged" && unstageFiles.isPending) ? (
                   <ActivityIndicator size={14} color="#fff" />
                 ) : (
                   <MaterialCommunityIcons
@@ -521,9 +557,48 @@ export function GitDrawer({
                         : `Unstage ${selectedFiles.size}`}
                 </Text>
               </Pressable>
+
+              {activeSection === "staged" && (
+                <>
+                  <View style={styles.commitInputRow}>
+                    <TextInput
+                      style={styles.commitInput}
+                      placeholder="Enter commit message..."
+                      value={commitMessage}
+                      onChangeText={setCommitMessage}
+                      placeholderTextColor="#94A3B8"
+                    />
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.commitButton,
+                        {
+                          opacity: pressed || isCommitting ? 0.7 : 1,
+                          backgroundColor: commitMessage.trim()
+                            ? "#2563EB"
+                            : "#64748B",
+                        },
+                      ]}
+                      onPress={handleCommit}
+                      disabled={!commitMessage.trim() || isCommitting}
+                    >
+                      {isCommitting ? (
+                        <ActivityIndicator size={14} color="#fff" />
+                      ) : (
+                        <Text
+                          variant="labelSmall"
+                          style={styles.commitButtonText}
+                        >
+                          Commit
+                        </Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </>
+              )}
             </View>
           )}
-      </View>
+        </View>
+      </KeyboardAvoidingView>
     </>
   );
 }
@@ -546,6 +621,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 5,
+  },
+  drawerContent: {
+    flex: 1,
   },
   header: {
     flexDirection: "row",
@@ -641,7 +719,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: 1,
-    alignItems: "flex-start",
+    alignItems: "stretch",
+    gap: 12,
   },
   bottomActionBtn: {
     flexDirection: "row",
@@ -652,6 +731,31 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   bottomActionText: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+  commitInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  commitInput: {
+    flex: 1,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    color: "#fff",
+  },
+  commitButton: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  commitButtonText: {
     color: "#fff",
     fontWeight: "600",
   },
