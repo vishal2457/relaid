@@ -6,14 +6,14 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { disconnectSseClient } from "@/lib/sse";
-import { queryClient } from "@/lib/query-client";
+import { disconnectSseClient } from "@/src/lib/sse";
+import { queryClient } from "@/src/lib/query-client";
 import {
   clearPairingSession as clearStoredPairingSession,
   loadStoredPairingSession,
   savePairingSession as saveStoredPairingSession,
   type PairingSession,
-} from "@/lib/pairing/session";
+} from "@/src/lib/pairing/session";
 
 type PairingSessionContextValue = {
   hydrated: boolean;

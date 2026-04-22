@@ -2,29 +2,29 @@ import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Text, useTheme } from "react-native-paper";
 import { SelectionSheet } from "@/src/components/SelectionSheet";
-import type { ActiveModel } from "@/lib/api/providers";
+import type { Branch } from "@/src/lib/api/branches";
 
-type ModelSelectionSheetProps = {
+type BranchSelectionSheetProps = {
   visible: boolean;
-  models: ActiveModel[];
-  activeModelId?: string | null;
+  branches: Branch[];
+  currentBranch?: string | null;
   loading?: boolean;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onClose: () => void;
-  onSelectModel: (model: ActiveModel) => void;
+  onSelectBranch: (branch: Branch) => Promise<void> | void;
 };
 
-export function ModelSelectionSheet({
+export function BranchSelectionSheet({
   visible,
-  models,
-  activeModelId,
+  branches,
+  currentBranch,
   loading = false,
   searchQuery,
   onSearchChange,
   onClose,
-  onSelectModel,
-}: ModelSelectionSheetProps) {
+  onSelectBranch,
+}: BranchSelectionSheetProps) {
   const theme = useTheme();
   const borderColor = theme.dark
     ? "rgba(255,255,255,0.1)"
@@ -33,22 +33,22 @@ export function ModelSelectionSheet({
   return (
     <SelectionSheet
       visible={visible}
-      title="Select Model"
-      data={models}
+      title="Select Branch"
+      data={branches}
       onClose={onClose}
-      onItemPress={onSelectModel}
-      searchPlaceholder="Search models or providers"
+      onItemPress={onSelectBranch}
+      searchPlaceholder="Search branches"
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}
       isLoading={loading}
-      emptyText="No models found"
-      selectedId={activeModelId}
-      getItemId={(item) => item.id}
-      keyExtractor={(item) => item.id}
+      emptyText="No branches found"
+      selectedId={currentBranch}
+      getItemId={(item) => item.name}
+      keyExtractor={(item) => item.name}
       renderItem={(item, isSelected) => {
         return (
           <Pressable
-            onPress={() => onSelectModel(item)}
+            onPress={() => onSelectBranch(item)}
             style={[
               styles.item,
               {
@@ -63,7 +63,7 @@ export function ModelSelectionSheet({
               <View
                 style={[
                   styles.dot,
-                  { backgroundColor: isSelected ? "#00FF41" : "#6366F1" },
+                  { backgroundColor: isSelected ? "#00FF41" : "#F2A900" },
                 ]}
               />
               <View style={styles.content}>
@@ -79,13 +79,6 @@ export function ModelSelectionSheet({
                   numberOfLines={1}
                 >
                   {item.name}
-                </Text>
-                <Text
-                  variant="bodySmall"
-                  style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}
-                  numberOfLines={1}
-                >
-                  {item.providerName}
                 </Text>
               </View>
             </View>
@@ -117,8 +110,5 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-  },
-  subtitle: {
-    marginTop: 2,
   },
 });

@@ -6,7 +6,7 @@ import React, {
   useCallback,
 } from "react";
 import * as SecureStore from "expo-secure-store";
-import { updateBaseUrl } from "@/lib/axios/base";
+import { updateBaseUrl } from "@/src/lib/axios/base";
 
 const DEFAULT_SERVER_URL = "http://100.95.62.14:3001";
 const SERVER_URL_KEY = "SERVER_BASE_URL";

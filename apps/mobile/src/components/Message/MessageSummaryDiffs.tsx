@@ -9,7 +9,7 @@ import {
 import { Surface, Text, useTheme } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import InlineDiffViewer from "../InlineDiffViewer";
-import type { FileDiff, MessageSummary } from "@/lib/api/messages";
+import type { FileDiff, MessageSummary } from "@/src/lib/api/messages";
 
 interface MessageSummaryDiffsProps {
   summary: MessageSummary;

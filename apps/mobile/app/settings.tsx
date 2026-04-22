@@ -5,7 +5,7 @@ import {
 } from "@/src/components/ServerUrlContext";
 import { useAppTheme } from "@/src/components/ThemeContext";
 import ThemeSelector from "@/src/components/ThemeSelector";
-import { disconnectSseClient } from "@/lib/sse";
+import { disconnectSseClient } from "@/src/lib/sse";
 import { router } from "expo-router";
 import React, { useCallback, useState, useEffect } from "react";
 import {
@@ -35,7 +35,7 @@ import {
   startGithubOAuth,
   clearGithubSession,
   type GithubSession,
-} from "@/lib/api/github";
+} from "@/src/lib/api/github";
 
 export default function SettingsScreen() {
   const theme = useTheme();

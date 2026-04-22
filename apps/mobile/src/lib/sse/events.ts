@@ -1,5 +1,5 @@
-import type { SessionMessage } from "@/lib/api/messages";
-import type { StreamChunkType } from "@/lib/opencode-types";
+import type { SessionMessage } from "@/src/lib/api/messages";
+import type { StreamChunkType } from "@/src/lib/opencode-types";
 
 export type SessionPromptResponseEvent = {
   requestId: string;

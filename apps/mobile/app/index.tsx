@@ -28,10 +28,10 @@ import {
   MIN_INPUT_HEIGHT,
 } from "@/src/components/ChatComposer";
 import { SessionDrawer } from "@/src/components/SessionDrawer";
-import { ProjectSelectionSheet } from "@/components/ProjectSelectionSheet";
-import { ModelSelectionSheet } from "@/components/ModelSelectionSheet";
-import { AgentSelectionSheet } from "@/components/AgentSelectionSheet";
-import { BranchSelectionSheet } from "@/components/BranchSelectionSheet";
+import { ProjectSelectionSheet } from "@/src/components/BottomModals/ProjectSelectionSheet";
+import { ModelSelectionSheet } from "@/src/components/BottomModals/ModelSelectionSheet";
+import { AgentSelectionSheet } from "@/src/components/BottomModals/AgentSelectionSheet";
+import { BranchSelectionSheet } from "@/src/components/BottomModals/BranchSelectionSheet";
 import { Stack } from "expo-router";
 import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import {
@@ -43,7 +43,7 @@ import {
   messageKeys,
   useSessionMessages,
   type SessionMessage,
-} from "@/lib/api/messages";
+} from "@/src/lib/api/messages";
 import {
   clearActiveSessionStream,
   FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
@@ -51,29 +51,33 @@ import {
   isStreamingSessionStatus,
   saveActiveSessionStream,
   shouldScheduleSessionRefresh,
-} from "@/lib/active-session-stream";
-import { useLiveAssistantStream } from "@/lib/live-assistant-stream";
+} from "@/src/lib/active-session-stream";
+import { useLiveAssistantStream } from "@/src/lib/live-assistant-stream";
 import {
   useProjectFileSearch,
   useProjects,
   type Project,
   type ProjectFileMatch,
-} from "@/lib/api/projects";
-import { useProjectSkills, type Skill } from "@/lib/api/skills";
-import { useAgents, type Agent } from "@/lib/api/agents";
-import { useBranches, useSwitchBranch } from "@/lib/api/branches";
+} from "@/src/lib/api/projects";
+import { useProjectSkills, type Skill } from "@/src/lib/api/skills";
+import { useAgents, type Agent } from "@/src/lib/api/agents";
+import { useBranches, useSwitchBranch } from "@/src/lib/api/branches";
 import {
   useProviders,
   type ActiveModel,
   flattenProvidersToModels,
-} from "@/lib/api/providers";
-import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
-import { queryClient } from "@/lib/query-client";
-import { showPermissionNotification } from "@/lib/permission-notifications";
+} from "@/src/lib/api/providers";
+import {
+  sessionsKeys,
+  useCreateSession,
+  useSession,
+} from "@/src/lib/api/sessions";
+import { queryClient } from "@/src/lib/query-client";
+import { showPermissionNotification } from "@/src/lib/permission-notifications";
 import {
   isAppInForeground,
   showNewMessageNotification,
-} from "@/lib/notifications";
+} from "@/src/lib/notifications";
 import {
   connectSseClient,
   getSseClient,
@@ -84,14 +88,15 @@ import {
   sendQuestionResponse,
   subscribeToSse,
   type SseClient,
-} from "@/lib/sse";
+} from "@/src/lib/sse";
 import type {
   SessionPromptResponseEvent,
   SessionStreamChunkEvent,
-} from "@/lib/sse/events";
+} from "@/src/lib/sse/events";
 import { GitDrawer } from "@/src/components/GitDrawer";
 import { FileDrawer } from "@/src/components/FileDrawer";
-import { useGitFileStatus } from "@/lib/api/git";
+import { HeaderActionMenu } from "@/src/components/HeaderActionMenu";
+import { useGitFileStatus } from "@/src/lib/api/git";
 // Message queue temporarily disabled - will be re-enabled later
 // import { QueueDrawer } from "@/components/QueueDrawer";
 import { MessageRow, TypingIndicator } from "@/src/components/Message";
@@ -1537,142 +1542,19 @@ export default function ChatScreen() {
             color={theme.colors.onSurface}
           />
         </Pressable>
-        <View style={[styles.buttonGroup, { borderColor }]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={menuExpanded ? "Collapse menu" : "Expand menu"}
-            onPress={handleToggleMenu}
-            style={[
-              styles.gitButton,
-              {
-                backgroundColor: theme.dark
-                  ? "rgba(17, 24, 39, 0.92)"
-                  : "rgba(255, 255, 255, 0.96)",
-              },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name={menuExpanded ? "chevron-right" : "chevron-left"}
-              size={20}
-              color={theme.colors.onSurface}
-            />
-          </Pressable>
-          {menuExpanded && (
-            <>
-              <View
-                style={[
-                  styles.buttonGroupDivider,
-                  { backgroundColor: borderColor },
-                ]}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Refresh session"
-                onPress={handleRefreshPress}
-                disabled={isRefreshing}
-                style={[
-                  styles.gitButton,
-                  {
-                    backgroundColor: theme.dark
-                      ? "rgba(17, 24, 39, 0.92)"
-                      : "rgba(255, 255, 255, 0.96)",
-                  },
-                ]}
-              >
-                {isRefreshing ? (
-                  <ActivityIndicator
-                    size="small"
-                    color={theme.colors.onSurface}
-                  />
-                ) : (
-                  <MaterialCommunityIcons
-                    name="refresh"
-                    size={20}
-                    color={theme.colors.onSurface}
-                  />
-                )}
-              </Pressable>
-              <View
-                style={[
-                  styles.buttonGroupDivider,
-                  { backgroundColor: borderColor },
-                ]}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open Git drawer"
-                onPress={() => setShowGitDrawer(true)}
-                style={[
-                  styles.gitButton,
-                  {
-                    backgroundColor: theme.dark
-                      ? "rgba(17, 24, 39, 0.92)"
-                      : "rgba(255, 255, 255, 0.96)",
-                  },
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name="source-branch"
-                  size={20}
-                  color={theme.colors.onSurface}
-                />
-              </Pressable>
-              <View
-                style={[
-                  styles.buttonGroupDivider,
-                  { backgroundColor: borderColor },
-                ]}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open files drawer"
-                onPress={() => setShowFileDrawer(true)}
-                style={[
-                  styles.gitButton,
-                  {
-                    backgroundColor: theme.dark
-                      ? "rgba(17, 24, 39, 0.92)"
-                      : "rgba(255, 255, 255, 0.96)",
-                  },
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name="file-tree-outline"
-                  size={20}
-                  color={theme.colors.onSurface}
-                />
-              </Pressable>
-            </>
-          )}
-          <View
-            style={[
-              styles.buttonGroupDivider,
-              { backgroundColor: borderColor },
-            ]}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="New session"
-            onPress={() => {
-              setActiveSessionId(null);
-              setOptimisticMessage(null);
-            }}
-            style={[
-              styles.gitButton,
-              {
-                backgroundColor: theme.dark
-                  ? "rgba(17, 24, 39, 0.92)"
-                  : "rgba(255, 255, 255, 0.96)",
-              },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name="plus"
-              size={20}
-              color={theme.colors.onSurface}
-            />
-          </Pressable>
-        </View>
+        <HeaderActionMenu
+          menuExpanded={menuExpanded}
+          isRefreshing={isRefreshing}
+          borderColor={borderColor}
+          onToggleMenu={handleToggleMenu}
+          onRefreshPress={handleRefreshPress}
+          onOpenGitDrawer={() => setShowGitDrawer(true)}
+          onOpenFileDrawer={() => setShowFileDrawer(true)}
+          onNewSession={() => {
+            setActiveSessionId(null);
+            setOptimisticMessage(null);
+          }}
+        />
       </View>
 
       <View
@@ -1990,17 +1872,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  buttonGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 22,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  buttonGroupDivider: {
-    width: 1,
-    height: "100%",
-  },
   messagesContainer: {
     flex: 1,
   },
@@ -2009,13 +1880,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     gap: 12,
-  },
-  gitButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 40,
-    width: 40,
   },
   scrollToBottomButton: {
     position: "absolute",

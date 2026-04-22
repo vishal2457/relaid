@@ -2,55 +2,75 @@ import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Text, useTheme } from "react-native-paper";
 import { SelectionSheet } from "@/src/components/SelectionSheet";
-import type { Agent } from "@/lib/api/agents";
+import type { Project } from "@/src/lib/api/projects";
 
-type AgentSelectionSheetProps = {
+type ProjectSelectionSheetProps = {
   visible: boolean;
-  agents: Agent[];
-  activeAgentName?: string | null;
+  projects: Project[];
+  activeProjectId?: string | null;
   loading?: boolean;
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
   onClose: () => void;
-  onSelectAgent: (agent: Agent) => void;
-  getAgentSubtitle: (agent: Agent) => string;
+  onSelectProject: (project: Project) => void;
 };
 
-export function AgentSelectionSheet({
+export function ProjectSelectionSheet({
   visible,
-  agents,
-  activeAgentName,
+  projects,
+  activeProjectId,
   loading = false,
-  searchQuery,
-  onSearchChange,
   onClose,
-  onSelectAgent,
-  getAgentSubtitle,
-}: AgentSelectionSheetProps) {
+  onSelectProject,
+}: ProjectSelectionSheetProps) {
+  const [searchQuery, setSearchQuery] = React.useState("");
   const theme = useTheme();
   const borderColor = theme.dark
     ? "rgba(255,255,255,0.1)"
     : "rgba(0,0,0,0.08)";
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  React.useEffect(() => {
+    if (!visible) {
+      setSearchQuery("");
+    }
+  }, [visible]);
+
+  const filteredProjects = React.useMemo(() => {
+    if (!normalizedSearchQuery) {
+      return projects;
+    }
+
+    return projects.filter((project) => {
+      const searchableText = [
+        project.name,
+        project.folder,
+        project.description,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(normalizedSearchQuery);
+    });
+  }, [normalizedSearchQuery, projects]);
 
   return (
     <SelectionSheet
       visible={visible}
-      title="Select Agent"
-      data={agents}
+      title="Select Project"
+      data={filteredProjects}
       onClose={onClose}
-      onItemPress={onSelectAgent}
-      searchPlaceholder="Search agents"
+      onItemPress={onSelectProject}
+      searchPlaceholder="Search projects"
       searchQuery={searchQuery}
-      onSearchChange={onSearchChange}
+      onSearchChange={setSearchQuery}
       isLoading={loading}
-      emptyText="No agents found"
-      selectedId={activeAgentName}
-      getItemId={(item) => item.name}
-      keyExtractor={(item) => item.name}
+      emptyText="No projects found"
+      selectedId={activeProjectId}
+      getItemId={(item) => item.id}
       renderItem={(item, isSelected) => {
         return (
           <Pressable
-            onPress={() => onSelectAgent(item)}
+            onPress={() => onSelectProject(item)}
             style={[
               styles.item,
               {
@@ -65,7 +85,7 @@ export function AgentSelectionSheet({
               <View
                 style={[
                   styles.dot,
-                  { backgroundColor: isSelected ? "#00FF41" : "#14B8A6" },
+                  { backgroundColor: isSelected ? "#00FF41" : "#F2A900" },
                 ]}
               />
               <View style={styles.content}>
@@ -85,9 +105,9 @@ export function AgentSelectionSheet({
                 <Text
                   variant="bodySmall"
                   style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}
-                  numberOfLines={2}
+                  numberOfLines={1}
                 >
-                  {item.description?.trim() || getAgentSubtitle(item)}
+                  {item.folder || "No folder path"}
                 </Text>
               </View>
             </View>

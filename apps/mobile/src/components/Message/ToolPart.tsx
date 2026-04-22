@@ -6,9 +6,9 @@ import InlineDiffViewer from "../InlineDiffViewer";
 import type {
   SessionAssistantActivity,
   SessionAssistantActivityItem,
-} from "@/lib/api/messages";
+} from "@/src/lib/api/messages";
 import { RawDiffViewer } from "./MessageSummaryDiffs";
-import { toUnifiedDiffSmart } from "@/lib/diff/to-unified-diff";
+import { toUnifiedDiffSmart } from "@/src/lib/diff/to-unified-diff";
 
 interface ToolPartProps {
   activity: SessionAssistantActivity;
