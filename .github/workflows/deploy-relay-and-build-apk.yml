@@ -1,4 +1,4 @@
-name: Build Desktop And Mobile Artifacts
+name: Build Desktop Artifacts
 
 on:
   push:
@@ -131,6 +131,7 @@ jobs:
   build-mobile-apk:
     name: Build mobile APK
     runs-on: ubuntu-latest
+    if: false # Mobile build is intentionally disabled for now.
     permissions:
       contents: read
     steps:
@@ -194,7 +195,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-desktop
-      - build-mobile-apk
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
