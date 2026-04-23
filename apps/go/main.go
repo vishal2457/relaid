@@ -14,6 +14,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIcon []byte
+
 func main() {
 	godotenv.Load()
 
@@ -22,7 +25,7 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:             "Derived",
+		Title:             "Relaid",
 		Width:             960,
 		Height:            640,
 		MinWidth:          800,
@@ -46,8 +49,9 @@ func main() {
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			About: &mac.AboutInfo{
-				Title:   "Derived",
-				Message: "© 2024 Derived",
+				Title:   "Relaid",
+				Message: "© 2026 Relaid",
+				Icon:    appIcon,
 			},
 		},
 		Windows: &windows.Options{

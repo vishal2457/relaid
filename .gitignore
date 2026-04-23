@@ -26,6 +26,14 @@ coverage
 out/
 build
 dist
+!apps/go/build/
+apps/go/build/*
+!apps/go/build/appicon.png
+!apps/go/build/darwin/
+apps/go/build/darwin/*
+!apps/go/build/darwin/Info.plist
+!apps/go/build/darwin/Info.dev.plist
+!apps/go/build/darwin/iconfile.icns
 
 
 # Debug

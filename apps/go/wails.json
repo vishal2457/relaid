@@ -11,6 +11,6 @@
     "email": "44444485+vishal2457@users.noreply.github.com"
   },
   "mac": {
-    "icon": "./frontend/public/iconfile.icns"
+    "icon": "./build/darwin/iconfile.icns"
   }
 }

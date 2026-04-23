@@ -69,9 +69,62 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
+      - name: Generate macOS app icon
+        if: runner.os == 'macOS'
+        run: |
+          rm -rf build/darwin/icon.iconset
+          mkdir -p build/darwin/icon.iconset
+
+          sips -z 16 16 build/appicon.png --out build/darwin/icon.iconset/icon_16x16.png
+          sips -z 32 32 build/appicon.png --out build/darwin/icon.iconset/icon_16x16@2x.png
+          sips -z 32 32 build/appicon.png --out build/darwin/icon.iconset/icon_32x32.png
+          sips -z 64 64 build/appicon.png --out build/darwin/icon.iconset/icon_32x32@2x.png
+          sips -z 128 128 build/appicon.png --out build/darwin/icon.iconset/icon_128x128.png
+          sips -z 256 256 build/appicon.png --out build/darwin/icon.iconset/icon_128x128@2x.png
+          sips -z 256 256 build/appicon.png --out build/darwin/icon.iconset/icon_256x256.png
+          sips -z 512 512 build/appicon.png --out build/darwin/icon.iconset/icon_256x256@2x.png
+          sips -z 512 512 build/appicon.png --out build/darwin/icon.iconset/icon_512x512.png
+          sips -z 1024 1024 build/appicon.png --out build/darwin/icon.iconset/icon_512x512@2x.png
+
+          iconutil -c icns build/darwin/icon.iconset -o build/darwin/iconfile.icns
+
       - name: Install workspace dependencies
         working-directory: .
         run: pnpm install --frozen-lockfile
+
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE" ] || [ -z "$MACOS_CERTIFICATE_PASSWORD" ]; then
+            echo "Missing macOS signing secrets"
+            exit 1
+          fi
+
+          KEYCHAIN_PATH="$HOME/build.keychain"
+          KEYCHAIN_PASSWORD="temp_$(date +%s)"
+
+          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 3600 "$KEYCHAIN_PATH"
+
+          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          security import certificate.p12 \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -A
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          rm certificate.p12
+
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build desktop app
         run: |
@@ -92,6 +145,42 @@ jobs:
             -trimpath \
             -ldflags "-X main.Version=${VERSION} -X main.GitCommit=${GITHUB_SHA} -X main.BuildDate=${BUILD_DATE}" \
             "${EXTRA_ARGS[@]}"
+
+      - name: Sign and notarize macOS app
+        if: runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$TEAM_ID" ]; then
+            echo "Missing macOS notarization secrets"
+            exit 1
+          fi
+
+          APP_PATH="build/bin/Relaid.app"
+          ZIP_PATH="build/Relaid-macos.zip"
+          CERT_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | sed -n 's/.*\"\(.*\)\".*/\1/p')
+
+          if [ -z "$CERT_IDENTITY" ]; then
+            echo "No Developer ID Application certificate found"
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+            exit 1
+          fi
+
+          codesign --force --deep --options runtime --timestamp --sign "$CERT_IDENTITY" "$APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
+
+          xcrun notarytool submit "$ZIP_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait
+
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
 
       - name: Package desktop artifact
         id: desktop_artifact
@@ -120,6 +209,11 @@ jobs:
 
           echo "artifact_name=${ARTIFACT_FILE}" >> "$GITHUB_OUTPUT"
           echo "artifact_path=dist/${ARTIFACT_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Cleanup macOS keychain
+        if: runner.os == 'macOS' && always()
+        run: |
+          [ -n "$KEYCHAIN_PATH" ] && security delete-keychain "$KEYCHAIN_PATH" || true
 
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v4
