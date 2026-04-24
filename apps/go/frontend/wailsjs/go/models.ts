@@ -1,5 +1,132 @@
 export namespace main {
 	
+	export class DesktopAgent {
+	    name: string;
+	    description?: string;
+	    mode?: string;
+	    hidden: boolean;
+	    tools: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DesktopAgent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.mode = source["mode"];
+	        this.hidden = source["hidden"];
+	        this.tools = source["tools"];
+	    }
+	}
+	export class DesktopProvider {
+	    id: string;
+	    name: string;
+	    modelCount: number;
+	    models: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DesktopProvider(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.modelCount = source["modelCount"];
+	        this.models = source["models"];
+	    }
+	}
+	export class DesktopOpencodeStatus {
+	    available: boolean;
+	    connected: boolean;
+	    statusMessage?: string;
+	    providers: DesktopProvider[];
+	    agents: DesktopAgent[];
+	    availableTools: string[];
+	    errors?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DesktopOpencodeStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.connected = source["connected"];
+	        this.statusMessage = source["statusMessage"];
+	        this.providers = this.convertValues(source["providers"], DesktopProvider);
+	        this.agents = this.convertValues(source["agents"], DesktopAgent);
+	        this.availableTools = source["availableTools"];
+	        this.errors = source["errors"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class DesktopServerStatus {
+	    baseUrl: string;
+	    healthy: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DesktopServerStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.baseUrl = source["baseUrl"];
+	        this.healthy = source["healthy"];
+	    }
+	}
+	export class DesktopStatusPayload {
+	    server: DesktopServerStatus;
+	    opencode: DesktopOpencodeStatus;
+	
+	    static createFrom(source: any = {}) {
+	        return new DesktopStatusPayload(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.server = this.convertValues(source["server"], DesktopServerStatus);
+	        this.opencode = this.convertValues(source["opencode"], DesktopOpencodeStatus);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class WorkspacePayload {
 	    id: string;
 	    name: string;

@@ -89,6 +89,7 @@ type AgentConfig struct {
 	Mode        string
 	BuiltIn     bool
 	Hidden      bool
+	Tools       []string
 	Model       *ModelRef
 }
 

@@ -6,7 +6,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -38,6 +40,41 @@ type App struct {
 	client     *relay.Client
 	relayURL   string
 	relayMu    sync.Mutex
+}
+
+type DesktopStatusPayload struct {
+	Server   DesktopServerStatus   `json:"server"`
+	Opencode DesktopOpencodeStatus `json:"opencode"`
+}
+
+type DesktopServerStatus struct {
+	BaseURL string `json:"baseUrl"`
+	Healthy bool   `json:"healthy"`
+}
+
+type DesktopOpencodeStatus struct {
+	Available      bool                   `json:"available"`
+	Connected      bool                   `json:"connected"`
+	StatusMessage  string                 `json:"statusMessage,omitempty"`
+	Providers      []DesktopProvider      `json:"providers"`
+	Agents         []DesktopAgent         `json:"agents"`
+	AvailableTools []string               `json:"availableTools"`
+	Errors         []string               `json:"errors,omitempty"`
+}
+
+type DesktopProvider struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	ModelCount int      `json:"modelCount"`
+	Models     []string `json:"models"`
+}
+
+type DesktopAgent struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Mode        string   `json:"mode,omitempty"`
+	Hidden      bool     `json:"hidden"`
+	Tools       []string `json:"tools"`
 }
 
 func NewApp() *App {
@@ -275,6 +312,140 @@ func (a *App) GetServerBaseURL() string {
 	}
 
 	return fmt.Sprintf("http://%s:%s", host, port)
+}
+
+func (a *App) GetDesktopStatus() DesktopStatusPayload {
+	payload := DesktopStatusPayload{
+		Server: DesktopServerStatus{
+			BaseURL: a.GetServerBaseURL(),
+			Healthy: a.server != nil,
+		},
+		Opencode: DesktopOpencodeStatus{
+			Providers:      []DesktopProvider{},
+			Agents:         []DesktopAgent{},
+			AvailableTools: []string{},
+		},
+	}
+
+	if a.server == nil {
+		payload.Opencode.StatusMessage = "Desktop server is unavailable"
+		payload.Opencode.Errors = []string{"desktop server is unavailable"}
+		return payload
+	}
+
+	provider, err := a.server.Registry().Get(agent.ProviderOpencode)
+	if err != nil {
+		payload.Opencode.StatusMessage = "OpenCode provider is not registered"
+		payload.Opencode.Errors = []string{err.Error()}
+		return payload
+	}
+
+	if a.server.Healthy() {
+		payload.Server.Healthy = true
+	}
+
+	payload.Opencode.Available = isOpencodeAvailable(a.server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	agents, agentErr := provider.Agents().List(ctx, "")
+	if agentErr != nil {
+		payload.Opencode.StatusMessage = "OpenCode is unavailable"
+		payload.Opencode.Errors = []string{agentErr.Error()}
+		return payload
+	}
+
+	payload.Opencode.Connected = true
+	payload.Opencode.StatusMessage = "OpenCode connected"
+
+	providers, providerErr := provider.Providers().List(ctx)
+	if providerErr != nil {
+		payload.Opencode.Errors = []string{providerErr.Error()}
+	} else {
+		payload.Opencode.Providers = serializeDesktopProviders(providers)
+	}
+
+	payload.Opencode.Agents, payload.Opencode.AvailableTools = serializeDesktopAgents(agents)
+	if !payload.Opencode.Available {
+		payload.Opencode.Available = true
+	}
+
+	return payload
+}
+
+func isOpencodeAvailable(s *server.Server) bool {
+	if s == nil {
+		return false
+	}
+
+	cfg := config.Load()
+	if cfg.OpencodeBaseURL != "" {
+		return true
+	}
+
+	_, err := exec.LookPath(cfg.OpencodeBin)
+	return err == nil
+}
+
+func serializeDesktopProviders(providers []agent.Provider) []DesktopProvider {
+	result := make([]DesktopProvider, 0, len(providers))
+	for _, provider := range providers {
+		models := make([]string, 0, len(provider.Models))
+		for _, model := range provider.Models {
+			name := model.Name
+			if name == "" {
+				name = model.ID
+			}
+			models = append(models, name)
+		}
+		sort.Strings(models)
+
+		result = append(result, DesktopProvider{
+			ID:         provider.ID,
+			Name:       provider.Name,
+			ModelCount: len(provider.Models),
+			Models:     models,
+		})
+	}
+	return result
+}
+
+func serializeDesktopAgents(agents []agent.AgentConfig) ([]DesktopAgent, []string) {
+	result := make([]DesktopAgent, 0, len(agents))
+	toolSet := map[string]struct{}{}
+
+	for _, item := range agents {
+		if item.Hidden {
+			continue
+		}
+
+		tools := append([]string(nil), item.Tools...)
+		sort.Strings(tools)
+		for _, tool := range tools {
+			toolSet[tool] = struct{}{}
+		}
+
+		result = append(result, DesktopAgent{
+			Name:        item.Name,
+			Description: item.Description,
+			Mode:        item.Mode,
+			Hidden:      item.Hidden,
+			Tools:       tools,
+		})
+	}
+
+	availableTools := make([]string, 0, len(toolSet))
+	for tool := range toolSet {
+		availableTools = append(availableTools, tool)
+	}
+	sort.Strings(availableTools)
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+
+	return result, availableTools
 }
 
 func (a *App) configureRelayClient(relayURL string, creds relay.DeviceCredentials) error {

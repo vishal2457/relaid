@@ -27,6 +27,7 @@ import {
 import {
   useRelayHooks,
   useConnectedClients,
+  useDesktopStatus,
 } from "../../shared/api/features/relay.api";
 import { ROUTES_PATH } from "../../routes/routes";
 
@@ -52,6 +53,12 @@ export const HomePage = () => {
   } = useRelayHooks();
 
   const { clients, refresh: refreshClients } = useConnectedClients();
+  const {
+    status: desktopStatus,
+    refresh: refreshDesktopStatus,
+    isLoading: isDesktopStatusLoading,
+    error: desktopStatusError,
+  } = useDesktopStatus();
 
   const statusColor = isConnected
     ? "text-green-500"
@@ -65,6 +72,18 @@ export const HomePage = () => {
     : storedUrl
       ? "Disconnected"
       : "Not configured";
+
+  const opencodeAvailable = desktopStatus?.opencode.available ?? false;
+  const opencodeConnected = desktopStatus?.opencode.connected ?? false;
+  const opencodeStatusColor = opencodeConnected
+    ? "text-green-500"
+    : opencodeAvailable
+      ? "text-yellow-500"
+      : "text-muted-foreground";
+  const OpencodeStatusIcon = opencodeConnected ? Wifi : WifiOff;
+  const opencodeStatusLabel = opencodeConnected
+    ? "Connected"
+    : "Disconnected";
 
   return (
     <div className="container mx-auto max-w-lg py-8">
@@ -140,7 +159,32 @@ export const HomePage = () => {
           </div>
         </section>
 
-        
+        <section className="rounded-lg border p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              OpenCode
+            </h2>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshDesktopStatus}
+              disabled={isDesktopStatusLoading}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isDesktopStatusLoading ? "animate-spin" : ""}`}
+              />
+            </Button>
+          </div>
+
+          <div className={`mt-4 flex items-center gap-2 text-sm ${opencodeStatusColor}`}>
+            <OpencodeStatusIcon className="h-4 w-4" />
+            <span>{opencodeStatusLabel}</span>
+          </div>
+          {desktopStatusError ? (
+            <p className="mt-2 text-xs text-red-500">{desktopStatusError}</p>
+          ) : null}
+        </section>
 
         {isConnected && (
           <section className="rounded-lg border p-5">

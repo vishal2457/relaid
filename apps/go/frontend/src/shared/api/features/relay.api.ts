@@ -12,6 +12,37 @@ export interface MobileClient {
   connectionId: string;
 }
 
+export interface DesktopProviderStatus {
+  id: string;
+  name: string;
+  modelCount: number;
+  models: string[];
+}
+
+export interface DesktopAgentStatus {
+  name: string;
+  description?: string;
+  mode?: string;
+  hidden: boolean;
+  tools: string[];
+}
+
+export interface DesktopStatus {
+  server: {
+    baseUrl: string;
+    healthy: boolean;
+  };
+  opencode: {
+    available: boolean;
+    connected: boolean;
+    statusMessage?: string;
+    providers: DesktopProviderStatus[];
+    agents: DesktopAgentStatus[];
+    availableTools: string[];
+    errors?: string[];
+  };
+}
+
 export const useRelayHooks = () => {
   const [storedUrl, setStoredUrl] = useState<string>("");
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -132,5 +163,42 @@ export const useConnectedClients = () => {
     isLoading,
     error,
     refresh: fetchClients,
+  };
+};
+
+export const useDesktopStatus = () => {
+  const [status, setStatus] = useState<DesktopStatus | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const App = getApp();
+      const result = await App.GetDesktopStatus();
+      setStatus(result);
+      return result;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch desktop status";
+      setError(message);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 15000);
+    return () => clearInterval(interval);
+  }, [fetchStatus]);
+
+  return {
+    status,
+    isLoading,
+    error,
+    refresh: fetchStatus,
   };
 };

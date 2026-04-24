@@ -273,6 +273,14 @@ func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.Age
 
 	result := make([]agent.AgentConfig, 0, len(response))
 	for _, item := range response {
+		tools := make([]string, 0, len(item.Tools))
+		for name, enabled := range item.Tools {
+			if enabled {
+				tools = append(tools, name)
+			}
+		}
+		sort.Strings(tools)
+
 		var model *agent.ModelRef
 		if item.Model != nil {
 			model = &agent.ModelRef{
@@ -286,6 +294,7 @@ func (a *Adapter) ListAgents(ctx context.Context, directory string) ([]agent.Age
 			Mode:        item.Mode,
 			BuiltIn:     item.BuiltIn,
 			Hidden:      item.Hidden,
+			Tools:       tools,
 			Model:       model,
 		})
 	}

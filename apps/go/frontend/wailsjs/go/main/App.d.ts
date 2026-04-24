@@ -9,6 +9,8 @@ export function CreateWorkspace(arg1:string):Promise<main.WorkspacePayload>;
 
 export function GetConnectedClients():Promise<Array<relay.MobileClient>>;
 
+export function GetDesktopStatus():Promise<main.DesktopStatusPayload>;
+
 export function GetDeviceCredentials():Promise<relay.DeviceCredentials>;
 
 export function GetServerBaseURL():Promise<string>;

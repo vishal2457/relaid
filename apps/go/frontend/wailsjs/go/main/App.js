@@ -14,6 +14,10 @@ export function GetConnectedClients() {
   return window['go']['main']['App']['GetConnectedClients']();
 }
 
+export function GetDesktopStatus() {
+  return window['go']['main']['App']['GetDesktopStatus']();
+}
+
 export function GetDeviceCredentials() {
   return window['go']['main']['App']['GetDeviceCredentials']();
 }
