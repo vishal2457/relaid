@@ -13,8 +13,8 @@ import {
 import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { type ProjectFileMatch } from "@/lib/api/projects";
-import { type Skill } from "@/lib/api/skills";
+import { type ProjectFileMatch } from "@/src/lib/api/projects";
+import { type Skill } from "@/src/lib/api/skills";
 
 export const MIN_INPUT_HEIGHT = 44;
 export const MAX_INPUT_HEIGHT = 150;

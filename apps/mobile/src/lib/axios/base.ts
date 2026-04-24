@@ -1,6 +1,6 @@
 import axios, { type AxiosRequestConfig } from "axios";
 import { ToastAndroid, Platform } from "react-native";
-import { getCurrentAccessToken } from "@/lib/pairing/session";
+import { getCurrentAccessToken } from "@/src/lib/pairing/session";
 
 const DEFAULT_BASE_URL = "http://100.95.62.14:3001";
 

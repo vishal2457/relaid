@@ -26,8 +26,8 @@ import {
   messageKeys,
   useSessionMessages,
   type SessionMessage,
-} from "@/lib/api/messages";
-import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
+} from "@/src/lib/api/messages";
+import { sessionsKeys, useCreateSession, useSession } from "@/src/lib/api/sessions";
 import {
   clearActiveSessionStream,
   FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
@@ -35,11 +35,11 @@ import {
   isStreamingSessionStatus,
   saveActiveSessionStream,
   shouldScheduleSessionRefresh,
-} from "@/lib/active-session-stream";
-import { queryClient } from "@/lib/query-client";
-import { showPermissionNotification } from "@/lib/permission-notifications";
-import { isAppInForeground } from "@/lib/notifications";
-import { useLiveAssistantStream } from "@/lib/live-assistant-stream";
+} from "@/src/lib/active-session-stream";
+import { queryClient } from "@/src/lib/query-client";
+import { showPermissionNotification } from "@/src/lib/permission-notifications";
+import { isAppInForeground } from "@/src/lib/notifications";
+import { useLiveAssistantStream } from "@/src/lib/live-assistant-stream";
 import {
   connectSseClient,
   getSseClient,
@@ -48,11 +48,11 @@ import {
   sendPermissionResponse,
   sendQuestionResponse,
   subscribeToSse,
-} from "@/lib/sse";
+} from "@/src/lib/sse";
 import type {
   SessionPromptResponseEvent,
   SessionStreamChunkEvent,
-} from "@/lib/sse/events";
+} from "@/src/lib/sse/events";
 import {
   PermissionCard,
   QuestionCard,

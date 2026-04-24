@@ -16,13 +16,13 @@ import {
   ServerUrlProvider,
   useServerUrl,
 } from "@/src/components/ServerUrlContext";
-import { defaultTheme, THEMES } from "@/constants/themes";
-import { queryClient } from "@/lib/query-client";
+import { defaultTheme, THEMES } from "@/src/constants/themes";
+import { queryClient } from "@/src/lib/query-client";
 import {
   initializeNotifications,
   requestNotificationPermissions,
   registerPushTokenWithServer,
-} from "@/lib/notifications";
+} from "@/src/lib/notifications";
 
 function StartupInit() {
   useEffect(() => {

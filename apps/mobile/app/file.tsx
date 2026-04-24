@@ -7,7 +7,7 @@ import {
 } from "react-native-paper";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { Stack, useLocalSearchParams, router } from "expo-router";
-import { useFileContent } from "@/lib/api/git";
+import { useFileContent } from "@/src/lib/api/git";
 
 const TOKENS = [
   { regex: /(\/\/.*|#.*)/g, color: "#6A9955" },

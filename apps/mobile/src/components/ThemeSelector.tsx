@@ -1,7 +1,7 @@
 import React from "react";
 import { StyleSheet, TouchableOpacity, View, ScrollView } from "react-native";
 import { Card, Text as PaperText, useTheme } from "react-native-paper";
-import { ThemeKey, THEMES } from "@/constants/themes";
+import { ThemeKey, THEMES } from "@/src/constants/themes";
 
 type ThemeSelectorProps = {
   selectedTheme: ThemeKey;

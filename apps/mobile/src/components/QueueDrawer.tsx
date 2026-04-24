@@ -16,8 +16,8 @@ import {
   useExecuteQueueItem,
   type QueueItem,
   type QueueItemStatus,
-} from "@/lib/api/message-queue";
-import { type Project } from "@/lib/api/projects";
+} from "@/src/lib/api/message-queue";
+import { type Project } from "@/src/lib/api/projects";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DRAWER_WIDTH = Math.min(320, SCREEN_WIDTH * 0.85);

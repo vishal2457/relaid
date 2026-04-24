@@ -5,7 +5,7 @@ import {
 } from "@/src/components/ServerUrlContext";
 import { useAppTheme } from "@/src/components/ThemeContext";
 import ThemeSelector from "@/src/components/ThemeSelector";
-import { disconnectSseClient } from "@/lib/sse";
+import { disconnectSseClient } from "@/src/lib/sse";
 import { router } from "expo-router";
 import React, { useCallback, useState, useEffect } from "react";
 import {
@@ -35,7 +35,7 @@ import {
   startGithubOAuth,
   clearGithubSession,
   type GithubSession,
-} from "@/lib/api/github";
+} from "@/src/lib/api/github";
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -49,7 +49,9 @@ export default function SettingsScreen() {
   >("idle");
   const [showPairingSheet, setShowPairingSheet] = useState(false);
   const [showRelaySheet, setShowRelaySheet] = useState(false);
-  const [githubSession, setGithubSession] = useState<GithubSession | null>(null);
+  const [githubSession, setGithubSession] = useState<GithubSession | null>(
+    null,
+  );
   const [githubHydrated, setGithubHydrated] = useState(false);
   const [githubConnecting, setGithubConnecting] = useState(false);
 
@@ -257,8 +259,8 @@ export default function SettingsScreen() {
                         : !githubHydrated
                           ? "Syncing GitHub connection status"
                           : githubSession
-                        ? "GitHub account linked for PR reviews"
-                        : "Connect your GitHub account to review pull requests"}
+                            ? "GitHub account linked for PR reviews"
+                            : "Connect your GitHub account to review pull requests"}
                     </Text>
                   </View>
                 </View>
@@ -279,7 +281,9 @@ export default function SettingsScreen() {
                       mode="contained-tonal"
                       onPress={handleGithubConnect}
                       loading={githubConnecting}
-                      disabled={githubConnecting || !isPaired || !githubHydrated}
+                      disabled={
+                        githubConnecting || !isPaired || !githubHydrated
+                      }
                       icon="source-branch"
                     >
                       {githubConnecting ? "Connecting..." : "Connect GitHub"}
