@@ -1,0 +1,168 @@
+name: Deploy Relay to Docker Hub
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deploy-relay-dockerhub.yml"
+      - ".dockerignore"
+      - "apps/relay/**"
+      - "deploy/relay/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: ${{ vars.DOCKERHUB_REPOSITORY || format('{0}/relaid-relay', secrets.DOCKERHUB_USERNAME) }}
+  RELAY_PORT: ${{ vars.RELAY_PORT || '3001' }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+  RELAY_DEPLOY_PATH: ${{ secrets.RELAY_DEPLOY_PATH || '/opt/relaid/relay' }}
+
+jobs:
+  build-and-push:
+    name: Build and push relay image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      image_tag: ${{ steps.image.outputs.image_tag }}
+      image_ref: ${{ steps.image.outputs.image_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: image
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IMAGE_TAG="sha-${SHORT_SHA}"
+
+          {
+            echo "image=${IMAGE_NAME}"
+            echo "image_tag=${IMAGE_TAG}"
+            echo "image_ref=${IMAGE_NAME}:${IMAGE_TAG}"
+            echo "tags<<EOF"
+            echo "${IMAGE_NAME}:${IMAGE_TAG}"
+            if [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
+              echo "${IMAGE_NAME}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/relay/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-vps:
+    name: Pull and restart relay on VPS
+    runs-on: ubuntu-latest
+    needs:
+      - build-and-push
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -p "$VPS_PORT" "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload compose file
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i ~/.ssh/vps_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "mkdir -p '$RELAY_DEPLOY_PATH'"
+          scp -i ~/.ssh/vps_key -P "$VPS_PORT" deploy/relay/docker-compose.yml "$VPS_USER@$VPS_HOST:$RELAY_DEPLOY_PATH/docker-compose.yml"
+
+      - name: Pull image and restart relay
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          RELAY_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          RELAY_PUBLIC_BASE_URL: ${{ secrets.RELAY_PUBLIC_BASE_URL }}
+          RELAY_CORS_ORIGIN: ${{ vars.RELAY_CORS_ORIGIN || '*' }}
+          RELAY_LOG_LEVEL: ${{ vars.RELAY_LOG_LEVEL || 'info' }}
+          RELAY_PAIRING_SESSION_TTL_MS: ${{ vars.RELAY_PAIRING_SESSION_TTL_MS || '300000' }}
+          RELAY_SOCKET_REQUEST_TIMEOUT_MS: ${{ vars.RELAY_SOCKET_REQUEST_TIMEOUT_MS || '30000' }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          GITHUB_CLIENT_ID: ${{ secrets.RELAY_GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.RELAY_GITHUB_CLIENT_SECRET }}
+          GITHUB_REDIRECT_URI: ${{ secrets.RELAY_GITHUB_REDIRECT_URI }}
+          APP_DEEP_LINK_SCHEME: ${{ vars.APP_DEEP_LINK_SCHEME || 'relaid' }}
+        run: |
+          ssh -i ~/.ssh/vps_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+            "DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' \
+             DOCKERHUB_TOKEN='$DOCKERHUB_TOKEN' \
+             RELAY_DEPLOY_PATH='$RELAY_DEPLOY_PATH' \
+             RELAY_IMAGE='$RELAY_IMAGE' \
+             RELAY_PORT='$RELAY_PORT' \
+             RELAY_PUBLIC_BASE_URL='$RELAY_PUBLIC_BASE_URL' \
+             RELAY_CORS_ORIGIN='$RELAY_CORS_ORIGIN' \
+             RELAY_LOG_LEVEL='$RELAY_LOG_LEVEL' \
+             RELAY_PAIRING_SESSION_TTL_MS='$RELAY_PAIRING_SESSION_TTL_MS' \
+             RELAY_SOCKET_REQUEST_TIMEOUT_MS='$RELAY_SOCKET_REQUEST_TIMEOUT_MS' \
+             ENCRYPTION_KEY='$ENCRYPTION_KEY' \
+             GITHUB_CLIENT_ID='$GITHUB_CLIENT_ID' \
+             GITHUB_CLIENT_SECRET='$GITHUB_CLIENT_SECRET' \
+             GITHUB_REDIRECT_URI='$GITHUB_REDIRECT_URI' \
+             APP_DEEP_LINK_SCHEME='$APP_DEEP_LINK_SCHEME' \
+             bash -s" <<'EOF'
+          set -euo pipefail
+
+          cd "$RELAY_DEPLOY_PATH"
+
+          cat > .env <<ENVEOF
+          RELAY_IMAGE=$RELAY_IMAGE
+          RELAY_PORT=$RELAY_PORT
+          PORT=3001
+          HOST=0.0.0.0
+          DB_PATH=/data/chat-server.db
+          LOGS_DIR=/logs
+          PUBLIC_BASE_URL=$RELAY_PUBLIC_BASE_URL
+          CORS_ORIGIN=$RELAY_CORS_ORIGIN
+          LOG_LEVEL=$RELAY_LOG_LEVEL
+          PAIRING_SESSION_TTL_MS=$RELAY_PAIRING_SESSION_TTL_MS
+          SOCKET_REQUEST_TIMEOUT_MS=$RELAY_SOCKET_REQUEST_TIMEOUT_MS
+          ENCRYPTION_KEY=$ENCRYPTION_KEY
+          GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID
+          GITHUB_CLIENT_SECRET=$GITHUB_CLIENT_SECRET
+          GITHUB_REDIRECT_URI=$GITHUB_REDIRECT_URI
+          APP_DEEP_LINK_SCHEME=$APP_DEEP_LINK_SCHEME
+          ENVEOF
+
+          echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+          docker compose pull relay
+          docker compose up -d relay
+          docker image prune -f
+          EOF
