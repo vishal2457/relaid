@@ -43,18 +43,17 @@ const statusLabelMap: Record<string, string> = {
 };
 
 const statusColorMap: Record<string, string> = {
-  added: "#22C55E",
-  modified: "#F59E0B",
-  deleted: "#EF4444",
-  renamed: "#8B5CF6",
-  copied: "#22C55E",
-  typechanged: "#0EA5E9",
-  unmerged: "#EF4444",
-  untracked: "#64748B",
-  ignored: "#94A3B8",
-  created: "#22C55E",
-  conflicted: "#EF4444",
-  staged: "#22C55E",
+  A: "#22C55E",
+  M: "#F59E0B",
+  D: "#EF4444",
+  R: "#8B5CF6",
+  C: "#22C55E",
+  T: "#0EA5E9",
+  U: "#EF4444",
+  "?": "#64748B",
+  I: "#94A3B8",
+  "!": "#EF4444",
+  S: "#22C55E",
 };
 
 type Section = "none" | "changes" | "staged";
@@ -207,7 +206,7 @@ function CollapsibleSection({
                       fontWeight: "600",
                     }}
                   >
-                    {statusLabelMap[item.status] ?? "?"}
+                    {item.status ?? "?"}
                   </Text>
                 </Pressable>
               );
@@ -249,6 +248,10 @@ export function GitDrawer({
     activeProject?.id ?? "",
     Boolean(activeProject),
   );
+
+  console.log(data?.staged, "staged");
+  console.log(data?.unstaged, "staged");
+
 
   const staged = data?.staged ?? [];
   const unstaged = data?.unstaged ?? [];
@@ -578,8 +581,8 @@ export function GitDrawer({
                         activeSection === "changes" ? "#2563EB" : "#D97706",
                       opacity:
                         pressed ||
-                        stageFiles.isPending ||
-                        unstageFiles.isPending
+                          stageFiles.isPending ||
+                          unstageFiles.isPending
                           ? 0.7
                           : 1,
                     },
@@ -590,7 +593,7 @@ export function GitDrawer({
                   disabled={stageFiles.isPending || unstageFiles.isPending}
                 >
                   {(activeSection === "changes" && stageFiles.isPending) ||
-                  (activeSection === "staged" && unstageFiles.isPending) ? (
+                    (activeSection === "staged" && unstageFiles.isPending) ? (
                     <ActivityIndicator size={14} color="#fff" />
                   ) : (
                     <MaterialCommunityIcons

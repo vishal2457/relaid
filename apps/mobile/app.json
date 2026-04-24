@@ -50,6 +50,12 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Relaid to choose a QR code image from your library."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./src/assets/images/relaid.png",

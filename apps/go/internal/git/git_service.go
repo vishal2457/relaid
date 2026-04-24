@@ -213,16 +213,46 @@ func (s *Service) GetFileStatusLists() Result[StatusLists] {
 		branchName = head.Name().Short()
 	}
 
-	// Use native git status porcelain output instead of go-git's Status().
-	// The NUL-delimited format avoids path quoting issues and handles renames
-	// consistently even when file names contain spaces or special characters.
-	out, err := runGit(s.cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	// Get the working tree
+	worktree, err := repo.Worktree()
 	if err != nil {
-		s.handleError("getFileStatusLists", err)
-		return fail[StatusLists](err.Error())
+		panic(err)
 	}
 
-	staged, unstaged := parseStatusPorcelainV1Z(out)
+	// Get status — this returns a map of filepath -> FileStatus
+	status, err := worktree.Status()
+	if err != nil {
+		panic(err)
+	}
+
+	if status.IsClean() {
+		fmt.Println("Nothing to commit, working tree clean")
+		return ok(StatusLists{
+			Staged:   []FileWithStatus{},
+			Unstaged: []FileWithStatus{},
+			Branch:   branchName,
+		})
+	}
+
+	var staged []FileWithStatus
+	for path, s := range status {
+		if s.Staging != git.Unmodified && s.Staging != git.Untracked {
+			staged = append(staged, FileWithStatus{
+				Path:   path,
+				Status: string(s.Staging),
+			})
+		}
+	}
+
+	var unstaged []FileWithStatus
+	for path, s := range status {
+		if s.Worktree != git.Unmodified {
+			unstaged = append(unstaged, FileWithStatus{
+				Path:   path,
+				Status: string(s.Worktree),
+			})
+		}
+	}
 
 	return ok(StatusLists{
 		Staged:   staged,

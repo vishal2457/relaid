@@ -2,8 +2,9 @@ import { claimPairingSession } from "@/src/lib/api/pairing";
 import { parsePairingUrl } from "@/src/lib/pairing/url";
 import { usePairingSession } from "@/src/components/PairingSessionContext";
 import { useServerUrl } from "@/src/components/ServerUrlContext";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView, scanFromURLAsync, useCameraPermissions } from "expo-camera";
 import * as Device from "expo-device";
+import * as ImagePicker from "expo-image-picker";
 import { router, Stack } from "expo-router";
 import React, { useCallback, useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
@@ -26,9 +27,45 @@ export default function PairScreen() {
   const { setServerUrl } = useServerUrl();
   const { saveSession } = usePairingSession();
   const [permission, requestPermission] = useCameraPermissions();
+  const [mediaPermission, requestMediaPermission] =
+    ImagePicker.useMediaLibraryPermissions();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handlePairingPayload = useCallback(
+    async (data: string) => {
+      if (submitting) {
+        return;
+      }
+
+      setSubmitting(true);
+      setErrorMessage(null);
+
+      try {
+        const parsed = parsePairingUrl(data);
+        const qrRelayUrl = normalizeUrl(parsed.relayUrl);
+        await setServerUrl(qrRelayUrl);
+        const claimedSession = await claimPairingSession({
+          pairingId: parsed.pairingId,
+          pairingSecret: parsed.pairingSecret,
+          deviceName: Device.deviceName || "Mobile Device",
+          platform: Platform.OS,
+        });
+
+        await saveSession(claimedSession);
+        setScannerOpen(false);
+        router.replace("/");
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        setErrorMessage(errMsg || "Failed to pair device.");
+        setScannerOpen(false);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [saveSession, setServerUrl, submitting],
+  );
 
   const handleOpenScanner = useCallback(async () => {
     if (!permission?.granted) {
@@ -45,47 +82,51 @@ export default function PairScreen() {
     setScannerOpen(true);
   }, [permission?.granted, requestPermission]);
 
-  const handleBarcodeScanned = useCallback(
-    async ({ data }: { data: string }) => {
-      if (submitting) {
+  const handlePickQrFromGallery = useCallback(async () => {
+    if (!mediaPermission?.granted) {
+      const nextPermission = await requestMediaPermission();
+      if (!nextPermission.granted) {
+        setErrorMessage(
+          "Photo library access is required to scan a QR code from an image.",
+        );
+        return;
+      }
+    }
+
+    setErrorMessage(null);
+    setScannerOpen(false);
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: false,
+      quality: 1,
+    });
+
+    if (result.canceled || !result.assets[0]?.uri) {
+      return;
+    }
+
+    try {
+      const scannedResults = await scanFromURLAsync(result.assets[0].uri, ["qr"]);
+      const qrPayload = scannedResults[0]?.data;
+
+      if (!qrPayload) {
+        setErrorMessage("No QR code was found in the selected image.");
         return;
       }
 
-      setSubmitting(true);
-      setErrorMessage(null);
+      await handlePairingPayload(qrPayload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      setErrorMessage(errMsg || "Failed to scan QR code from image.");
+    }
+  }, [handlePairingPayload, mediaPermission?.granted, requestMediaPermission]);
 
-      try {
-        const parsed = parsePairingUrl(data);
-        const qrRelayUrl = normalizeUrl(parsed.relayUrl);
-        await setServerUrl(qrRelayUrl);
-        try {
-          const claimedSession = await claimPairingSession({
-            pairingId: parsed.pairingId,
-            pairingSecret: parsed.pairingSecret,
-            deviceName: Device.deviceName || "Mobile Device",
-            platform: Platform.OS,
-          });
-          console.log(claimedSession, "claimed session");
-
-          await saveSession(claimedSession);
-          setScannerOpen(false);
-          router.replace("/");
-        } catch (error) {
-          console.log(error, "error");
-
-          throw error;
-        }
-      } catch (error) {
-        console.log(error, "error");
-
-        const errMsg = error instanceof Error ? error.message : String(error);
-        setErrorMessage(errMsg || "Failed to pair device.");
-        setScannerOpen(false);
-      } finally {
-        setSubmitting(false);
-      }
+  const handleBarcodeScanned = useCallback(
+    async ({ data }: { data: string }) => {
+      await handlePairingPayload(data);
     },
-    [saveSession, setServerUrl, submitting],
+    [handlePairingPayload],
   );
 
   const borderColor = theme.dark ? "#243244" : "#D8E2EC";
@@ -135,6 +176,16 @@ export default function PairScreen() {
             style={styles.primaryButton}
           >
             {scannerOpen ? "Scanner Open" : "Scan QR Code"}
+          </Button>
+
+          <Button
+            mode="outlined"
+            icon="image-outline"
+            onPress={handlePickQrFromGallery}
+            disabled={submitting}
+            style={styles.secondaryButton}
+          >
+            Upload From Gallery
           </Button>
 
           {submitting ? (
@@ -214,6 +265,10 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     marginTop: 18,
+    borderRadius: 14,
+  },
+  secondaryButton: {
+    marginTop: 12,
     borderRadius: 14,
   },
   statusRow: {

@@ -15,7 +15,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useSessions } from "@/src/lib/api/sessions";
 import { type Project } from "@/src/lib/api/projects";
-import { clearActiveSessionStream } from "@/src/lib/active-session-stream";
+import {
+  clearActiveSessionStream,
+  getActiveSessionStream,
+} from "@/src/lib/active-session-stream";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -40,6 +43,7 @@ export function SessionDrawer({
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const [isMounted, setIsMounted] = React.useState(visible);
+  const [hasPendingSession, setHasPendingSession] = React.useState(false);
   const slideAnim = React.useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const backdropAnim = React.useRef(new Animated.Value(0)).current;
   const {
@@ -74,11 +78,30 @@ export function SessionDrawer({
           style: "destructive",
           onPress: async () => {
             await clearActiveSessionStream();
+            setHasPendingSession(false);
           },
         },
       ],
     );
   };
+
+  React.useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    void getActiveSessionStream().then((stream) => {
+      if (!isCancelled) {
+        setHasPendingSession(Boolean(stream));
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [visible]);
 
   React.useEffect(() => {
     if (visible) {
@@ -293,24 +316,26 @@ export function SessionDrawer({
           )}
         </ScrollView>
 
-        <Pressable
-          onPress={handleClearPendingSession}
-          style={[styles.footer, { borderTopColor: borderColor }]}
-          accessibilityRole="button"
-          accessibilityLabel="Clear pending session"
-        >
-          <MaterialCommunityIcons
-            name="close-circle-outline"
-            size={22}
-            color={theme.colors.onSurfaceVariant}
-          />
-          <Text
-            variant="labelLarge"
-            style={{ color: theme.colors.onSurfaceVariant, marginLeft: 12 }}
+        {hasPendingSession ? (
+          <Pressable
+            onPress={handleClearPendingSession}
+            style={[styles.footer, { borderTopColor: borderColor }]}
+            accessibilityRole="button"
+            accessibilityLabel="Clear pending session"
           >
-            Clear Pending Session
-          </Text>
-        </Pressable>
+            <MaterialCommunityIcons
+              name="close-circle-outline"
+              size={22}
+              color={theme.colors.onSurfaceVariant}
+            />
+            <Text
+              variant="labelLarge"
+              style={{ color: theme.colors.onSurfaceVariant, marginLeft: 12 }}
+            >
+              Clear Pending Session
+            </Text>
+          </Pressable>
+        ) : null}
 
         <Pressable
           onPress={() => {
