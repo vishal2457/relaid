@@ -1,6 +1,8 @@
 import React from "react";
 import {
+  Animated,
   Dimensions,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,10 +16,11 @@ import {
   useProjectDirectory,
   type Project,
   type ProjectDirectoryNode,
-} from "@/lib/api/projects";
+} from "@/src/lib/api/projects";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DRAWER_WIDTH = Math.min(360, SCREEN_WIDTH * 0.88);
+const DRAWER_ANIMATION_DURATION = 220;
 
 type FileTreeNodeProps = {
   node: ProjectDirectoryNode;
@@ -164,6 +167,9 @@ export function FileDrawer({
   backgroundColor,
 }: FileDrawerProps) {
   const theme = useTheme();
+  const [isMounted, setIsMounted] = React.useState(visible);
+  const slideAnim = React.useRef(new Animated.Value(DRAWER_WIDTH)).current;
+  const backdropAnim = React.useRef(new Animated.Value(0)).current;
   const {
     data: rootNodes = [],
     isLoading,
@@ -174,18 +180,62 @@ export function FileDrawer({
 
   const surfaceVariant = theme.dark ? "#111827" : "#F8FAFC";
 
-  if (!visible) return null;
+  React.useEffect(() => {
+    if (visible) {
+      setIsMounted(true);
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: DRAWER_ANIMATION_DURATION,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropAnim, {
+          toValue: 1,
+          duration: DRAWER_ANIMATION_DURATION,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      return;
+    }
+
+    if (!isMounted) return;
+
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: DRAWER_WIDTH,
+        duration: DRAWER_ANIMATION_DURATION,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropAnim, {
+        toValue: 0,
+        duration: DRAWER_ANIMATION_DURATION,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setIsMounted(false);
+    });
+  }, [visible, isMounted, slideAnim, backdropAnim]);
+
+  if (!isMounted) return null;
 
   return (
     <>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View
+      <Animated.View
+        pointerEvents={visible ? "auto" : "none"}
+        style={[styles.backdrop, { opacity: backdropAnim }]}
+      >
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+      </Animated.View>
+      <Animated.View
         style={[
           styles.drawer,
           {
             backgroundColor,
             borderLeftWidth: 1,
             borderColor,
+            transform: [{ translateX: slideAnim }],
           },
         ]}
       >
@@ -301,7 +351,7 @@ export function FileDrawer({
             ))
           )}
         </ScrollView>
-      </View>
+      </Animated.View>
     </>
   );
 }

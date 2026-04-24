@@ -1,5 +1,5 @@
-import { claimPairingSession } from "@/lib/api/pairing";
-import { parsePairingUrl } from "@/lib/pairing/url";
+import { claimPairingSession } from "@/src/lib/api/pairing";
+import { parsePairingUrl } from "@/src/lib/pairing/url";
 import { usePairingSession } from "@/src/components/PairingSessionContext";
 import { useServerUrl } from "@/src/components/ServerUrlContext";
 import { CameraView, useCameraPermissions } from "expo-camera";

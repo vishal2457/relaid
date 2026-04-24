@@ -1,7 +1,8 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { formatPermissionType } from "../src/components/PermissionCard";
+
 import { sendPermissionResponse } from "./sse/manager";
+import { formatPermissionType } from "../components/PermissionCard";
 
 const PERMISSION_CATEGORY = "PERMISSION_REQUEST";
 const DEFAULT_ANDROID_NOTIFICATION_CHANNEL_ID = "default";

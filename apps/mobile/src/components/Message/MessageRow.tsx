@@ -4,7 +4,7 @@ import { MessageBubble } from "./MessageBubble";
 import { MessageSummaryDiffs } from "./MessageSummaryDiffs";
 import {
   type SessionMessage,
-} from "@/lib/api/messages";
+} from "@/src/lib/api/messages";
 import type { AssistantResponseSummaryContext } from "./getAssistantResponseSummary";
 
 interface MessageRowProps {

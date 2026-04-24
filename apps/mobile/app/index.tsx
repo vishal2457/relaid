@@ -28,10 +28,10 @@ import {
   MIN_INPUT_HEIGHT,
 } from "@/src/components/ChatComposer";
 import { SessionDrawer } from "@/src/components/SessionDrawer";
-import { ProjectSelectionSheet } from "@/components/ProjectSelectionSheet";
-import { ModelSelectionSheet } from "@/components/ModelSelectionSheet";
-import { AgentSelectionSheet } from "@/components/AgentSelectionSheet";
-import { BranchSelectionSheet } from "@/components/BranchSelectionSheet";
+import { ProjectSelectionSheet } from "@/src/components/BottomModals/ProjectSelectionSheet";
+import { ModelSelectionSheet } from "@/src/components/BottomModals/ModelSelectionSheet";
+import { AgentSelectionSheet } from "@/src/components/BottomModals/AgentSelectionSheet";
+import { BranchSelectionSheet } from "@/src/components/BottomModals/BranchSelectionSheet";
 import { Stack } from "expo-router";
 import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import {
@@ -43,7 +43,7 @@ import {
   messageKeys,
   useSessionMessages,
   type SessionMessage,
-} from "@/lib/api/messages";
+} from "@/src/lib/api/messages";
 import {
   clearActiveSessionStream,
   FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
@@ -51,29 +51,33 @@ import {
   isStreamingSessionStatus,
   saveActiveSessionStream,
   shouldScheduleSessionRefresh,
-} from "@/lib/active-session-stream";
-import { useLiveAssistantStream } from "@/lib/live-assistant-stream";
+} from "@/src/lib/active-session-stream";
+import { useLiveAssistantStream } from "@/src/lib/live-assistant-stream";
 import {
   useProjectFileSearch,
   useProjects,
   type Project,
   type ProjectFileMatch,
-} from "@/lib/api/projects";
-import { useProjectSkills, type Skill } from "@/lib/api/skills";
-import { useAgents, type Agent } from "@/lib/api/agents";
-import { useBranches, useSwitchBranch } from "@/lib/api/branches";
+} from "@/src/lib/api/projects";
+import { useProjectSkills, type Skill } from "@/src/lib/api/skills";
+import { useAgents, type Agent } from "@/src/lib/api/agents";
+import { useBranches, useSwitchBranch } from "@/src/lib/api/branches";
 import {
   useProviders,
   type ActiveModel,
   flattenProvidersToModels,
-} from "@/lib/api/providers";
-import { sessionsKeys, useCreateSession, useSession } from "@/lib/api/sessions";
-import { queryClient } from "@/lib/query-client";
-import { showPermissionNotification } from "@/lib/permission-notifications";
+} from "@/src/lib/api/providers";
+import {
+  sessionsKeys,
+  useCreateSession,
+  useSession,
+} from "@/src/lib/api/sessions";
+import { queryClient } from "@/src/lib/query-client";
+import { showPermissionNotification } from "@/src/lib/permission-notifications";
 import {
   isAppInForeground,
   showNewMessageNotification,
-} from "@/lib/notifications";
+} from "@/src/lib/notifications";
 import {
   connectSseClient,
   getSseClient,
@@ -84,14 +88,15 @@ import {
   sendQuestionResponse,
   subscribeToSse,
   type SseClient,
-} from "@/lib/sse";
+} from "@/src/lib/sse";
 import type {
   SessionPromptResponseEvent,
   SessionStreamChunkEvent,
-} from "@/lib/sse/events";
+} from "@/src/lib/sse/events";
 import { GitDrawer } from "@/src/components/GitDrawer";
 import { FileDrawer } from "@/src/components/FileDrawer";
-import { useGitFileStatus } from "@/lib/api/git";
+import { HeaderActionMenu } from "@/src/components/HeaderActionMenu";
+import { useGitFileStatus } from "@/src/lib/api/git";
 // Message queue temporarily disabled - will be re-enabled later
 // import { QueueDrawer } from "@/components/QueueDrawer";
 import { MessageRow, TypingIndicator } from "@/src/components/Message";
@@ -465,7 +470,7 @@ export default function ChatScreen() {
     if (!hydrated) return;
     if (activeProject) {
       AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => { },
+        () => {},
       );
     }
   }, [activeProject, hydrated]);
@@ -476,7 +481,7 @@ export default function ChatScreen() {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
-      ).catch(() => { });
+      ).catch(() => {});
     }
   }, [activeModel, hydrated]);
 
@@ -506,7 +511,7 @@ export default function ChatScreen() {
           );
         }
       })
-      .catch(() => { });
+      .catch(() => {});
   }, [activeProject, agents, hydrated]);
 
   React.useEffect(() => {
@@ -543,7 +548,7 @@ export default function ChatScreen() {
           JSON.stringify(currentMap),
         );
       })
-      .catch(() => { });
+      .catch(() => {});
   }, [activeAgent, activeProject, hydrated]);
 
   React.useEffect(() => {
@@ -563,7 +568,7 @@ export default function ChatScreen() {
             setActiveModel(savedModel);
           }
         }
-      } catch { }
+      } catch {}
     })();
   }, [hydrated, providers]);
 
@@ -608,18 +613,18 @@ export default function ChatScreen() {
 
     const filtered = normalizedQuery
       ? models
-        .map((model) => ({
-          model,
-          score: getModelSearchScore(model, normalizedQuery),
-        }))
-        .filter((entry) => entry.score >= 0)
-        .sort((a, b) => {
-          if (b.score !== a.score) {
-            return b.score - a.score;
-          }
-          return a.model.name.localeCompare(b.model.name);
-        })
-        .map((entry) => entry.model)
+          .map((model) => ({
+            model,
+            score: getModelSearchScore(model, normalizedQuery),
+          }))
+          .filter((entry) => entry.score >= 0)
+          .sort((a, b) => {
+            if (b.score !== a.score) {
+              return b.score - a.score;
+            }
+            return a.model.name.localeCompare(b.model.name);
+          })
+          .map((entry) => entry.model)
       : models;
 
     if (!activeModel) {
@@ -648,16 +653,16 @@ export default function ChatScreen() {
     const normalizedQuery = normalizeSearchValue(agentSearchQuery);
     const filtered = normalizedQuery
       ? agents.filter((agent) => {
-        const haystacks = [
-          agent.name,
-          agent.description ?? "",
-          agent.model?.providerID ?? "",
-          agent.model?.modelID ?? "",
-        ];
-        return haystacks.some((value) =>
-          normalizeSearchValue(value).includes(normalizedQuery),
-        );
-      })
+          const haystacks = [
+            agent.name,
+            agent.description ?? "",
+            agent.model?.providerID ?? "",
+            agent.model?.modelID ?? "",
+          ];
+          return haystacks.some((value) =>
+            normalizeSearchValue(value).includes(normalizedQuery),
+          );
+        })
       : agents;
 
     const sorted = [...filtered];
@@ -871,7 +876,7 @@ export default function ChatScreen() {
 
   const connectSse = React.useCallback(() => {
     if (!isMountedRef.current) {
-      return () => { };
+      return () => {};
     }
 
     setConnectionState("connecting");
@@ -945,7 +950,7 @@ export default function ChatScreen() {
       setConnectionState("disconnected");
       sseClientRef.current = null;
       unsubscribe();
-      return () => { };
+      return () => {};
     }
 
     sseClientRef.current = client;
@@ -1165,17 +1170,17 @@ export default function ChatScreen() {
   const mentionSuggestionCount = fileSuggestions?.length ?? 0;
   const mentionSuggestionHeight = showMentionSuggestions
     ? Math.min(
-      mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
-      220,
-    ) + 8
+        mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
+        220,
+      ) + 8
     : 0;
   const showSkillSuggestions = Boolean(activeProject && activeSlash);
   const skillSuggestionCount = skillSuggestions?.length ?? 0;
   const skillSuggestionHeight = showSkillSuggestions
     ? Math.min(
-      skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
-      220,
-    ) + 8
+        skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
+        220,
+      ) + 8
     : 0;
   const composerHeight =
     Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
@@ -1288,9 +1293,9 @@ export default function ChatScreen() {
         agent: activeAgent?.name,
         model: activeModel
           ? {
-            providerId: activeModel.providerId,
-            modelId: activeModel.id,
-          }
+              providerId: activeModel.providerId,
+              modelId: activeModel.id,
+            }
           : undefined,
       });
     } catch (error) {
@@ -1537,142 +1542,19 @@ export default function ChatScreen() {
             color={theme.colors.onSurface}
           />
         </Pressable>
-        <View style={[styles.buttonGroup, { borderColor }]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={menuExpanded ? "Collapse menu" : "Expand menu"}
-            onPress={handleToggleMenu}
-            style={[
-              styles.gitButton,
-              {
-                backgroundColor: theme.dark
-                  ? "rgba(17, 24, 39, 0.92)"
-                  : "rgba(255, 255, 255, 0.96)",
-              },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name={menuExpanded ? "chevron-right" : "chevron-left"}
-              size={20}
-              color={theme.colors.onSurface}
-            />
-          </Pressable>
-          {menuExpanded && (
-            <>
-              <View
-                style={[
-                  styles.buttonGroupDivider,
-                  { backgroundColor: borderColor },
-                ]}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Refresh session"
-                onPress={handleRefreshPress}
-                disabled={isRefreshing}
-                style={[
-                  styles.gitButton,
-                  {
-                    backgroundColor: theme.dark
-                      ? "rgba(17, 24, 39, 0.92)"
-                      : "rgba(255, 255, 255, 0.96)",
-                  },
-                ]}
-              >
-                {isRefreshing ? (
-                  <ActivityIndicator
-                    size="small"
-                    color={theme.colors.onSurface}
-                  />
-                ) : (
-                  <MaterialCommunityIcons
-                    name="refresh"
-                    size={20}
-                    color={theme.colors.onSurface}
-                  />
-                )}
-              </Pressable>
-              <View
-                style={[
-                  styles.buttonGroupDivider,
-                  { backgroundColor: borderColor },
-                ]}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open Git drawer"
-                onPress={() => setShowGitDrawer(true)}
-                style={[
-                  styles.gitButton,
-                  {
-                    backgroundColor: theme.dark
-                      ? "rgba(17, 24, 39, 0.92)"
-                      : "rgba(255, 255, 255, 0.96)",
-                  },
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name="source-branch"
-                  size={20}
-                  color={theme.colors.onSurface}
-                />
-              </Pressable>
-              <View
-                style={[
-                  styles.buttonGroupDivider,
-                  { backgroundColor: borderColor },
-                ]}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open files drawer"
-                onPress={() => setShowFileDrawer(true)}
-                style={[
-                  styles.gitButton,
-                  {
-                    backgroundColor: theme.dark
-                      ? "rgba(17, 24, 39, 0.92)"
-                      : "rgba(255, 255, 255, 0.96)",
-                  },
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name="file-tree-outline"
-                  size={20}
-                  color={theme.colors.onSurface}
-                />
-              </Pressable>
-            </>
-          )}
-          <View
-            style={[
-              styles.buttonGroupDivider,
-              { backgroundColor: borderColor },
-            ]}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="New session"
-            onPress={() => {
-              setActiveSessionId(null);
-              setOptimisticMessage(null);
-            }}
-            style={[
-              styles.gitButton,
-              {
-                backgroundColor: theme.dark
-                  ? "rgba(17, 24, 39, 0.92)"
-                  : "rgba(255, 255, 255, 0.96)",
-              },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name="plus"
-              size={20}
-              color={theme.colors.onSurface}
-            />
-          </Pressable>
-        </View>
+        <HeaderActionMenu
+          menuExpanded={menuExpanded}
+          isRefreshing={isRefreshing}
+          borderColor={borderColor}
+          onToggleMenu={handleToggleMenu}
+          onRefreshPress={handleRefreshPress}
+          onOpenGitDrawer={() => setShowGitDrawer(true)}
+          onOpenFileDrawer={() => setShowFileDrawer(true)}
+          onNewSession={() => {
+            setActiveSessionId(null);
+            setOptimisticMessage(null);
+          }}
+        />
       </View>
 
       <View
@@ -1687,8 +1569,8 @@ export default function ChatScreen() {
       >
         <View style={styles.messagesContainer}>
           {messagesLoading &&
-            activeSessionId &&
-            displayedMessages.length === 0 ? (
+          activeSessionId &&
+          displayedMessages.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator />
             </View>
@@ -1990,17 +1872,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  buttonGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 22,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  buttonGroupDivider: {
-    width: 1,
-    height: "100%",
-  },
   messagesContainer: {
     flex: 1,
   },
@@ -2009,13 +1880,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     gap: 12,
-  },
-  gitButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 40,
-    width: 40,
   },
   scrollToBottomButton: {
     position: "absolute",

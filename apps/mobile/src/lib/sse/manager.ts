@@ -4,8 +4,8 @@ import {
   type SseConnectionCallback,
   type SseErrorCallback,
 } from "./client";
-import { getCurrentAccessToken } from "@/lib/pairing/session";
-import baseApi, { chatServerApiUrl } from "@/lib/axios/base";
+import { getCurrentAccessToken } from "@/src/lib/pairing/session";
+import baseApi, { chatServerApiUrl } from "@/src/lib/axios/base";
 
 let sseClient: SseClient | null = null;
 let listenerIdCounter = 0;

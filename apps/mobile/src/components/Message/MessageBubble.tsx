@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { FormattedText } from "./FormattedText";
 import { ToolPart } from "./ToolPart";
-import type { SessionMessage } from "@/lib/api/messages";
+import type { SessionMessage } from "@/src/lib/api/messages";
 
 const roleLabelMap: Record<SessionMessage["role"], string> = {
   assistant: "Assistant",

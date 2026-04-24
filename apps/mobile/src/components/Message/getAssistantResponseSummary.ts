@@ -1,4 +1,4 @@
-import type { MessageSummary, SessionMessage } from "@/lib/api/messages";
+import type { MessageSummary, SessionMessage } from "@/src/lib/api/messages";
 
 export interface AssistantResponseSummaryContext {
   messageID: string;

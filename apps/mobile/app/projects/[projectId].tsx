@@ -25,8 +25,8 @@ import {
   useSessions,
   useCreateSession,
   type Session,
-} from "@/lib/api/sessions";
-import { useProject } from "@/lib/api/projects";
+} from "@/src/lib/api/sessions";
+import { useProject } from "@/src/lib/api/projects";
 
 const HEADER_HEIGHT = 44;
 const HEADER_TOP_MARGIN = 12;

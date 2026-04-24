@@ -2,9 +2,9 @@ import React from "react";
 import {
   adaptStreamActivity,
   type SessionAssistantActivity,
-} from "@/lib/api/messages";
-import type { SessionStreamChunkEvent } from "@/lib/sse/events";
-import { useBufferedStreamingText } from "@/lib/streaming-text";
+} from "@/src/lib/api/messages";
+import type { SessionStreamChunkEvent } from "@/src/lib/sse/events";
+import { useBufferedStreamingText } from "@/src/lib/streaming-text";
 
 export type LiveAssistantPhase = "thinking" | "responding" | "complete";
 

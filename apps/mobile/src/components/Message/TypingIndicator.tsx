@@ -3,8 +3,8 @@ import { Animated, Pressable, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Text, useTheme } from "react-native-paper";
 import { FormattedText } from "./FormattedText";
-import type { SessionAssistantActivity } from "@/lib/api/messages";
-import type { LiveAssistantPhase } from "@/lib/live-assistant-stream";
+import type { SessionAssistantActivity } from "@/src/lib/api/messages";
+import type { LiveAssistantPhase } from "@/src/lib/live-assistant-stream";
 
 interface TypingIndicatorProps {
   streamingContent: string;

@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { SessionMessage } from "@/lib/api/messages";
+import type { SessionMessage } from "@/src/lib/api/messages";
 
 const ACTIVE_SESSION_STREAM_KEY = "active_session_stream";
 

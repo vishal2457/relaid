@@ -1,8 +1,9 @@
 import React from "react";
 import {
+  Animated,
   Alert,
   Dimensions,
-  Image,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,12 +13,14 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useSessions } from "@/lib/api/sessions";
-import { type Project } from "@/lib/api/projects";
-import { clearActiveSessionStream } from "@/lib/active-session-stream";
+import { useSessions } from "@/src/lib/api/sessions";
+import { type Project } from "@/src/lib/api/projects";
+import { clearActiveSessionStream } from "@/src/lib/active-session-stream";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DRAWER_WIDTH = Math.min(320, SCREEN_WIDTH * 0.85);
+const DRAWER_ANIMATION_DURATION = 220;
 
 type SessionDrawerProps = {
   visible: boolean;
@@ -35,6 +38,10 @@ export function SessionDrawer({
   onSelectSession,
 }: SessionDrawerProps) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const [isMounted, setIsMounted] = React.useState(visible);
+  const slideAnim = React.useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  const backdropAnim = React.useRef(new Animated.Value(0)).current;
   const {
     data: sessions,
     isLoading: sessionsLoading,
@@ -73,18 +80,62 @@ export function SessionDrawer({
     );
   };
 
-  if (!visible) return null;
+  React.useEffect(() => {
+    if (visible) {
+      setIsMounted(true);
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: DRAWER_ANIMATION_DURATION,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropAnim, {
+          toValue: 1,
+          duration: DRAWER_ANIMATION_DURATION,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      return;
+    }
+
+    if (!isMounted) return;
+
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: -DRAWER_WIDTH,
+        duration: DRAWER_ANIMATION_DURATION,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropAnim, {
+        toValue: 0,
+        duration: DRAWER_ANIMATION_DURATION,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setIsMounted(false);
+    });
+  }, [visible, isMounted, slideAnim, backdropAnim]);
+
+  if (!isMounted) return null;
 
   return (
     <>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View
+      <Animated.View
+        pointerEvents={visible ? "auto" : "none"}
+        style={[styles.backdrop, { opacity: backdropAnim }]}
+      >
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+      </Animated.View>
+      <Animated.View
         style={[
           styles.drawer,
           {
             backgroundColor: surfaceColor,
             borderRightWidth: 1,
             borderColor,
+            transform: [{ translateX: slideAnim }],
           },
         ]}
       >
@@ -96,10 +147,11 @@ export function SessionDrawer({
 
         <View style={[styles.header, { borderBottomColor: borderColor }]}>
           <View style={styles.headerTop}>
-            <Image
-              source={require("@/assets/images/relaid.png")}
+            {/* <Image
+              // Metro asset resolution is strict; keep this as a relative static require.
+              source={require("../assets/images/relaid.png")}
               style={styles.logoImage}
-            />
+            /> */}
             <Text variant="titleLarge" style={styles.title}>
               {activeProject?.name}
             </Text>
@@ -265,7 +317,10 @@ export function SessionDrawer({
             onClose();
             router.push("/settings");
           }}
-          style={[styles.footer, { borderTopColor: borderColor }]}
+          style={[
+            styles.footer,
+            { borderTopColor: borderColor, marginBottom: insets.bottom },
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Open settings"
         >
@@ -281,7 +336,7 @@ export function SessionDrawer({
             Settings
           </Text>
         </Pressable>
-      </View>
+      </Animated.View>
     </>
   );
 }
@@ -321,7 +376,7 @@ const styles = StyleSheet.create({
     height: 25,
     borderRadius: 8,
     marginRight: 12,
-    marginTop: 2
+    marginTop: 2,
   },
   title: {
     fontWeight: "700",
