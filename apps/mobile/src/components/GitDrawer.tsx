@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from "react";
 import {
   Animated,
+  Dimensions,
   Easing,
   FlatList,
   Pressable,
@@ -57,12 +58,13 @@ const statusColorMap: Record<string, string> = {
 };
 
 type Section = "none" | "changes" | "staged";
-const DRAWER_WIDTH = 320;
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const DRAWER_WIDTH = Math.min(360, SCREEN_WIDTH * 0.88);
 const DRAWER_ANIMATION_DURATION = 220;
 
 type CollapsibleSectionProps = {
   title: string;
-  icon: string;
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
   files: GitFileStatus[];
   borderColor: string;
   metaColor: string;
@@ -116,11 +118,7 @@ function CollapsibleSection({
         }}
       >
         <View style={styles.sectionHeaderLeft}>
-          <MaterialCommunityIcons
-            name={icon as any}
-            size={18}
-            color={metaColor}
-          />
+          <MaterialCommunityIcons name={icon} size={18} color={metaColor} />
           <Text
             variant="titleSmall"
             style={[styles.sectionTitle, { color: theme.colors.onSurface }]}
@@ -173,6 +171,8 @@ function CollapsibleSection({
             scrollEnabled={false}
             renderItem={({ item }) => {
               const isSelected = selectedFiles.has(item.path);
+              const statusLabel =
+                statusLabelMap[item.status] ?? item.status ?? "?";
               return (
                 <Pressable
                   style={[styles.fileItem, { borderBottomColor: borderColor }]}
@@ -188,6 +188,7 @@ function CollapsibleSection({
                       variant="bodyMedium"
                       style={{ color: theme.colors.onSurface }}
                       numberOfLines={1}
+                      ellipsizeMode="tail"
                     >
                       {item.path.split("/").pop()}
                     </Text>
@@ -195,6 +196,7 @@ function CollapsibleSection({
                       variant="bodySmall"
                       style={{ color: metaColor }}
                       numberOfLines={1}
+                      ellipsizeMode="tail"
                     >
                       {item.path}
                     </Text>
@@ -202,11 +204,11 @@ function CollapsibleSection({
                   <Text
                     variant="labelSmall"
                     style={{
-                      color: statusColorMap[item.status] ?? metaColor,
+                      color: statusColorMap[statusLabel] ?? metaColor,
                       fontWeight: "600",
                     }}
                   >
-                    {item.status ?? "?"}
+                    {statusLabel}
                   </Text>
                 </Pressable>
               );
@@ -246,12 +248,8 @@ export function GitDrawer({
 
   const { data, isLoading, error, refetch, isRefetching } = useGitFileStatus(
     activeProject?.id ?? "",
-    Boolean(activeProject),
+    visible && Boolean(activeProject),
   );
-
-  console.log(data?.staged, "staged");
-  console.log(data?.unstaged, "staged");
-
 
   const staged = data?.staged ?? [];
   const unstaged = data?.unstaged ?? [];
@@ -404,6 +402,7 @@ export function GitDrawer({
             backgroundColor,
             borderLeftWidth: 1,
             borderColor,
+            transform: [{ translateX: slideAnim }],
           },
         ]}
       >
@@ -434,7 +433,7 @@ export function GitDrawer({
               </Text>
             )}
             <Pressable
-              onPress={() => refetch()}
+              onPress={() => void refetch()}
               style={[styles.closeButton, { borderColor, marginRight: 8 }]}
               disabled={!activeProject || isRefetching}
             >
@@ -527,7 +526,7 @@ export function GitDrawer({
                         params: {
                           projectId: activeProject.id,
                           filePath: path,
-                          fileName: path.split("/").pop(),
+                          fileName: path.split("/").pop() ?? path,
                         },
                       });
                     }}
@@ -552,7 +551,7 @@ export function GitDrawer({
                         params: {
                           projectId: activeProject.id,
                           filePath: path,
-                          fileName: path.split("/").pop(),
+                          fileName: path.split("/").pop() ?? path,
                         },
                       });
                     }}
@@ -581,8 +580,8 @@ export function GitDrawer({
                         activeSection === "changes" ? "#2563EB" : "#D97706",
                       opacity:
                         pressed ||
-                          stageFiles.isPending ||
-                          unstageFiles.isPending
+                        stageFiles.isPending ||
+                        unstageFiles.isPending
                           ? 0.7
                           : 1,
                     },
@@ -593,7 +592,7 @@ export function GitDrawer({
                   disabled={stageFiles.isPending || unstageFiles.isPending}
                 >
                   {(activeSection === "changes" && stageFiles.isPending) ||
-                    (activeSection === "staged" && unstageFiles.isPending) ? (
+                  (activeSection === "staged" && unstageFiles.isPending) ? (
                     <ActivityIndicator size={14} color="#fff" />
                   ) : (
                     <MaterialCommunityIcons

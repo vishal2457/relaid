@@ -1,23 +1,30 @@
 import { usePairingSession } from "@/src/components/PairingSessionContext";
+import { SelectionSheet } from "@/src/components/SelectionSheet";
 import {
   DEFAULT_SERVER_URL,
   useServerUrl,
 } from "@/src/components/ServerUrlContext";
 import { useAppTheme } from "@/src/components/ThemeContext";
 import ThemeSelector from "@/src/components/ThemeSelector";
+import {
+  checkGithubStatus,
+  clearGithubSession,
+  disconnectGithub,
+  loadStoredGithubSession,
+  startGithubOAuth,
+  type GithubSession,
+} from "@/src/lib/api/github";
 import { disconnectSseClient } from "@/src/lib/sse";
 import { router } from "expo-router";
-import React, { useCallback, useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
-  Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   TouchableWithoutFeedback,
-  View,
+  View
 } from "react-native";
 import {
   Button,
@@ -28,14 +35,6 @@ import {
   useTheme,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
-import {
-  checkGithubStatus,
-  disconnectGithub,
-  loadStoredGithubSession,
-  startGithubOAuth,
-  clearGithubSession,
-  type GithubSession,
-} from "@/src/lib/api/github";
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -167,28 +166,6 @@ export default function SettingsScreen() {
   }, []);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
-  const sheetBg = theme.dark ? "#1E252D" : "#FFFFFF";
-  const sheetOverlay = {
-    flex: 1,
-    justifyContent: "flex-end" as const,
-    backgroundColor: "rgba(0,0,0,0.4)",
-  };
-  const sheetContainer = {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: "60%" as const,
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-  };
-  const sheetHandle = {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#CBD5E1",
-    alignSelf: "center" as const,
-    marginTop: 12,
-    marginBottom: 8,
-  };
 
   return (
     <SafeAreaView
@@ -303,150 +280,122 @@ export default function SettingsScreen() {
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
 
-      <Modal
+      <SelectionSheet
         visible={showPairingSheet}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowPairingSheet(false)}
+        title="Pairing"
+        onClose={() => setShowPairingSheet(false)}
+        enableDynamicSizing
       >
-        <Pressable
-          style={sheetOverlay}
-          onPress={() => setShowPairingSheet(false)}
-        >
-          <View
-            style={[sheetContainer, { backgroundColor: sheetBg }]}
-            onStartShouldSetResponder={() => true}
-          >
-            <View style={sheetHandle} />
-            <Text variant="titleMedium" style={styles.sheetTitle}>
-              Pairing
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            <Text variant="bodyLarge" style={styles.settingTitle}>
+              Status
             </Text>
-            <View style={styles.settingRow}>
-              <View style={styles.settingInfo}>
-                <Text variant="bodyLarge" style={styles.settingTitle}>
-                  Status
-                </Text>
-                <Text variant="bodySmall" style={styles.settingDescription}>
-                  {isPaired
-                    ? `${session?.serverName || "Paired server"} is connected to this phone`
-                    : "This phone is not paired yet"}
-                </Text>
-              </View>
-            </View>
-
-            {isPaired ? (
-              <>
-                <Text variant="bodySmall" style={styles.metaText}>
-                  Server ID: {session?.serverId}
-                </Text>
-                <Text variant="bodySmall" style={styles.metaText}>
-                  Device ID: {session?.deviceId}
-                </Text>
-                <View style={styles.sheetButtonRow}>
-                  <Button
-                    mode="outlined"
-                    onPress={handleForgetDevice}
-                    icon="link-off"
-                  >
-                    Forget This Device
-                  </Button>
-                </View>
-              </>
-            ) : (
-              <View style={styles.sheetButtonRow}>
-                <Button
-                  mode="contained-tonal"
-                  onPress={() => {
-                    setShowPairingSheet(false);
-                    router.push("/pair" as any);
-                  }}
-                  icon="qrcode-scan"
-                >
-                  Open Pairing Screen
-                </Button>
-              </View>
-            )}
+            <Text variant="bodySmall" style={styles.settingDescription}>
+              {isPaired
+                ? `${session?.serverName || "Paired server"} is connected to this phone`
+                : "This phone is not paired yet"}
+            </Text>
           </View>
-        </Pressable>
-      </Modal>
+        </View>
 
-      <Modal
-        visible={showRelaySheet}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowRelaySheet(false)}
-      >
-        <Pressable
-          style={sheetOverlay}
-          onPress={() => setShowRelaySheet(false)}
-        >
-          <View
-            style={[sheetContainer, { backgroundColor: sheetBg }]}
-            onStartShouldSetResponder={() => true}
-          >
-            <View style={sheetHandle} />
-            <Text variant="titleMedium" style={styles.sheetTitle}>
-              Relay URL
+        {isPaired ? (
+          <>
+            <Text variant="bodySmall" style={styles.metaText}>
+              Server ID: {session?.serverId}
             </Text>
-            <TextInput
-              mode="outlined"
-              value={urlInput}
-              onChangeText={setUrlInput}
-              placeholder="http://100.95.62.14:3001"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              style={styles.input}
-              outlineStyle={styles.inputOutline}
-            />
-
+            <Text variant="bodySmall" style={styles.metaText}>
+              Device ID: {session?.deviceId}
+            </Text>
             <View style={styles.sheetButtonRow}>
-              {urlInput !== DEFAULT_SERVER_URL && (
-                <Button
-                  mode="outlined"
-                  onPress={handleReset}
-                  style={styles.pingButton}
-                  icon="refresh"
-                >
-                  Reset
-                </Button>
-              )}
               <Button
                 mode="outlined"
-                onPress={handlePing}
-                disabled={!urlInput.trim() || pingStatus === "pinging"}
-                style={styles.pingButton}
-                icon={
-                  pingStatus === "pinging"
-                    ? "loading"
-                    : pingStatus === "success"
-                      ? "check"
-                      : pingStatus === "error"
-                        ? "close"
-                        : "access-point"
-                }
+                onPress={handleForgetDevice}
+                icon="link-off"
               >
-                {pingStatus === "pinging"
-                  ? "Pinging..."
-                  : pingStatus === "success"
-                    ? "Connected"
-                    : pingStatus === "error"
-                      ? "Failed"
-                      : "Ping"}
-              </Button>
-              <Button
-                mode="contained"
-                onPress={handleSave}
-                disabled={!urlInput.trim()}
-                style={styles.saveButton}
-                icon={saved ? "check" : "content-save"}
-              >
-                {saved ? "Saved" : "Save"}
+                Forget This Device
               </Button>
             </View>
+          </>
+        ) : (
+          <View style={styles.sheetButtonRow}>
+            <Button
+              mode="contained-tonal"
+              onPress={() => {
+                setShowPairingSheet(false);
+                router.push("/pair" as any);
+              }}
+              icon="qrcode-scan"
+            >
+              Open Pairing Screen
+            </Button>
           </View>
-        </Pressable>
-      </Modal>
+        )}
+      </SelectionSheet>
+
+      <SelectionSheet
+        visible={showRelaySheet}
+        title="Relay URL"
+        onClose={() => setShowRelaySheet(false)}
+        enableDynamicSizing
+      >
+        <TextInput
+          mode="outlined"
+          value={urlInput}
+          onChangeText={setUrlInput}
+          placeholder="http://100.95.62.14:3001"
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          style={styles.input}
+          outlineStyle={styles.inputOutline}
+        />
+
+        <View style={styles.sheetButtonRow}>
+          {urlInput !== DEFAULT_SERVER_URL && (
+            <Button
+              mode="outlined"
+              onPress={handleReset}
+              style={styles.pingButton}
+              icon="refresh"
+            >
+              Reset
+            </Button>
+          )}
+          <Button
+            mode="outlined"
+            onPress={handlePing}
+            disabled={!urlInput.trim() || pingStatus === "pinging"}
+            style={styles.pingButton}
+            icon={
+              pingStatus === "pinging"
+                ? "loading"
+                : pingStatus === "success"
+                  ? "check"
+                  : pingStatus === "error"
+                    ? "close"
+                    : "access-point"
+            }
+          >
+            {pingStatus === "pinging"
+              ? "Pinging..."
+              : pingStatus === "success"
+                ? "Connected"
+                : pingStatus === "error"
+                  ? "Failed"
+                  : "Ping"}
+          </Button>
+          <Button
+            mode="contained"
+            onPress={handleSave}
+            disabled={!urlInput.trim()}
+            style={styles.saveButton}
+            icon={saved ? "check" : "content-save"}
+          >
+            {saved ? "Saved" : "Save"}
+          </Button>
+        </View>
+      </SelectionSheet>
     </SafeAreaView>
   );
 }
