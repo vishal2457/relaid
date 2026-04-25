@@ -1,34 +1,15 @@
-# Relay VPS Deployment
+# Relay Docker Deployment
 
-The `Deploy Relay to Docker Hub` GitHub Actions workflow builds only `apps/relay`, pushes the image to Docker Hub as `vishal2457/derived:relay-latest`, then SSHes into the VPS to pull that tag and restart the Docker Compose service.
+The `Deploy Relay to Docker Hub` GitHub Actions workflow builds only `apps/relay`, pushes the image to Docker Hub as `vishal2457/derived:relay-latest`, then SSHes into the VPS and restarts the `relay` service from `/srv/derived/derived-infra`.
 
 ## Required GitHub Secrets
 
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
 - `VPS_HOST`
-- `VPS_USER`
-- `VPS_SSH_KEY`
-- `VPS_PORT` (optional, defaults to `22`)
-- `RELAY_DEPLOY_PATH` (example: `/opt/relaid/relay`)
-- `RELAY_PUBLIC_BASE_URL`
-- `ENCRYPTION_KEY` (64-character hex string)
-
-## Optional GitHub OAuth Secrets
-
-- `RELAY_GITHUB_CLIENT_ID`
-- `RELAY_GITHUB_CLIENT_SECRET`
-- `RELAY_GITHUB_REDIRECT_URI`
-
-## Optional GitHub Variables
-
-- `RELAY_PORT` (defaults to `3001`)
-- `RELAY_CORS_ORIGIN` (defaults to `*`)
-- `RELAY_LOG_LEVEL` (defaults to `info`)
-- `RELAY_PAIRING_SESSION_TTL_MS` (defaults to `300000`)
-- `RELAY_SOCKET_REQUEST_TIMEOUT_MS` (defaults to `30000`)
-- `APP_DEEP_LINK_SCHEME` (defaults to `relaid`)
+- `VPS_USERNAME`
+- `VPS_PASSWORD`
 
 ## VPS Requirements
 
-Install Docker with the Compose plugin on the VPS. The workflow uploads this compose file into `RELAY_DEPLOY_PATH`, writes the runtime `.env`, runs `docker login`, `docker compose pull relay`, and `docker compose up -d relay`.
+Install Docker with the Compose plugin on the VPS. The infra repo at `/srv/derived/derived-infra` owns Docker Compose, relay environment variables, volumes, and nginx routing for `relaid.derived.dev`.
