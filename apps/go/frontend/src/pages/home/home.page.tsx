@@ -85,6 +85,11 @@ export const HomePage = () => {
     ? "Connected"
     : "Disconnected";
 
+  const openConfigDialog = () => {
+    setRelayUrl(storedUrl);
+    setShowConfigDialog(true);
+  };
+
   return (
     <div className="container mx-auto max-w-lg py-8">
       <div className="space-y-6">
@@ -122,7 +127,7 @@ export const HomePage = () => {
                     variant="outline"
                     size="sm"
                     className="rounded-none"
-                    onClick={() => setShowConfigDialog(true)}
+                    onClick={openConfigDialog}
                   >
                     <Settings className="h-3.5 w-3.5" />
                   </Button>
@@ -233,7 +238,7 @@ export const HomePage = () => {
             <Input
               placeholder="https://relay.example.com"
               type={showUrl ? "text" : "password"}
-              value={relayUrl || storedUrl || ""}
+              value={relayUrl}
               onChange={(e) => setRelayUrl(e.target.value)}
               hint="Relay server URL for remote access"
               suffixButton={
@@ -256,13 +261,10 @@ export const HomePage = () => {
             <Button
               className="w-full"
               onClick={() => {
-                const url = relayUrl || storedUrl;
-                if (url) {
-                  saveUrl(url);
-                  setShowConfigDialog(false);
-                }
+                void saveUrl(relayUrl);
+                setShowConfigDialog(false);
               }}
-              disabled={!relayUrl && !storedUrl}
+              disabled={isSaving}
             >
               {isSaving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
               Save

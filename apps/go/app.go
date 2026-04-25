@@ -188,6 +188,14 @@ func (a *App) GetStoredRelayURL() (string, error) {
 
 func (a *App) StoreRelayURL(url string) error {
 	normalizedURL := relay.NormalizeRelayURL(url)
+	if normalizedURL == "" {
+		if err := a.keychain.Delete(RELAY_URL_KEY); err != nil {
+			log.Printf("relay: failed to clear stored relay URL: %v", err)
+		}
+		a.disconnectRelayClient()
+		return nil
+	}
+
 	if err := relay.PingRelayHealth(normalizedURL); err != nil {
 		return fmt.Errorf("relay server is not reachable: %w", err)
 	}
@@ -372,6 +380,19 @@ func (a *App) GetDesktopStatus() DesktopStatusPayload {
 	}
 
 	return payload
+}
+
+func (a *App) disconnectRelayClient() {
+	a.relayMu.Lock()
+	client := a.client
+	a.client = nil
+	a.handler = nil
+	a.relayURL = ""
+	a.relayMu.Unlock()
+
+	if client != nil {
+		client.Close()
+	}
 }
 
 func isOpencodeAvailable(s *server.Server) bool {
