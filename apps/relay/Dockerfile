@@ -25,6 +25,7 @@ COPY apps/relay/package.json apps/relay/package.json
 RUN pnpm install --filter relay --prod --frozen-lockfile --ignore-scripts
 
 COPY --from=build /workspace/apps/relay/dist apps/relay/dist
+COPY --from=build /workspace/apps/relay/drizzle apps/relay/drizzle
 COPY --from=build /workspace/apps/relay/package.json apps/relay/package.json
 
 RUN mkdir -p /data /logs && chown -R node:node /data /logs /workspace
@@ -41,4 +42,4 @@ ENV LOGS_DIR=/logs
 VOLUME ["/data", "/logs"]
 EXPOSE 3001
 
-CMD ["node", "dist/index.js"]
+CMD ["pnpm", "--filter", "relay", "start:prod"]
