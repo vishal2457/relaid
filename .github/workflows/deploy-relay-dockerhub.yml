@@ -47,17 +47,32 @@ jobs:
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELAY_IMAGE: ${{ env.RELAY_IMAGE }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script_stop: true
+          command_timeout: 30m
+          envs: RELAY_IMAGE
           script: |
             set -euo pipefail
 
             cd /srv/derived/derived-infra
-            docker compose pull relay
+
+            echo "Disk before pull:"
+            df -h /
+            echo "Memory before pull:"
+            free -h
+
+            time docker pull "$RELAY_IMAGE"
+
             docker compose up -d relay nginx
+
+            docker compose ps relay nginx
+            docker compose logs --tail=80 relay
+
             docker image prune -f
             echo "Deployment completed successfully!"
