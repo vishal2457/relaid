@@ -1,6 +1,6 @@
 # Relay VPS Deployment
 
-The `Deploy Relay to Docker Hub` GitHub Actions workflow builds only `apps/relay`, pushes the image to Docker Hub, then SSHes into the VPS to pull the image and restart the Docker Compose service.
+The `Deploy Relay to Docker Hub` GitHub Actions workflow builds only `apps/relay`, pushes the image to Docker Hub as `vishal2457/derived:relay-latest`, then SSHes into the VPS to pull that tag and restart the Docker Compose service.
 
 ## Required GitHub Secrets
 
@@ -22,7 +22,6 @@ The `Deploy Relay to Docker Hub` GitHub Actions workflow builds only `apps/relay
 
 ## Optional GitHub Variables
 
-- `DOCKERHUB_REPOSITORY` (defaults to `<DOCKERHUB_USERNAME>/relaid-relay`)
 - `RELAY_PORT` (defaults to `3001`)
 - `RELAY_CORS_ORIGIN` (defaults to `*`)
 - `RELAY_LOG_LEVEL` (defaults to `info`)
