@@ -8,7 +8,7 @@
     "dev": "nodemon --exec \"tsx src/index.ts\" -e .ts",
     "migrate": "node dist/db/migrate.js",
     "start": "node dist/index.js",
-    "start:prod": "node dist/db/migrate.js && node dist/index.js",
+    "start:prod": "node dist/start.js",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate"

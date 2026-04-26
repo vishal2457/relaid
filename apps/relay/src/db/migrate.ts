@@ -18,7 +18,7 @@ const migrationsFolder = path.resolve(process.cwd(), "drizzle");
 const client = createClient({ url: `file:${dbPath}` });
 const db = drizzle(client);
 
-async function main() {
+export async function runMigrations() {
   try {
     await migrate(db, { migrationsFolder });
     console.log(`Database migrations applied to ${dbPath}`);
@@ -27,8 +27,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("Database migration failed");
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  runMigrations().catch((error) => {
+    console.error("Database migration failed");
+    console.error(error);
+    process.exit(1);
+  });
+}

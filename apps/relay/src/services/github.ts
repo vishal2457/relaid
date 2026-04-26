@@ -1,11 +1,12 @@
-import { Octokit } from "@octokit/rest";
+import type { Octokit } from "@octokit/rest";
 
-export function getClient(token: string): Octokit {
+export async function getClient(token: string): Promise<Octokit> {
+  const { Octokit } = await import("@octokit/rest");
   return new Octokit({ auth: token });
 }
 
 export async function getUserRepos(token: string) {
-  const octokit = getClient(token);
+  const octokit = await getClient(token);
   const { data } = await octokit.repos.listForAuthenticatedUser({
     sort: "updated",
     per_page: 50,
@@ -19,7 +20,7 @@ export async function getRepoPRs(
   repo: string,
   state: "open" | "closed" | "all" = "open",
 ) {
-  const octokit = getClient(token);
+  const octokit = await getClient(token);
   const { data } = await octokit.pulls.list({ owner, repo, state });
   return data;
 }
@@ -30,7 +31,7 @@ export async function getPRDetails(
   repo: string,
   pull_number: number,
 ) {
-  const octokit = getClient(token);
+  const octokit = await getClient(token);
   const { data } = await octokit.pulls.get({ owner, repo, pull_number });
   return data;
 }
@@ -41,7 +42,7 @@ export async function getPRDiff(
   repo: string,
   pull_number: number,
 ) {
-  const octokit = getClient(token);
+  const octokit = await getClient(token);
   const { data } = await octokit.pulls.get({
     owner,
     repo,
@@ -59,7 +60,7 @@ export async function submitPRReview(
   body: string,
   event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
 ) {
-  const octokit = getClient(token);
+  const octokit = await getClient(token);
   const { data } = await octokit.pulls.createReview({
     owner,
     repo,
@@ -71,7 +72,7 @@ export async function submitPRReview(
 }
 
 export async function getAuthenticatedUser(token: string) {
-  const octokit = getClient(token);
+  const octokit = await getClient(token);
   const { data } = await octokit.users.getAuthenticated();
   return data;
 }

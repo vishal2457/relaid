@@ -42,4 +42,4 @@ ENV LOGS_DIR=/logs
 VOLUME ["/data", "/logs"]
 EXPOSE 3001
 
-CMD ["pnpm", "--filter", "relay", "start:prod"]
+CMD ["node", "dist/start.js"]
