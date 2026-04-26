@@ -61,6 +61,7 @@ import {
 } from "@/src/components/PermissionCard";
 import { MessageRow, TypingIndicator } from "@/src/components/Message";
 import { getAssistantResponseSummaryContext } from "@/src/components/Message/getAssistantResponseSummary";
+import { ErrorToast } from "@/src/components/ErrorToast";
 
 const MIN_INPUT_HEIGHT = 44;
 const MAX_INPUT_HEIGHT = 150;
@@ -113,6 +114,13 @@ export default function SessionMessagesScreen() {
   const streamScrollTimeoutRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const [errorToastVisible, setErrorToastVisible] = React.useState(false);
+  const [errorToastMessage, setErrorToastMessage] = React.useState("");
+
+  const showError = React.useCallback((message: string) => {
+    setErrorToastMessage(message);
+    setErrorToastVisible(true);
+  }, []);
 
   React.useEffect(() => {
     const showListener = Keyboard.addListener(
@@ -373,10 +381,7 @@ export default function SessionMessagesScreen() {
       void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
 
       if (!payload.success) {
-        Alert.alert(
-          "OpenCode failed",
-          payload.error || "Failed to send message",
-        );
+        showError(payload.error || "Failed to send message");
       }
     };
 
@@ -390,7 +395,7 @@ export default function SessionMessagesScreen() {
 
       flushStreamingContent();
       clearPendingStreamState(payload.requestId);
-      Alert.alert("Error", payload.message || "Failed to send message");
+      showError(payload.message || "Failed to send message");
     };
 
     const handlePermissionRequest = (payload: PermissionRequestEvent) => {
@@ -570,7 +575,7 @@ export default function SessionMessagesScreen() {
     } catch (error) {
       console.error("[Session] Failed to send prompt:", error);
       clearPendingStreamState(requestId);
-      Alert.alert("Error", "Failed to send message. Please try again.");
+      showError("Failed to send message. Please try again.");
     }
   }, [
     clearPendingStreamState,
@@ -627,10 +632,7 @@ export default function SessionMessagesScreen() {
         setPendingPermission(null);
       } catch (error) {
         console.error("[PermissionResponse] Failed to send:", error);
-        Alert.alert(
-          "Permission response failed",
-          "The request was not delivered. Please try again.",
-        );
+        showError("The permission response was not delivered. Please try again.");
       } finally {
         setIsRespondingToPermission(false);
       }
@@ -657,10 +659,7 @@ export default function SessionMessagesScreen() {
         setPendingQuestion(null);
       } catch (error) {
         console.error("[QuestionResponse] Failed to send:", error);
-        Alert.alert(
-          "Question response failed",
-          "The answers were not delivered. Please try again.",
-        );
+        showError("The answers were not delivered. Please try again.");
       } finally {
         setIsRespondingToQuestion(false);
       }
@@ -909,6 +908,16 @@ export default function SessionMessagesScreen() {
           )}
         </View>
         {bottomContent}
+        <ErrorToast
+          visible={errorToastVisible}
+          message={errorToastMessage}
+          onDismiss={() => setErrorToastVisible(false)}
+          bottomOffset={
+            keyboardHeight > 0
+              ? keyboardHeight + composerHeight + KEYBOARD_ADDITIONAL_PADDING
+              : composerHeight
+          }
+        />
       </View>
     </SafeAreaView>
   );

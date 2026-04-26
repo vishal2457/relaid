@@ -10,6 +10,7 @@ import {
   MAX_INPUT_HEIGHT,
   MIN_INPUT_HEIGHT,
 } from "@/src/components/ChatComposer";
+import { ErrorToast } from "@/src/components/ErrorToast";
 import { SessionDrawer } from "@/src/components/SessionDrawer";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
@@ -140,6 +141,14 @@ export default function ChatScreen() {
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(
     null,
   );
+  const [errorToastVisible, setErrorToastVisible] = React.useState(false);
+  const [errorToastMessage, setErrorToastMessage] = React.useState("");
+
+  const showError = React.useCallback((message: string) => {
+    setErrorToastMessage(message);
+    setErrorToastVisible(true);
+  }, []);
+
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showGitDrawer, setShowGitDrawer] = React.useState(false);
   const [showFileDrawer, setShowFileDrawer] = React.useState(false);
@@ -557,10 +566,7 @@ export default function ChatScreen() {
       void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
 
       if (!payload.success) {
-        Alert.alert(
-          "OpenCode failed",
-          payload.error || "Failed to send message",
-        );
+        showError(payload.error || "Failed to send message");
       } else if (
         !isAppInForeground() &&
         payload.messages &&
@@ -595,7 +601,7 @@ export default function ChatScreen() {
 
       flushStreamingContent();
       clearPendingStreamState(foundSessionId, payload.requestId);
-      Alert.alert("SSE error", payload.message || "Failed to send message");
+      showError(payload.message || "Failed to send message");
     },
   );
 
@@ -790,7 +796,7 @@ export default function ChatScreen() {
         setOptimisticMessage(null);
         composer.restoreInput(prompt);
         console.error(createError);
-        Alert.alert("Error", "Failed to create session");
+        showError("Failed to create session");
         return;
       }
     }
@@ -833,7 +839,7 @@ export default function ChatScreen() {
     } catch (error) {
       console.error("[Chat] Failed to send prompt:", error);
       clearPendingStreamState(sessionId, requestId);
-      Alert.alert("Error", "Failed to send message. Please try again.");
+      showError("Failed to send message. Please try again.");
     }
   }, [
     session.activeProject,
@@ -902,10 +908,7 @@ export default function ChatScreen() {
         setPendingPermission(null);
       } catch (error) {
         console.error("[PermissionResponse] Failed to send:", error);
-        Alert.alert(
-          "Permission response failed",
-          "The request was not delivered. Please try again.",
-        );
+        showError("The permission response was not delivered. Please try again.");
       } finally {
         setIsRespondingToPermission(false);
       }
@@ -931,10 +934,7 @@ export default function ChatScreen() {
         setPendingQuestion(null);
       } catch (error) {
         console.error("[QuestionResponse] Failed to send:", error);
-        Alert.alert(
-          "Question response failed",
-          "The answers were not delivered. Please try again.",
-        );
+        showError("The answers were not delivered. Please try again.");
       } finally {
         setIsRespondingToQuestion(false);
       }
@@ -1203,6 +1203,16 @@ export default function ChatScreen() {
           onSelectSkillSuggestion={composer.handleSelectSkillSuggestion}
           trimmedInput={composer.trimmedInput}
         />
+        <ErrorToast
+          visible={errorToastVisible}
+          message={errorToastMessage}
+          onDismiss={() => setErrorToastVisible(false)}
+          bottomOffset={
+            keyboardHeight > 0
+              ? keyboardHeight + measuredComposerHeight + KEYBOARD_ADDITIONAL_PADDING
+              : measuredComposerHeight
+          }
+        />
       </View>
 
       <ProjectSelectionSheet
@@ -1220,6 +1230,7 @@ export default function ChatScreen() {
             setOptimisticMessage(null);
             hasScrolledToBottom.current = false;
           }
+          session.handleCloseProjectSheet();
         }}
       />
 
