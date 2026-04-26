@@ -6,6 +6,56 @@ import { FormattedText } from "./FormattedText";
 import type { SessionAssistantActivity } from "@/src/lib/api/messages";
 import type { LiveAssistantPhase } from "@/src/lib/live-assistant-stream";
 
+const JumpingDot = ({ delay }: { delay: number }) => {
+  const translateY = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(translateY, {
+          toValue: -4,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateY, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.delay(500),
+      ])
+    );
+    const timeout = setTimeout(() => {
+      animation.start();
+    }, delay);
+    return () => {
+      clearTimeout(timeout);
+      animation.stop();
+    };
+  }, [translateY, delay]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.dot,
+        {
+          transform: [{ translateY }],
+        },
+      ]}
+    />
+  );
+};
+
+const JumpingDots = () => {
+  return (
+    <View style={styles.dotsContainer}>
+      <JumpingDot delay={0} />
+      <JumpingDot delay={150} />
+      <JumpingDot delay={300} />
+    </View>
+  );
+};
+
 interface TypingIndicatorProps {
   streamingContent: string;
   thinkingContent: string | null;
@@ -88,12 +138,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
           {isThinking ? (
             <View style={styles.loaderContent}>
               <Animated.View style={{ opacity: blinkOpacity }}>
-                <Text
-                  variant="labelMedium"
-                  style={{ color: "#60A5FA", fontWeight: "600" }}
-                >
-                  Thinking...
-                </Text>
+                <JumpingDots />
               </Animated.View>
 
               {currentActivity ? (
@@ -198,5 +243,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
+  },
+  dotsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#60A5FA",
   },
 });

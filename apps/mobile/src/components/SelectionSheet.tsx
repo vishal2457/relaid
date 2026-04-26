@@ -1,4 +1,4 @@
-import BottomSheet, { BottomSheetFlatList } from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetFlatList, BottomSheetView } from "@gorhom/bottom-sheet";
 import React from "react";
 import {
   Keyboard,
@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 type SelectionSheetProps<T> = {
   visible: boolean;
   title: string;
-  data: T[];
+  data?: T[];
   onClose: () => void;
   onItemPress?: (item: T, index: number) => void;
   searchPlaceholder?: string;
@@ -29,8 +29,11 @@ type SelectionSheetProps<T> = {
   emptyText?: string;
   selectedId?: string | null;
   getItemId?: (item: T, index: number) => string | null | undefined;
-  renderItem: (item: T, isSelected: boolean, index: number) => React.ReactNode;
+  renderItem?: (item: T, isSelected: boolean, index: number) => React.ReactNode;
   keyExtractor?: (item: T, index: number) => string;
+  children?: React.ReactNode;
+  snapPoints?: string[];
+  enableDynamicSizing?: boolean;
 };
 
 export function SelectionSheet<T>({
@@ -48,14 +51,36 @@ export function SelectionSheet<T>({
   getItemId,
   renderItem,
   keyExtractor,
+  children,
+  snapPoints: customSnapPoints,
+  enableDynamicSizing = false,
 }: SelectionSheetProps<T>) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const isDark = theme.dark;
   const sheetBg = isDark ? "#1E293B" : "#FFFFFF";
   const bottomSheetRef = React.useRef<BottomSheet>(null);
-  const snapPoints = React.useMemo(() => ["50%", "80%"], []);
+  
+  const snapPoints = React.useMemo(
+    () => customSnapPoints || (enableDynamicSizing ? [] : ["50%", "80%"]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customSnapPoints ? customSnapPoints.join(",") : "default"],
+  );
+
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+  const wasVisible = React.useRef(visible);
+  const initialIndex = React.useRef(0);
+
+  if (visible && !wasVisible.current) {
+    const isKeyboardVisible =
+      // @ts-ignore
+      Keyboard.isVisible?.() || (Keyboard.metrics()?.height ?? 0) > 0;
+    
+    // If dynamic sizing is enabled and no snap points are provided, max index is 0.
+    const maxIndex = snapPoints.length > 0 ? snapPoints.length - 1 : 0;
+    initialIndex.current = isKeyboardVisible ? Math.min(1, maxIndex) : 0;
+  }
+  wasVisible.current = visible;
 
   React.useEffect(() => {
     const showEvent =
@@ -107,9 +132,9 @@ export function SelectionSheet<T>({
 
       <BottomSheet
         ref={bottomSheetRef}
-        index={0}
-        snapPoints={snapPoints}
-        enableDynamicSizing={false}
+        index={initialIndex.current}
+        snapPoints={snapPoints.length > 0 ? snapPoints : undefined}
+        enableDynamicSizing={enableDynamicSizing}
         enablePanDownToClose
         onClose={onClose}
         keyboardBehavior="interactive"
@@ -117,83 +142,130 @@ export function SelectionSheet<T>({
         backgroundStyle={{ backgroundColor: sheetBg }}
         handleIndicatorStyle={{ backgroundColor: "#CBD5E1" }}
       >
-        <View>
-          <Text
-            variant="titleMedium"
-            style={[styles.title, { color: theme.colors.onSurface }]}
-          >
-            {title}
-          </Text>
+        {children ? (
+          <BottomSheetView>
+            <View>
+              <Text
+                variant="titleMedium"
+                style={[styles.title, { color: theme.colors.onSurface }]}
+              >
+                {title}
+              </Text>
 
-          {onSearchChange && (
-            <View style={styles.searchContainer}>
-              <TextInput
-                mode="outlined"
-                dense
-                value={searchQuery}
-                onChangeText={onSearchChange}
-                placeholder={searchPlaceholder}
-                autoCapitalize="none"
-                autoCorrect={false}
-                left={<TextInput.Icon icon="magnify" />}
-                right={
-                  searchQuery ? (
-                    <TextInput.Icon
-                      icon="close"
-                      onPress={() => onSearchChange("")}
-                    />
-                  ) : undefined
+              {onSearchChange && (
+                <View style={styles.searchContainer}>
+                  <TextInput
+                    mode="outlined"
+                    dense
+                    value={searchQuery}
+                    onChangeText={onSearchChange}
+                    placeholder={searchPlaceholder}
+                    // @ts-expect-error: autoCapitalize is passed to underlying TextInput but missing from paper types
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    left={<TextInput.Icon icon="magnify" />}
+                    right={
+                      searchQuery ? (
+                        <TextInput.Icon
+                          icon="close"
+                          onPress={() => onSearchChange("")}
+                        />
+                      ) : undefined
+                    }
+                  />
+                </View>
+              )}
+            </View>
+            <View
+              style={[
+                styles.childrenContainer,
+                { paddingBottom: listBottomPadding },
+              ]}
+            >
+              {children}
+            </View>
+          </BottomSheetView>
+        ) : (
+          <>
+            <View>
+              <Text
+                variant="titleMedium"
+                style={[styles.title, { color: theme.colors.onSurface }]}
+              >
+                {title}
+              </Text>
+
+              {onSearchChange && (
+                <View style={styles.searchContainer}>
+                  <TextInput
+                    mode="outlined"
+                    dense
+                    value={searchQuery}
+                    onChangeText={onSearchChange}
+                    placeholder={searchPlaceholder}
+                    // @ts-expect-error: autoCapitalize is passed to underlying TextInput but missing from paper types
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    left={<TextInput.Icon icon="magnify" />}
+                    right={
+                      searchQuery ? (
+                        <TextInput.Icon
+                          icon="close"
+                          onPress={() => onSearchChange("")}
+                        />
+                      ) : undefined
+                    }
+                  />
+                </View>
+              )}
+            </View>
+            {isLoading ? (
+              <View style={styles.loading}>
+                <ActivityIndicator />
+              </View>
+            ) : data && renderItem ? (
+              <BottomSheetFlatList
+                data={data}
+                keyExtractor={resolveKey}
+                style={styles.list}
+                contentContainerStyle={[
+                  styles.listContent,
+                  { paddingBottom: listBottomPadding },
+                ]}
+                keyboardShouldPersistTaps="handled"
+                renderItem={({ item, index }) => {
+                  const itemId = resolveItemId(item, index);
+                  const isSelected =
+                    selectedId !== undefined &&
+                    selectedId !== null &&
+                    itemId !== undefined &&
+                    itemId !== null &&
+                    itemId === selectedId;
+
+                  const content = renderItem(item, isSelected, index);
+                  if (!content) return null;
+
+                  if (!onItemPress) return <View>{content}</View>;
+
+                  return (
+                    <Pressable onPress={() => onItemPress(item, index)}>
+                      <View>{content}</View>
+                    </Pressable>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={styles.empty}>
+                    <Text
+                      variant="bodyMedium"
+                      style={{ color: theme.colors.onSurfaceVariant }}
+                    >
+                      {emptyText}
+                    </Text>
+                  </View>
                 }
               />
-            </View>
-          )}
-        </View>
-
-        {isLoading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator />
-          </View>
-        ) : (
-          <BottomSheetFlatList
-            data={data}
-            keyExtractor={resolveKey}
-            style={styles.list}
-            contentContainerStyle={[
-              styles.listContent,
-              { paddingBottom: listBottomPadding },
-            ]}
-            keyboardShouldPersistTaps="handled"
-            renderItem={({ item, index }) => {
-              const itemId = resolveItemId(item, index);
-              const isSelected =
-                selectedId !== undefined &&
-                selectedId !== null &&
-                itemId !== undefined &&
-                itemId !== null &&
-                itemId === selectedId;
-
-              const content = renderItem(item, isSelected, index);
-              if (!content) return null;
-
-              if (!onItemPress) return <View>{content}</View>;
-
-              return (
-                <Pressable onPress={() => onItemPress(item, index)}>
-                  <View>{content}</View>
-                </Pressable>
-              );
-            }}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text
-                  variant="bodyMedium"
-                  style={{ color: theme.colors.onSurfaceVariant }}
-                >
-                  {emptyText}
-                </Text>
-              </View>
-            }
-          />
+            ) : null}
+          </>
         )}
       </BottomSheet>
     </View>
@@ -229,5 +301,8 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 40,
+  },
+  childrenContainer: {
+    paddingHorizontal: 20,
   },
 });

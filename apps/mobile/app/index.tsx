@@ -1,24 +1,7 @@
-import React from "react";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import {
-  Alert,
-  AppState,
-  FlatList,
-  Keyboard,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
-  Platform,
-  Pressable,
-  StatusBar,
-  StyleSheet,
-  TextInputSelectionChangeEventData,
-  View,
-  type AppStateStatus,
-  type FlatList as FlatListType,
-  type KeyboardEvent,
-  type LayoutChangeEvent,
-} from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { AgentSelectionSheet } from "@/src/components/BottomModals/AgentSelectionSheet";
+import { BranchSelectionSheet } from "@/src/components/BottomModals/BranchSelectionSheet";
+import { ModelSelectionSheet } from "@/src/components/BottomModals/ModelSelectionSheet";
+import { ProjectSelectionSheet } from "@/src/components/BottomModals/ProjectSelectionSheet";
 import {
   ChatComposer,
   COMPOSER_BOTTOM_PADDING,
@@ -27,23 +10,33 @@ import {
   MAX_INPUT_HEIGHT,
   MIN_INPUT_HEIGHT,
 } from "@/src/components/ChatComposer";
+import { ErrorToast } from "@/src/components/ErrorToast";
 import { SessionDrawer } from "@/src/components/SessionDrawer";
-import { ProjectSelectionSheet } from "@/src/components/BottomModals/ProjectSelectionSheet";
-import { ModelSelectionSheet } from "@/src/components/BottomModals/ModelSelectionSheet";
-import { AgentSelectionSheet } from "@/src/components/BottomModals/AgentSelectionSheet";
-import { BranchSelectionSheet } from "@/src/components/BottomModals/BranchSelectionSheet";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
+import React from "react";
+import {
+  Alert,
+  AppState,
+  FlatList,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
+  StatusBar,
+  StyleSheet,
+  View,
+  type AppStateStatus,
+  type FlatList as FlatListType
+} from "react-native";
 import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
-import {
-  messageKeys,
-  useSessionMessages,
-  type SessionMessage,
-} from "@/src/lib/api/messages";
+import { FileDrawer } from "@/src/components/FileDrawer";
+import { GitDrawer } from "@/src/components/GitDrawer";
+import { HeaderActionMenu } from "@/src/components/HeaderActionMenu";
 import {
   clearActiveSessionStream,
   FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
@@ -52,39 +45,30 @@ import {
   saveActiveSessionStream,
   shouldScheduleSessionRefresh,
 } from "@/src/lib/active-session-stream";
-import { useLiveAssistantStream } from "@/src/lib/live-assistant-stream";
 import {
-  useProjectFileSearch,
-  useProjects,
-  type Project,
-  type ProjectFileMatch,
-} from "@/src/lib/api/projects";
-import { useProjectSkills, type Skill } from "@/src/lib/api/skills";
-import { useAgents, type Agent } from "@/src/lib/api/agents";
-import { useBranches, useSwitchBranch } from "@/src/lib/api/branches";
-import {
-  useProviders,
-  type ActiveModel,
-  flattenProvidersToModels,
-} from "@/src/lib/api/providers";
+  messageKeys,
+  useSessionMessages,
+  type SessionMessage,
+} from "@/src/lib/api/messages";
 import {
   sessionsKeys,
   useCreateSession,
   useSession,
 } from "@/src/lib/api/sessions";
-import { queryClient } from "@/src/lib/query-client";
-import { showPermissionNotification } from "@/src/lib/permission-notifications";
+import { useLiveAssistantStream } from "@/src/lib/live-assistant-stream";
 import {
   isAppInForeground,
   showNewMessageNotification,
 } from "@/src/lib/notifications";
+import { showPermissionNotification } from "@/src/lib/permission-notifications";
+import { queryClient } from "@/src/lib/query-client";
 import {
   connectSseClient,
-  getSseClient,
   disconnectSseClient,
-  sendPromptRequest,
+  getSseClient,
   sendAbortRequest,
   sendPermissionResponse,
+  sendPromptRequest,
   sendQuestionResponse,
   subscribeToSse,
   type SseClient,
@@ -93,10 +77,6 @@ import type {
   SessionPromptResponseEvent,
   SessionStreamChunkEvent,
 } from "@/src/lib/sse/events";
-import { GitDrawer } from "@/src/components/GitDrawer";
-import { FileDrawer } from "@/src/components/FileDrawer";
-import { HeaderActionMenu } from "@/src/components/HeaderActionMenu";
-import { useGitFileStatus } from "@/src/lib/api/git";
 // Message queue temporarily disabled - will be re-enabled later
 // import { QueueDrawer } from "@/components/QueueDrawer";
 import { MessageRow, TypingIndicator } from "@/src/components/Message";
@@ -107,60 +87,11 @@ import {
   type PermissionRequest,
   type QuestionRequest,
 } from "@/src/components/PermissionCard";
-
-type ComposerSelection = {
-  start: number;
-  end: number;
-};
-
-type ActiveMention = {
-  start: number;
-  end: number;
-  query: string;
-};
-
-function getActiveMention(
-  value: string,
-  selection: ComposerSelection,
-): ActiveMention | null {
-  if (selection.start !== selection.end) {
-    return null;
-  }
-
-  const cursor = selection.start;
-  let tokenStart = cursor - 1;
-
-  while (tokenStart >= 0 && !/\s/.test(value[tokenStart] ?? "")) {
-    tokenStart -= 1;
-  }
-
-  tokenStart += 1;
-
-  if (value[tokenStart] !== "@") {
-    return null;
-  }
-
-  const suffix = value.slice(cursor);
-  const suffixLength = suffix.match(/^[^\s]*/)?.[0].length ?? 0;
-  const tokenEnd = cursor + suffixLength;
-  const token = value.slice(tokenStart, tokenEnd);
-
-  if (!token.startsWith("@") || token.slice(1).includes("@")) {
-    return null;
-  }
-
-  return {
-    start: tokenStart,
-    end: tokenEnd,
-    query: token.slice(1),
-  };
-}
+import { getAgentSubtitle, useChatSession } from "@/src/hooks/useChatSession";
+import { useComposerState } from "@/src/hooks/useComposerState";
+import { useKeyboardHeight } from "@/src/hooks/useKeyboardHeight";
 
 type ConnectionState = "connected" | "disconnected" | "connecting" | "error";
-
-const LAST_SELECTED_PROJECT_ID = "LAST_SELECTED_PROJECT_ID";
-const LAST_SELECTED_MODEL = "LAST_SELECTED_MODEL";
-const LAST_SELECTED_AGENT_BY_PROJECT = "LAST_SELECTED_AGENT_BY_PROJECT";
 
 type SessionPromptStartedEvent = {
   requestId: string;
@@ -171,92 +102,14 @@ type SessionPromptStartedEvent = {
 type PermissionRequestEvent = PermissionRequest;
 type QuestionRequestEvent = QuestionRequest;
 
-function normalizeSearchValue(value: string): string {
-  return value.toLowerCase().trim();
-}
-
-function fuzzyScore(target: string, query: string): number {
-  const normalizedTarget = normalizeSearchValue(target);
-  const normalizedQuery = normalizeSearchValue(query);
-
-  if (!normalizedQuery) {
-    return 0;
-  }
-
-  if (normalizedTarget === normalizedQuery) {
-    return 500;
-  }
-
-  if (normalizedTarget.startsWith(normalizedQuery)) {
-    return 300 - (normalizedTarget.length - normalizedQuery.length);
-  }
-
-  const substringIndex = normalizedTarget.indexOf(normalizedQuery);
-  if (substringIndex >= 0) {
-    return 220 - substringIndex;
-  }
-
-  let queryIndex = 0;
-  let score = 0;
-  let streak = 0;
-
-  for (let i = 0; i < normalizedTarget.length; i += 1) {
-    if (normalizedTarget[i] === normalizedQuery[queryIndex]) {
-      queryIndex += 1;
-      streak += 1;
-      score += 12 + streak * 3;
-      if (queryIndex === normalizedQuery.length) {
-        return score;
-      }
-    } else {
-      streak = 0;
-    }
-  }
-
-  return -1;
-}
-
-function getModelSearchScore(model: ActiveModel, query: string): number {
-  return Math.max(
-    fuzzyScore(model.name, query),
-    fuzzyScore(model.id, query),
-    fuzzyScore(model.providerName, query),
-    fuzzyScore(`${model.providerName} ${model.name}`, query),
-  );
-}
-
-function getDefaultAgent(agents: Agent[]): Agent | null {
-  if (agents.length === 0) {
-    return null;
-  }
-
-  return (
-    agents.find((agent) => agent.name === "general") ??
-    agents.find((agent) => agent.mode !== "subagent") ??
-    agents[0]
-  );
-}
-
-function getAgentSubtitle(agent: Agent): string {
-  if (agent.model) {
-    return `${agent.model.providerID} / ${agent.model.modelID}`;
-  }
-
-  return agent.builtIn ? "Built-in" : agent.mode;
-}
-
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const flatListRef = React.useRef<FlatListType<SessionMessage>>(null);
-  const [inputText, setInputText] = React.useState("");
-  const [inputSelection, setInputSelection] = React.useState<ComposerSelection>(
-    {
-      start: 0,
-      end: 0,
-    },
-  );
-  const [inputHeight, setInputHeight] = React.useState(MIN_INPUT_HEIGHT);
+
+  // --- Extracted hooks ---
+  const keyboardHeight = useKeyboardHeight();
+
   const [pendingRequestIds, setPendingRequestIds] = React.useState<
     Map<string, string>
   >(new Map());
@@ -285,32 +138,23 @@ export default function ChatScreen() {
   > | null>(null);
   const [optimisticMessage, setOptimisticMessage] =
     React.useState<SessionMessage | null>(null);
-  const [showProjectSheet, setShowProjectSheet] = React.useState(false);
-  const [showProviderSheet, setShowProviderSheet] = React.useState(false);
-  const [showAgentSheet, setShowAgentSheet] = React.useState(false);
-  const [showBranchSheet, setShowBranchSheet] = React.useState(false);
-  const [modelSearchQuery, setModelSearchQuery] = React.useState("");
-  const [agentSearchQuery, setAgentSearchQuery] = React.useState("");
-  const [branchSearchQuery, setBranchSearchQuery] = React.useState("");
-  const [activeProject, setActiveProject] = React.useState<Project | null>(
-    null,
-  );
-  const [activeModel, setActiveModel] = React.useState<ActiveModel | null>(
-    null,
-  );
-  const [activeAgent, setActiveAgent] = React.useState<Agent | null>(null);
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(
     null,
   );
+  const [errorToastVisible, setErrorToastVisible] = React.useState(false);
+  const [errorToastMessage, setErrorToastMessage] = React.useState("");
+
+  const showError = React.useCallback((message: string) => {
+    setErrorToastMessage(message);
+    setErrorToastVisible(true);
+  }, []);
+
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showGitDrawer, setShowGitDrawer] = React.useState(false);
   const [showFileDrawer, setShowFileDrawer] = React.useState(false);
   // Message queue temporarily disabled
   // const [showQueueDrawer, setShowQueueDrawer] = React.useState(false);
-  const [hydrated, setHydrated] = React.useState(false);
   const [isNearBottom, setIsNearBottom] = React.useState(true);
-  const [keyboardHeight, setKeyboardHeight] = React.useState(0);
-  const [composerLayoutHeight, setComposerLayoutHeight] = React.useState(0);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [menuExpanded, setMenuExpanded] = React.useState(false);
   const [pendingPermission, setPendingPermission] =
@@ -325,77 +169,30 @@ export default function ChatScreen() {
     typeof setTimeout
   > | null>(null);
 
-  React.useEffect(() => {
-    const showListener = Keyboard.addListener(
-      "keyboardDidShow",
-      (e: KeyboardEvent) => {
-        setKeyboardHeight(e.endCoordinates.height);
-      },
-    );
-    const hideListener = Keyboard.addListener("keyboardDidHide", () => {
-      setKeyboardHeight(0);
-    });
-    return () => {
-      showListener.remove();
-      hideListener.remove();
-    };
-  }, []);
+  const session = useChatSession({
+    isMountedRef: React.useRef(true),
+    allowSessionChangeRecoveryRef,
+    activeSessionIdRef,
+    pendingRequestIdsRef,
+    setActiveSessionId,
+    setPendingRequestIds,
+    setOptimisticMessage: () => setOptimisticMessage(null),
+    resetStreamingContent,
+  });
+
+  const composer = useComposerState(session.activeProject?.id);
 
   const [, setConnectionState] =
     React.useState<ConnectionState>("disconnected");
   const sseClientRef = React.useRef<SseClient | null>(null);
   const isMountedRef = React.useRef(true);
   const appStateRef = React.useRef<AppStateStatus>(AppState.currentState);
-  const activeProjectRef = React.useRef<Project | null>(null);
-  const projectsRef = React.useRef<Project[] | undefined>(undefined);
 
   const createSessionMutation = useCreateSession();
-  const { data: projects, isLoading: projectsLoading } = useProjects();
-  const { data: providers, isLoading: providersLoading } = useProviders();
-  const { data: agents = [], isLoading: agentsLoading } = useAgents(
-    activeProject?.id ?? "",
-    Boolean(activeProject),
-  );
-  const activeMention = React.useMemo(
-    () => getActiveMention(inputText, inputSelection),
-    [inputSelection, inputText],
-  );
-  const deferredMentionQuery = React.useDeferredValue(
-    activeMention?.query ?? "",
-  );
-  const { data: fileSuggestions, isLoading: fileSuggestionsLoading } =
-    useProjectFileSearch(
-      activeProject?.id ?? "",
-      deferredMentionQuery,
-      Boolean(activeProject && activeMention && deferredMentionQuery.trim()),
-    );
-
-  const activeSlash = React.useMemo(() => {
-    if (!inputText.startsWith("/")) return null;
-    const spaceIndex = inputText.indexOf(" ");
-    const query =
-      spaceIndex === -1 ? inputText.slice(1) : inputText.slice(1, spaceIndex);
-    return { query };
-  }, [inputText]);
-  const deferredSlashQuery = React.useDeferredValue(activeSlash?.query ?? "");
-  const { data: skillSuggestions, isLoading: skillSuggestionsLoading } =
-    useProjectSkills(
-      activeProject?.id ?? "",
-      deferredSlashQuery,
-      Boolean(activeProject && activeSlash),
-    );
 
   React.useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
-
-  React.useEffect(() => {
-    activeProjectRef.current = activeProject;
-  }, [activeProject]);
-
-  React.useEffect(() => {
-    projectsRef.current = projects;
-  }, [projects, resetStreamingContent]);
 
   React.useEffect(() => {
     pendingRequestIdsRef.current = pendingRequestIds;
@@ -409,169 +206,6 @@ export default function ChatScreen() {
     };
   }, []);
 
-  React.useEffect(() => {
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const activeStream = await getActiveSessionStream();
-        if (cancelled || !isMountedRef.current) {
-          return;
-        }
-
-        if (activeStream && projects) {
-          const streamingProject = projects.find(
-            (project) => project.id === activeStream.projectId,
-          );
-          if (streamingProject) {
-            allowSessionChangeRecoveryRef.current = true;
-            activeSessionIdRef.current = activeStream.sessionId;
-            const newPending = new Map<string, string>();
-            newPending.set(activeStream.sessionId, activeStream.requestId);
-            pendingRequestIdsRef.current = newPending;
-            setActiveProject(streamingProject);
-            setActiveSessionId(activeStream.sessionId);
-            setPendingRequestIds(newPending);
-            setOptimisticMessage(null);
-            resetStreamingContent();
-            return;
-          }
-        }
-
-        const savedId = await AsyncStorage.getItem(LAST_SELECTED_PROJECT_ID);
-        if (cancelled || !isMountedRef.current) {
-          return;
-        }
-
-        if (savedId) {
-          if (projects) {
-            const savedProject = projects.find((p) => p.id === savedId);
-            if (savedProject) {
-              setActiveProject(savedProject);
-            }
-          }
-        } else if (projects && projects.length > 0) {
-          setActiveProject(projects[0]);
-        }
-      } catch {
-      } finally {
-        if (!cancelled && isMountedRef.current) {
-          setHydrated(true);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projects, resetStreamingContent]);
-
-  React.useEffect(() => {
-    if (!hydrated) return;
-    if (activeProject) {
-      AsyncStorage.setItem(LAST_SELECTED_PROJECT_ID, activeProject.id).catch(
-        () => {},
-      );
-    }
-  }, [activeProject, hydrated]);
-
-  React.useEffect(() => {
-    if (!hydrated) return;
-    if (activeModel) {
-      AsyncStorage.setItem(
-        LAST_SELECTED_MODEL,
-        JSON.stringify(activeModel),
-      ).catch(() => {});
-    }
-  }, [activeModel, hydrated]);
-
-  React.useEffect(() => {
-    if (!hydrated || !activeProject) {
-      return;
-    }
-
-    void AsyncStorage.getItem(LAST_SELECTED_AGENT_BY_PROJECT)
-      .then((raw) => {
-        if (!raw || !isMountedRef.current) {
-          return;
-        }
-
-        const saved = JSON.parse(raw) as Record<string, string>;
-        const savedAgentName = saved[activeProject.id];
-        if (!savedAgentName || agents.length === 0) {
-          return;
-        }
-
-        const matchedAgent = agents.find(
-          (agent) => agent.name === savedAgentName,
-        );
-        if (matchedAgent) {
-          setActiveAgent((current: Agent | null) =>
-            current?.name === matchedAgent.name ? current : matchedAgent,
-          );
-        }
-      })
-      .catch(() => {});
-  }, [activeProject, agents, hydrated]);
-
-  React.useEffect(() => {
-    if (!agents.length) {
-      setActiveAgent(null);
-      return;
-    }
-
-    setActiveAgent((current: Agent | null) => {
-      if (current) {
-        const matched = agents.find((agent) => agent.name === current.name);
-        if (matched) {
-          return matched;
-        }
-      }
-
-      return getDefaultAgent(agents);
-    });
-  }, [agents]);
-
-  React.useEffect(() => {
-    if (!hydrated || !activeProject || !activeAgent) {
-      return;
-    }
-
-    void AsyncStorage.getItem(LAST_SELECTED_AGENT_BY_PROJECT)
-      .then((raw) => {
-        const currentMap = raw
-          ? (JSON.parse(raw) as Record<string, string>)
-          : {};
-        currentMap[activeProject.id] = activeAgent.name;
-        return AsyncStorage.setItem(
-          LAST_SELECTED_AGENT_BY_PROJECT,
-          JSON.stringify(currentMap),
-        );
-      })
-      .catch(() => {});
-  }, [activeAgent, activeProject, hydrated]);
-
-  React.useEffect(() => {
-    if (!hydrated || !providers) return;
-
-    (async () => {
-      try {
-        const savedModelJson = await AsyncStorage.getItem(LAST_SELECTED_MODEL);
-        if (savedModelJson) {
-          const savedModel = JSON.parse(savedModelJson) as ActiveModel;
-          const modelExists = providers.some(
-            (p) =>
-              p.id === savedModel.providerId &&
-              p.models.some((m) => m.id === savedModel.id),
-          );
-          if (modelExists) {
-            setActiveModel(savedModel);
-          }
-        }
-      } catch {}
-    })();
-  }, [hydrated, providers]);
-
   const {
     data: messages,
     isLoading: messagesLoading,
@@ -579,16 +213,6 @@ export default function ChatScreen() {
     refetch,
   } = useSessionMessages(activeSessionId ?? "");
   const { refetch: refetchActiveSession } = useSession(activeSessionId ?? "");
-  const { data: gitFileStatus } = useGitFileStatus(
-    activeProject?.id ?? "",
-    Boolean(activeProject),
-  );
-  const currentBranch = gitFileStatus?.branch ?? "main";
-  const { data: branches, isLoading: branchesLoading } = useBranches(
-    activeProject?.id ?? "",
-    showBranchSheet && Boolean(activeProject),
-  );
-  const switchBranchMutation = useSwitchBranch(activeProject?.id ?? "");
 
   const activeSessionMessages = React.useMemo(() => {
     if (!activeSessionId) {
@@ -607,88 +231,18 @@ export default function ChatScreen() {
     return [...activeSessionMessages, optimisticMessage];
   }, [activeSessionMessages, optimisticMessage]);
 
-  const sortedModels = React.useMemo(() => {
-    const models = flattenProvidersToModels(providers ?? []);
-    const normalizedQuery = normalizeSearchValue(modelSearchQuery);
-
-    const filtered = normalizedQuery
-      ? models
-          .map((model) => ({
-            model,
-            score: getModelSearchScore(model, normalizedQuery),
-          }))
-          .filter((entry) => entry.score >= 0)
-          .sort((a, b) => {
-            if (b.score !== a.score) {
-              return b.score - a.score;
-            }
-            return a.model.name.localeCompare(b.model.name);
-          })
-          .map((entry) => entry.model)
-      : models;
-
-    if (!activeModel) {
-      return filtered;
-    }
-
-    const sorted = [...filtered];
-    sorted.sort((a, b) => {
-      if (a.id === activeModel.id) return -1;
-      if (b.id === activeModel.id) return 1;
-      return 0;
-    });
-    return sorted;
-  }, [providers, activeModel, modelSearchQuery]);
-
-  const sortedProjects = React.useMemo(() => {
-    if (!activeProject) return projects ?? [];
-    const sorted = [...(projects ?? [])];
-    sorted.sort((a, b) =>
-      a.id === activeProject.id ? -1 : b.id === activeProject.id ? 1 : 0,
-    );
-    return sorted;
-  }, [projects, activeProject]);
-
-  const sortedAgents = React.useMemo(() => {
-    const normalizedQuery = normalizeSearchValue(agentSearchQuery);
-    const filtered = normalizedQuery
-      ? agents.filter((agent) => {
-          const haystacks = [
-            agent.name,
-            agent.description ?? "",
-            agent.model?.providerID ?? "",
-            agent.model?.modelID ?? "",
-          ];
-          return haystacks.some((value) =>
-            normalizeSearchValue(value).includes(normalizedQuery),
-          );
-        })
-      : agents;
-
-    const sorted = [...filtered];
-    sorted.sort((a, b) => {
-      if (a.name === activeAgent?.name) return -1;
-      if (b.name === activeAgent?.name) return 1;
-      return a.name.localeCompare(b.name);
-    });
-    return sorted;
-  }, [activeAgent?.name, agentSearchQuery, agents]);
-
-  const sortedBranches = React.useMemo(() => {
-    const normalizedQuery = branchSearchQuery.toLowerCase().trim();
-    let filtered = branches ?? [];
-    if (normalizedQuery) {
-      filtered = filtered.filter((b) =>
-        b.name.toLowerCase().includes(normalizedQuery),
-      );
-    }
-    filtered.sort((a, b) => {
-      if (a.isCurrent) return -1;
-      if (b.isCurrent) return 1;
-      return a.name.localeCompare(b.name);
-    });
-    return filtered;
-  }, [branches, branchSearchQuery]);
+  // Phase 5: Memoize theme-derived colors
+  const colors = React.useMemo(
+    () => ({
+      borderColor: theme.dark ? "#2A3441" : "#D9E2EC",
+      metaColor: theme.dark ? "#B8C2D1" : "#526277",
+      userBubble: theme.dark ? "#1D4ED8" : "#DBEAFE",
+      assistantBubble: theme.dark ? "#1F2937" : "#FFFFFF",
+      systemBubble: theme.dark ? "#3F3F46" : "#E2E8F0",
+      sheetBg: theme.dark ? "#1E293B" : "#FFFFFF",
+    }),
+    [theme.dark],
+  );
 
   const hasScrolledToBottom = React.useRef(false);
   React.useEffect(() => {
@@ -1012,10 +566,7 @@ export default function ChatScreen() {
       void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
 
       if (!payload.success) {
-        Alert.alert(
-          "OpenCode failed",
-          payload.error || "Failed to send message",
-        );
+        showError(payload.error || "Failed to send message");
       } else if (
         !isAppInForeground() &&
         payload.messages &&
@@ -1050,21 +601,21 @@ export default function ChatScreen() {
 
       flushStreamingContent();
       clearPendingStreamState(foundSessionId, payload.requestId);
-      Alert.alert("SSE error", payload.message || "Failed to send message");
+      showError(payload.message || "Failed to send message");
     },
   );
 
   const handlePermissionRequestRef = React.useRef(
     (payload: PermissionRequestEvent) => {
-      const currentProject = activeProjectRef.current;
-      const availableProjects = projectsRef.current ?? [];
+      const currentProject = session.activeProjectRef.current;
+      const availableProjects = session.projectsRef.current ?? [];
 
       if (currentProject?.id !== payload.projectId) {
         const matchingProject = availableProjects.find(
           (project) => project.id === payload.projectId,
         );
         if (matchingProject) {
-          setActiveProject(matchingProject);
+          session.setActiveProject(matchingProject);
         }
       }
 
@@ -1097,15 +648,15 @@ export default function ChatScreen() {
 
   const handleQuestionRequestRef = React.useRef(
     (payload: QuestionRequestEvent) => {
-      const currentProject = activeProjectRef.current;
-      const availableProjects = projectsRef.current ?? [];
+      const currentProject = session.activeProjectRef.current;
+      const availableProjects = session.projectsRef.current ?? [];
 
       if (currentProject?.id !== payload.projectId) {
         const matchingProject = availableProjects.find(
           (project) => project.id === payload.projectId,
         );
         if (matchingProject) {
-          setActiveProject(matchingProject);
+          session.setActiveProject(matchingProject);
         }
       }
 
@@ -1160,38 +711,29 @@ export default function ChatScreen() {
     return () => subscription.remove();
   }, [connectSse, recoverPendingStream]);
 
-  const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
-  const metaColor = theme.dark ? "#B8C2D1" : "#526277";
-  const userBubble = theme.dark ? "#1D4ED8" : "#DBEAFE";
-  const assistantBubble = theme.dark ? "#1F2937" : "#FFFFFF";
-  const systemBubble = theme.dark ? "#3F3F46" : "#E2E8F0";
-  const sheetBg = theme.dark ? "#1E293B" : "#FFFFFF";
-  const showMentionSuggestions = Boolean(activeProject && activeMention);
-  const mentionSuggestionCount = fileSuggestions?.length ?? 0;
-  const mentionSuggestionHeight = showMentionSuggestions
+  const mentionSuggestionCount = composer.fileSuggestions?.length ?? 0;
+  const mentionSuggestionHeight = composer.showMentionSuggestions
     ? Math.min(
         mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
         220,
       ) + 8
     : 0;
-  const showSkillSuggestions = Boolean(activeProject && activeSlash);
-  const skillSuggestionCount = skillSuggestions?.length ?? 0;
-  const skillSuggestionHeight = showSkillSuggestions
+  const skillSuggestionCount = composer.skillSuggestions?.length ?? 0;
+  const skillSuggestionHeight = composer.showSkillSuggestions
     ? Math.min(
         skillSuggestionCount > 0 ? skillSuggestionCount * 60 + 16 : 88,
         220,
       ) + 8
     : 0;
   const composerHeight =
-    Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, inputHeight)) +
+    Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, composer.inputHeight)) +
     COMPOSER_TOP_PADDING +
     Math.max(insets.bottom, COMPOSER_BOTTOM_PADDING) +
     mentionSuggestionHeight +
     skillSuggestionHeight +
     keyboardHeight +
     (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
-  const measuredComposerHeight = composerLayoutHeight || composerHeight;
-  const trimmedInput = inputText.trim();
+  const measuredComposerHeight = composer.composerLayoutHeight || composerHeight;
   const isSessionSending = creatingSessionId
     ? true
     : activeSessionId
@@ -1205,11 +747,11 @@ export default function ChatScreen() {
   const footerPhase = hasActiveStreamEvent ? streamingPhase : "thinking";
 
   const handleSend = React.useCallback(async () => {
-    if (!activeProject || !trimmedInput || isSessionSending) {
+    if (!session.activeProject || !composer.trimmedInput || isSessionSending) {
       return;
     }
 
-    const prompt = trimmedInput;
+    const prompt = composer.trimmedInput;
     const requestId = `mobile_${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 9)}`;
@@ -1230,18 +772,16 @@ export default function ChatScreen() {
     });
     setHasActiveStreamEvent(false);
     resetStreamingContent();
-    setInputText("");
-    setInputSelection({ start: 0, end: 0 });
-    setInputHeight(MIN_INPUT_HEIGHT);
+    composer.resetInput();
 
     if (!sessionId) {
       const tempRequestId = `creating_${Date.now()}`;
       setCreatingSessionId(tempRequestId);
       try {
-        const session = await createSessionMutation.mutateAsync(
-          activeProject.id,
+        const newSession = await createSessionMutation.mutateAsync(
+          session.activeProject.id,
         );
-        const resolvedSessionId = session.id;
+        const resolvedSessionId = newSession.id;
         sessionId = resolvedSessionId;
         allowSessionChangeRecoveryRef.current = false;
         setActiveSessionId(resolvedSessionId);
@@ -1254,11 +794,9 @@ export default function ChatScreen() {
       } catch (createError) {
         setCreatingSessionId(null);
         setOptimisticMessage(null);
-        setInputText(prompt);
-        setInputSelection({ start: prompt.length, end: prompt.length });
-        setInputHeight(MIN_INPUT_HEIGHT);
+        composer.restoreInput(prompt);
         console.error(createError);
-        Alert.alert("Error", "Failed to create session");
+        showError("Failed to create session");
         return;
       }
     }
@@ -1269,7 +807,7 @@ export default function ChatScreen() {
     activeSessionIdRef.current = sessionId;
     void saveActiveSessionStream({
       requestId,
-      projectId: activeProject.id,
+      projectId: session.activeProject.id,
       sessionId,
       baselineMessageId: isCreatingSession
         ? null
@@ -1288,25 +826,25 @@ export default function ChatScreen() {
       await sendPromptRequest({
         sessionId,
         requestId,
-        projectId: activeProject.id,
+        projectId: session.activeProject.id,
         prompt,
-        agent: activeAgent?.name,
-        model: activeModel
+        agent: session.activeAgent?.name,
+        model: session.activeModel
           ? {
-              providerId: activeModel.providerId,
-              modelId: activeModel.id,
+              providerId: session.activeModel.providerId,
+              modelId: session.activeModel.id,
             }
           : undefined,
       });
     } catch (error) {
       console.error("[Chat] Failed to send prompt:", error);
       clearPendingStreamState(sessionId, requestId);
-      Alert.alert("Error", "Failed to send message. Please try again.");
+      showError("Failed to send message. Please try again.");
     }
   }, [
-    activeProject,
+    session.activeProject,
     activeSessionId,
-    trimmedInput,
+    composer.trimmedInput,
     isSessionSending,
     pendingRequestIds,
     activeSessionMessages,
@@ -1314,9 +852,10 @@ export default function ChatScreen() {
     clearPendingStreamState,
     clearRequestRecoveryTimeout,
     recoverPendingStream,
-    activeModel,
-    activeAgent,
+    session.activeModel,
+    session.activeAgent,
     resetStreamingContent,
+    composer,
   ]);
 
   const handleAbort = React.useCallback(async () => {
@@ -1326,7 +865,7 @@ export default function ChatScreen() {
     }
 
     const requestId = pendingRequestIdsRef.current.get(sessionId);
-    if (!requestId || !activeProject) {
+    if (!requestId || !session.activeProject) {
       return;
     }
 
@@ -1345,11 +884,11 @@ export default function ChatScreen() {
     sendAbortRequest({
       sessionId,
       requestId,
-      projectId: activeProject.id,
+      projectId: session.activeProject.id,
     }).catch((error) => {
       console.error("[Chat] Failed to abort:", error);
     });
-  }, [activeProject, clearRequestRecoveryTimeout, resetStreamingContent]);
+  }, [session.activeProject, clearRequestRecoveryTimeout, resetStreamingContent]);
 
   const handlePermissionResponse = React.useCallback(
     async (reply: "once" | "always" | "reject") => {
@@ -1369,10 +908,7 @@ export default function ChatScreen() {
         setPendingPermission(null);
       } catch (error) {
         console.error("[PermissionResponse] Failed to send:", error);
-        Alert.alert(
-          "Permission response failed",
-          "The request was not delivered. Please try again.",
-        );
+        showError("The permission response was not delivered. Please try again.");
       } finally {
         setIsRespondingToPermission(false);
       }
@@ -1398,10 +934,7 @@ export default function ChatScreen() {
         setPendingQuestion(null);
       } catch (error) {
         console.error("[QuestionResponse] Failed to send:", error);
-        Alert.alert(
-          "Question response failed",
-          "The answers were not delivered. Please try again.",
-        );
+        showError("The answers were not delivered. Please try again.");
       } finally {
         setIsRespondingToQuestion(false);
       }
@@ -1409,10 +942,14 @@ export default function ChatScreen() {
     [pendingQuestion],
   );
 
+  // Phase 3: Use a ref for displayedMessages so renderMessage stays stable
+  const displayedMessagesRef = React.useRef(displayedMessages);
+  displayedMessagesRef.current = displayedMessages;
+
   const renderMessage = React.useCallback(
     ({ item, index }: { item: SessionMessage; index: number }) => {
       const responseSummaryContext = getAssistantResponseSummaryContext(
-        displayedMessages,
+        displayedMessagesRef.current,
         index,
       );
 
@@ -1420,31 +957,16 @@ export default function ChatScreen() {
         <MessageRow
           message={item}
           responseSummary={responseSummaryContext}
-          borderColor={borderColor}
-          metaColor={metaColor}
-          userBubble={userBubble}
-          assistantBubble={assistantBubble}
-          systemBubble={systemBubble}
+          borderColor={colors.borderColor}
+          metaColor={colors.metaColor}
+          userBubble={colors.userBubble}
+          assistantBubble={colors.assistantBubble}
+          systemBubble={colors.systemBubble}
           textColor={theme.colors.onSurface}
         />
       );
     },
-    [
-      borderColor,
-      metaColor,
-      userBubble,
-      assistantBubble,
-      systemBubble,
-      theme.colors.onSurface,
-      displayedMessages,
-    ],
-  );
-
-  const handleInputSelectionChange = React.useCallback(
-    (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
-      setInputSelection(event.nativeEvent.selection);
-    },
-    [],
+    [colors, theme.colors.onSurface],
   );
 
   const handleScroll = React.useCallback(
@@ -1462,53 +984,17 @@ export default function ChatScreen() {
     flatListRef.current?.scrollToEnd({ animated: true });
   }, [flatListRef]);
 
-  const handleComposerLayout = React.useCallback((event: LayoutChangeEvent) => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setComposerLayoutHeight((current) =>
-      current === nextHeight ? current : nextHeight,
-    );
+  // Phase 4: Stable callbacks for drawers
+  const handleOpenDrawer = React.useCallback(() => setShowDrawer(true), []);
+  const handleCloseDrawer = React.useCallback(() => setShowDrawer(false), []);
+  const handleOpenGitDrawer = React.useCallback(() => setShowGitDrawer(true), []);
+  const handleCloseGitDrawer = React.useCallback(() => setShowGitDrawer(false), []);
+  const handleOpenFileDrawer = React.useCallback(() => setShowFileDrawer(true), []);
+  const handleCloseFileDrawer = React.useCallback(() => setShowFileDrawer(false), []);
+  const handleNewSession = React.useCallback(() => {
+    setActiveSessionId(null);
+    setOptimisticMessage(null);
   }, []);
-
-  const handleSelectFileSuggestion = React.useCallback(
-    (match: ProjectFileMatch) => {
-      if (!activeMention) {
-        return;
-      }
-
-      const replacement = `"${match.path}" `;
-      const nextText = [
-        inputText.slice(0, activeMention.start),
-        replacement,
-        inputText.slice(activeMention.end),
-      ].join("");
-      const cursor = activeMention.start + replacement.length;
-
-      setInputText(nextText);
-      setInputSelection({ start: cursor, end: cursor });
-    },
-    [activeMention, inputText],
-  );
-
-  const handleSelectSkillSuggestion = React.useCallback(
-    (skill: Skill) => {
-      if (!activeSlash) {
-        return;
-      }
-
-      const slashIndex = inputText.indexOf("/");
-      const replacement = `/${skill.name} `;
-      const nextText = [
-        inputText.slice(0, slashIndex),
-        replacement,
-        inputText.slice(slashIndex + 1 + activeSlash.query.length),
-      ].join("");
-      const cursor = slashIndex + replacement.length;
-
-      setInputText(nextText);
-      setInputSelection({ start: cursor, end: cursor });
-    },
-    [activeSlash, inputText],
-  );
 
   return (
     <SafeAreaView
@@ -1525,14 +1011,14 @@ export default function ChatScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open sessions drawer"
-          onPress={() => setShowDrawer(true)}
+          onPress={handleOpenDrawer}
           style={[
             styles.headerButton,
             {
               backgroundColor: theme.dark
                 ? "rgba(17, 24, 39, 0.92)"
                 : "rgba(255, 255, 255, 0.96)",
-              borderColor,
+              borderColor: colors.borderColor,
             },
           ]}
         >
@@ -1545,15 +1031,12 @@ export default function ChatScreen() {
         <HeaderActionMenu
           menuExpanded={menuExpanded}
           isRefreshing={isRefreshing}
-          borderColor={borderColor}
+          borderColor={colors.borderColor}
           onToggleMenu={handleToggleMenu}
           onRefreshPress={handleRefreshPress}
-          onOpenGitDrawer={() => setShowGitDrawer(true)}
-          onOpenFileDrawer={() => setShowFileDrawer(true)}
-          onNewSession={() => {
-            setActiveSessionId(null);
-            setOptimisticMessage(null);
-          }}
+          onOpenGitDrawer={handleOpenGitDrawer}
+          onOpenFileDrawer={handleOpenFileDrawer}
+          onNewSession={handleNewSession}
         />
       </View>
 
@@ -1590,7 +1073,7 @@ export default function ChatScreen() {
               </Text>
               <Pressable
                 onPress={() => refetch()}
-                style={[styles.retryButton, { borderColor }]}
+                style={[styles.retryButton, { borderColor: colors.borderColor }]}
               >
                 <Text style={{ color: theme.colors.primary }}>Retry</Text>
               </Pressable>
@@ -1613,9 +1096,10 @@ export default function ChatScreen() {
               maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               onScroll={handleScroll}
               scrollEventThrottle={16}
-              removeClippedSubviews={Platform.OS === "android"}
-              maxToRenderPerBatch={10}
-              windowSize={10}
+              removeClippedSubviews
+              maxToRenderPerBatch={5}
+              updateCellsBatchingPeriod={50}
+              windowSize={7}
               initialNumToRender={15}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
@@ -1623,7 +1107,7 @@ export default function ChatScreen() {
                     variant="bodyLarge"
                     style={{ color: theme.colors.onSurfaceVariant }}
                   >
-                    {activeProject
+                    {session.activeProject
                       ? "Start a conversation..."
                       : "Select a project to begin"}
                   </Text>
@@ -1641,9 +1125,9 @@ export default function ChatScreen() {
                     thinkingContent={footerThinkingContent}
                     activities={footerActivities}
                     phase={footerPhase}
-                    borderColor={borderColor}
-                    assistantBubble={assistantBubble}
-                    metaColor={metaColor}
+                    borderColor={colors.borderColor}
+                    assistantBubble={colors.assistantBubble}
+                    metaColor={colors.metaColor}
                   />
                 ) : null
               }
@@ -1670,7 +1154,7 @@ export default function ChatScreen() {
               styles.scrollToBottomButton,
               {
                 backgroundColor: theme.dark ? "#1E293B" : "#FFFFFF",
-                borderColor,
+                borderColor: colors.borderColor,
                 shadowColor: theme.dark ? "#000" : "#000",
                 bottom:
                   keyboardHeight > 0
@@ -1687,119 +1171,112 @@ export default function ChatScreen() {
           </Pressable>
         )}
         <ChatComposer
-          activeProject={Boolean(activeProject)}
-          activeAgentName={activeAgent?.name ?? "Default agent"}
-          activeProjectName={activeProject?.name ?? "No project"}
-          borderColor={borderColor}
-          branchName={currentBranch}
-          fileSuggestions={fileSuggestions}
-          fileSuggestionsLoading={fileSuggestionsLoading}
-          inputHeight={inputHeight}
-          inputSelection={inputSelection}
-          inputText={inputText}
+          activeProject={Boolean(session.activeProject)}
+          activeAgentName={session.activeAgent?.name ?? "Default agent"}
+          activeProjectName={session.activeProject?.name ?? "No project"}
+          borderColor={colors.borderColor}
+          branchName={session.currentBranch}
+          fileSuggestions={composer.fileSuggestions}
+          fileSuggestionsLoading={composer.fileSuggestionsLoading}
+          inputHeight={composer.inputHeight}
+          inputSelection={composer.inputSelection}
+          inputText={composer.inputText}
           isSending={isSessionSending}
-          onPressAgent={() => setShowAgentSheet(true)}
-          onPressBranch={() => setShowBranchSheet(true)}
-          mentionQuery={activeMention?.query ?? ""}
-          metaColor={metaColor}
-          onChangeText={setInputText}
-          onComposerLayout={handleComposerLayout}
-          onInputHeightChange={setInputHeight}
-          onPressModel={() => setShowProviderSheet(true)}
-          onPressProject={() => setShowProjectSheet(true)}
-          onSelectionChange={handleInputSelectionChange}
-          onSelectFileSuggestion={handleSelectFileSuggestion}
+          onPressAgent={session.handleOpenAgentSheet}
+          onPressBranch={session.handleOpenBranchSheet}
+          mentionQuery={composer.activeMention?.query ?? ""}
+          metaColor={colors.metaColor}
+          onChangeText={composer.setInputText}
+          onComposerLayout={composer.handleComposerLayout}
+          onInputHeightChange={composer.setInputHeight}
+          onPressModel={session.handleOpenProviderSheet}
+          onPressProject={session.handleOpenProjectSheet}
+          onSelectionChange={composer.handleInputSelectionChange}
+          onSelectFileSuggestion={composer.handleSelectFileSuggestion}
           onSend={() => void handleSend()}
           onAbort={handleAbort}
-          selectedModelDisplayName={activeModel ? activeModel.name : "No model"}
-          showMentionSuggestions={showMentionSuggestions}
-          showSkillSuggestions={showSkillSuggestions}
-          skillSuggestions={skillSuggestions}
-          skillSuggestionsLoading={skillSuggestionsLoading}
-          onSelectSkillSuggestion={handleSelectSkillSuggestion}
-          trimmedInput={trimmedInput}
+          selectedModelDisplayName={session.activeModel ? session.activeModel.name : "No model"}
+          showMentionSuggestions={composer.showMentionSuggestions}
+          showSkillSuggestions={composer.showSkillSuggestions}
+          skillSuggestions={composer.skillSuggestions}
+          skillSuggestionsLoading={composer.skillSuggestionsLoading}
+          onSelectSkillSuggestion={composer.handleSelectSkillSuggestion}
+          trimmedInput={composer.trimmedInput}
+        />
+        <ErrorToast
+          visible={errorToastVisible}
+          message={errorToastMessage}
+          onDismiss={() => setErrorToastVisible(false)}
+          bottomOffset={
+            keyboardHeight > 0
+              ? keyboardHeight + measuredComposerHeight + KEYBOARD_ADDITIONAL_PADDING
+              : measuredComposerHeight
+          }
         />
       </View>
 
       <ProjectSelectionSheet
-        visible={showProjectSheet}
-        projects={sortedProjects}
-        activeProjectId={activeProject?.id}
-        loading={projectsLoading}
-        onClose={() => setShowProjectSheet(false)}
+        visible={session.showProjectSheet}
+        projects={session.sortedProjects}
+        activeProjectId={session.activeProject?.id}
+        loading={session.projectsLoading}
+        onClose={session.handleCloseProjectSheet}
         onSelectProject={(item) => {
-          if (item.id !== activeProject?.id) {
+          if (item.id !== session.activeProject?.id) {
             activeSessionIdRef.current = null;
             clearPendingStreamState();
-            setActiveProject(item);
+            session.setActiveProject(item);
             setActiveSessionId(null);
             setOptimisticMessage(null);
             hasScrolledToBottom.current = false;
           }
+          session.handleCloseProjectSheet();
         }}
       />
 
       <ModelSelectionSheet
-        visible={showProviderSheet}
-        models={sortedModels}
-        activeModelId={activeModel?.id}
-        loading={providersLoading}
-        searchQuery={modelSearchQuery}
-        onSearchChange={setModelSearchQuery}
-        onClose={() => {
-          setShowProviderSheet(false);
-          setModelSearchQuery("");
-        }}
-        onSelectModel={(item) => {
-          setActiveModel(item);
-          setShowProviderSheet(false);
-          setModelSearchQuery("");
-        }}
+        visible={session.showProviderSheet}
+        models={session.sortedModels}
+        activeModelId={session.activeModel?.id}
+        loading={session.providersLoading}
+        searchQuery={session.modelSearchQuery}
+        onSearchChange={session.setModelSearchQuery}
+        onClose={session.handleCloseProviderSheet}
+        onSelectModel={session.handleSelectModel}
       />
 
       <AgentSelectionSheet
-        visible={showAgentSheet}
-        agents={sortedAgents}
-        activeAgentName={activeAgent?.name}
-        loading={agentsLoading}
-        searchQuery={agentSearchQuery}
-        onSearchChange={setAgentSearchQuery}
-        onClose={() => {
-          setShowAgentSheet(false);
-          setAgentSearchQuery("");
-        }}
-        onSelectAgent={(item) => {
-          setActiveAgent(item);
-          setShowAgentSheet(false);
-          setAgentSearchQuery("");
-        }}
+        visible={session.showAgentSheet}
+        agents={session.sortedAgents}
+        activeAgentName={session.activeAgent?.name}
+        loading={session.agentsLoading}
+        searchQuery={session.agentSearchQuery}
+        onSearchChange={session.setAgentSearchQuery}
+        onClose={session.handleCloseAgentSheet}
+        onSelectAgent={session.handleSelectAgent}
         getAgentSubtitle={getAgentSubtitle}
       />
 
       <BranchSelectionSheet
-        visible={showBranchSheet}
-        branches={sortedBranches}
-        currentBranch={currentBranch}
-        loading={branchesLoading}
-        searchQuery={branchSearchQuery}
-        onSearchChange={setBranchSearchQuery}
-        onClose={() => {
-          setShowBranchSheet(false);
-          setBranchSearchQuery("");
-        }}
+        visible={session.showBranchSheet}
+        branches={session.sortedBranches}
+        currentBranch={session.currentBranch}
+        loading={session.branchesLoading}
+        searchQuery={session.branchSearchQuery}
+        onSearchChange={session.setBranchSearchQuery}
+        onClose={session.handleCloseBranchSheet}
         onSelectBranch={async (item) => {
-          if (item.name !== currentBranch) {
-            await switchBranchMutation.mutateAsync(item.name);
+          if (item.name !== session.currentBranch) {
+            await session.switchBranchMutation.mutateAsync(item.name);
           }
-          setShowBranchSheet(false);
-          setBranchSearchQuery("");
+          session.handleCloseBranchSheet();
         }}
       />
 
       <SessionDrawer
         visible={showDrawer}
-        onClose={() => setShowDrawer(false)}
-        activeProject={activeProject}
+        onClose={handleCloseDrawer}
+        activeProject={session.activeProject}
         activeSessionId={activeSessionId}
         onSelectSession={(sessionId) => {
           if (sessionId === null) {
@@ -1820,27 +1297,27 @@ export default function ChatScreen() {
 
       <GitDrawer
         visible={showGitDrawer}
-        onClose={() => setShowGitDrawer(false)}
-        activeProject={activeProject}
-        borderColor={borderColor}
-        metaColor={metaColor}
-        backgroundColor={sheetBg}
+        onClose={handleCloseGitDrawer}
+        activeProject={session.activeProject}
+        borderColor={colors.borderColor}
+        metaColor={colors.metaColor}
+        backgroundColor={colors.sheetBg}
       />
 
       <FileDrawer
         visible={showFileDrawer}
-        onClose={() => setShowFileDrawer(false)}
-        activeProject={activeProject}
-        borderColor={borderColor}
-        metaColor={metaColor}
-        backgroundColor={sheetBg}
+        onClose={handleCloseFileDrawer}
+        activeProject={session.activeProject}
+        borderColor={colors.borderColor}
+        metaColor={colors.metaColor}
+        backgroundColor={colors.sheetBg}
       />
 
       {/* Message queue temporarily disabled
       <QueueDrawer
         visible={showQueueDrawer}
         onClose={() => setShowQueueDrawer(false)}
-        activeProject={activeProject}
+        activeProject={session.activeProject}
         activeSessionId={activeSessionId}
       />
       */}
