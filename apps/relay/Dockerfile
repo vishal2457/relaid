@@ -28,7 +28,7 @@ COPY --from=build /workspace/apps/relay/dist apps/relay/dist
 COPY --from=build /workspace/apps/relay/drizzle apps/relay/drizzle
 COPY --from=build /workspace/apps/relay/package.json apps/relay/package.json
 
-RUN mkdir -p /data /logs && chown -R node:node /data /logs /workspace
+RUN mkdir -p /logs && chown -R node:node /logs /workspace
 
 USER node
 WORKDIR /workspace/apps/relay
@@ -36,10 +36,9 @@ WORKDIR /workspace/apps/relay
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV HOST=0.0.0.0
-ENV DB_PATH=/data/chat-server.db
 ENV LOGS_DIR=/logs
 
-VOLUME ["/data", "/logs"]
+VOLUME ["/logs"]
 EXPOSE 3001
 
 CMD ["node", "dist/start.js"]

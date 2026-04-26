@@ -1,28 +1,26 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
 
-export const users = sqliteTable("users", {
+export const users = pgTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
   name: text("name"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const localServers = sqliteTable("local_servers", {
+export const localServers = pgTable("local_servers", {
   id: text("id").primaryKey(),
   userId: text("user_id")
     .notNull()
     .references(() => users.id),
   name: text("name").notNull(),
   serverSecretHash: text("server_secret_hash"),
-  lastConnected: integer("last_connected", { mode: "timestamp" }),
-  isConnected: integer("is_connected", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  lastConnected: timestamp("last_connected"),
+  isConnected: boolean("is_connected").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const mobileDevices = sqliteTable("mobile_devices", {
+export const mobileDevices = pgTable("mobile_devices", {
   id: text("id").primaryKey(),
   serverId: text("server_id")
     .notNull()
@@ -30,32 +28,32 @@ export const mobileDevices = sqliteTable("mobile_devices", {
   name: text("name").notNull(),
   platform: text("platform"),
   tokenHash: text("token_hash").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastSeenAt: integer("last_seen_at", { mode: "timestamp" }),
-  revokedAt: integer("revoked_at", { mode: "timestamp" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at"),
+  revokedAt: timestamp("revoked_at"),
 });
 
-export const pairingSessions = sqliteTable("pairing_sessions", {
+export const pairingSessions = pgTable("pairing_sessions", {
   id: text("id").primaryKey(),
   serverId: text("server_id")
     .notNull()
     .references(() => localServers.id),
   secretHash: text("secret_hash").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  usedAt: integer("used_at", { mode: "timestamp" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
   claimedDeviceId: text("claimed_device_id").references(() => mobileDevices.id),
 });
 
-export const expoPushTokens = sqliteTable("expo_push_tokens", {
+export const expoPushTokens = pgTable("expo_push_tokens", {
   id: text("id").primaryKey(),
   userId: text("user_id")
     .notNull()
     .references(() => users.id),
   token: text("token").notNull(),
   platform: text("platform").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export type User = typeof users.$inferSelect;
@@ -72,6 +70,3 @@ export type NewMobileDevice = typeof mobileDevices.$inferInsert;
 
 export type PairingSession = typeof pairingSessions.$inferSelect;
 export type NewPairingSession = typeof pairingSessions.$inferInsert;
-
-export { githubTokens } from "./github-schema";
-export type { GithubToken, NewGithubToken } from "./github-schema";

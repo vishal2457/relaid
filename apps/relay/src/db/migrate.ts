@@ -1,29 +1,37 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
-import fs from "fs";
-import os from "os";
+import pg from "pg";
+const { Pool } = pg;
+import { drizzle, type PgRemoteDatabase } from "drizzle-orm/pg-proxy";
 import path from "path";
+import fs from "fs";
 
-const dbPath = process.env.DB_PATH
-  ? path.resolve(process.cwd(), process.env.DB_PATH)
-  : path.join(os.homedir(), "maximus-chat-data", "chat-server.db");
+const databaseUrl = process.env.DATABASE_URL || "postgres://localhost:5432/relay";
 
-const dbDir = path.dirname(dbPath);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
+const pool = new Pool({
+  connectionString: databaseUrl,
+});
+
+const query = async (sql: string, params?: unknown[]) => {
+  const result = await pool.query(sql, params);
+  return { rows: result.rows };
+};
+
+const db = drizzle(query);
 
 const migrationsFolder = path.resolve(process.cwd(), "drizzle");
-const client = createClient({ url: `file:${dbPath}` });
-const db = drizzle(client);
 
 export async function runMigrations() {
   try {
-    await migrate(db, { migrationsFolder });
-    console.log(`Database migrations applied to ${dbPath}`);
+    const migrationFiles = fs.readdirSync(migrationsFolder).sort();
+    for (const file of migrationFiles) {
+      if (file.endsWith(".sql")) {
+        const sql = fs.readFileSync(path.join(migrationsFolder, file), "utf-8");
+        await pool.query(sql);
+        console.log(`Applied migration: ${file}`);
+      }
+    }
+    console.log(`Database migrations applied`);
   } finally {
-    client.close();
+    await pool.end();
   }
 }
 

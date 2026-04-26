@@ -1,65 +1,48 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import path from "path";
-import fs from "fs";
-import os from "os";
+import pg from "pg";
+const { Pool } = pg;
+import { drizzle } from "drizzle-orm/pg-proxy";
 import * as schema from "./schema";
+import * as githubSchema from "./github-schema";
 
-let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
-let dbClient: ReturnType<typeof createClient> | null = null;
-let githubSchemaReady: Promise<void> | null = null;
+const schemaWithGithub = {
+  ...schema,
+  githubTokens: githubSchema.githubTokens,
+};
 
-async function ensureGithubTokensTable(
-  client: ReturnType<typeof createClient>,
-): Promise<void> {
-  await client.execute(`
-    CREATE TABLE IF NOT EXISTS github_tokens (
-      id TEXT PRIMARY KEY NOT NULL,
-      user_id TEXT NOT NULL UNIQUE,
-      encrypted_token TEXT NOT NULL,
-      github_username TEXT NOT NULL,
-      scope TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-  `);
-}
+type Pool = pg.Pool;
 
-export function ensureGithubSchema(): Promise<void> {
-  if (!dbClient) {
-    getDb();
-  }
-
-  if (!dbClient) {
-    throw new Error("Database client is not initialized");
-  }
-
-  if (!githubSchemaReady) {
-    githubSchemaReady = ensureGithubTokensTable(dbClient);
-  }
-
-  return githubSchemaReady;
-}
+let db: ReturnType<typeof drizzle<typeof schemaWithGithub>> | null = null;
+let dbPool: Pool | null = null;
 
 export function getDb() {
   if (db) {
     return db;
   }
 
-  const dbPath = process.env.DB_PATH
-    ? path.resolve(process.cwd(), process.env.DB_PATH)
-    : path.join(os.homedir(), "maximus-chat-data", "chat-server.db");
+  const databaseUrl = process.env.DATABASE_URL || "postgres://localhost:5432/relay";
 
-  const dbDir = path.dirname(dbPath);
-  if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
-  }
+  console.log("Database URL:", databaseUrl);
 
-  dbClient = createClient({ url: `file:${dbPath}` });
-  db = drizzle(dbClient, { schema });
+  dbPool = new Pool({
+    connectionString: databaseUrl,
+  });
+
+  const query = async (sql: string, params?: unknown[]) => {
+    const result = await dbPool!.query(sql, params);
+    return { rows: result.rows };
+  };
+
+  db = drizzle(query, { schema: schemaWithGithub });
 
   return db;
 }
 
-export * from "./schema";
+export type { User, NewUser } from "./schema";
+export type { LocalServer, NewLocalServer } from "./schema";
+export type { ExpoPushToken, NewExpoPushToken } from "./schema";
+export type { MobileDevice, NewMobileDevice } from "./schema";
+export type { PairingSession, NewPairingSession } from "./schema";
+export type { GithubToken, NewGithubToken } from "./github-schema";
+
+export { users, localServers, mobileDevices, pairingSessions, expoPushTokens } from "./schema";
+export { githubTokens } from "./github-schema";
