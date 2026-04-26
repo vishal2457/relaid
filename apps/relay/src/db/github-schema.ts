@@ -1,7 +1,7 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { users } from "./schema";
 
-export const githubTokens = sqliteTable("github_tokens", {
+export const githubTokens = pgTable("github_tokens", {
   id: text("id").primaryKey(),
   userId: text("user_id")
     .notNull()
@@ -10,8 +10,8 @@ export const githubTokens = sqliteTable("github_tokens", {
   encryptedToken: text("encrypted_token").notNull(),
   githubUsername: text("github_username").notNull(),
   scope: text("scope"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export type GithubToken = typeof githubTokens.$inferSelect;

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { ensureGithubSchema, getDb } from "../db";
+import { getDb } from "../db";
 import { githubTokens } from "../db/github-schema";
 import { encrypt, decrypt } from "../utils/crypto";
 import { logger } from "../shared/logger";
@@ -69,7 +69,7 @@ function requireUserId(req: Request): string {
 async function getDecryptedGithubToken(
   userId: string,
 ): Promise<string> {
-  await ensureGithubSchema();
+  await getDb();
   const db = getDb();
   const [row] = await db
     .select()
@@ -93,7 +93,7 @@ async function upsertGithubToken(
   username: string,
   scope: string,
 ): Promise<void> {
-  await ensureGithubSchema();
+  await getDb();
   const db = getDb();
   const now = new Date();
   const encryptedToken = encrypt(accessToken);
@@ -287,7 +287,7 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
 router.get("/status", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req);
-    await ensureGithubSchema();
+    await getDb();
     const db = getDb();
     const [row] = await db
       .select({ githubUsername: githubTokens.githubUsername })
@@ -310,7 +310,7 @@ router.get("/status", async (req: Request, res: Response) => {
 router.delete("/session", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req);
-    await ensureGithubSchema();
+    await getDb();
     const db = getDb();
 
     await db.delete(githubTokens).where(eq(githubTokens.userId, userId));

@@ -23,7 +23,7 @@ import { skillsRouter } from "./routes/skills";
 import { githubRouter } from "./routes/github";
 import { logger, stream } from "./shared/logger";
 import { getDb } from "./db";
-import { expoPushTokens, localServers } from "./db/schema";
+import { expoPushTokens, localServers, users } from "./db/schema";
 import { authenticateMobileAccessToken, getBearerToken } from "./services/auth";
 import { RouteError } from "./services/local-server-proxy";
 
@@ -147,6 +147,18 @@ app.use("/api/mobile", mobileActionsRouter);
 
 const io = createSocketServer(httpServer);
 
+async function verifyDbConnection() {
+  try {
+    const db = getDb();
+    await db.select().from(users).limit(1);
+    logger.info("Database connected");
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Database connection failed", { error: errMsg });
+    process.exit(1);
+  }
+}
+
 async function cleanupStaleConnections() {
   try {
     const db = getDb();
@@ -160,6 +172,8 @@ async function cleanupStaleConnections() {
     logger.error("Failed to cleanup stale connections", { error: errMsg });
   }
 }
+
+verifyDbConnection();
 
 cleanupStaleConnections();
 
