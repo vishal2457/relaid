@@ -49,14 +49,24 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           RELAY_IMAGE: ${{ env.RELAY_IMAGE }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+          GITHUB_REDIRECT_URI: ${{ secrets.GITHUB_REDIRECT_URI }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          APP_DEEP_LINK_SCHEME: ${{ secrets.APP_DEEP_LINK_SCHEME }}
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+          SOCKET_REQUEST_TIMEOUT_MS: ${{ secrets.SOCKET_REQUEST_TIMEOUT_MS }}
+          PAIRING_SESSION_TTL_MS: ${{ secrets.PAIRING_SESSION_TTL_MS }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script_stop: true
-          command_timeout: 30m
-          envs: RELAY_IMAGE
+          envs: RELAY_IMAGE,DATABASE_URL,ENCRYPTION_KEY,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,GITHUB_REDIRECT_URI,PUBLIC_BASE_URL,APP_DEEP_LINK_SCHEME,CORS_ORIGIN,SOCKET_REQUEST_TIMEOUT_MS,PAIRING_SESSION_TTL_MS,LOG_LEVEL
           script: |
             set -euo pipefail
 
