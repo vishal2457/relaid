@@ -1,6 +1,6 @@
 import pg from "pg";
 const { Pool } = pg;
-import { drizzle } from "drizzle-orm/pg-proxy";
+import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
 import * as githubSchema from "./github-schema";
 
@@ -27,12 +27,7 @@ export function getDb() {
     connectionString: databaseUrl,
   });
 
-  const query = async (sql: string, params?: unknown[]) => {
-    const result = await dbPool!.query(sql, params);
-    return { rows: result.rows };
-  };
-
-  db = drizzle(query, { schema: schemaWithGithub });
+  db = drizzle(dbPool, { schema: schemaWithGithub });
 
   return db;
 }

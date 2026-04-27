@@ -27,9 +27,13 @@ func Register(group *echo.Group) {
 func (r *RelayServer) getStoredURL(c echo.Context) error {
 	url, err := r.keychain.Get("relay_server_url")
 	if err != nil {
+		url = relay.DefaultRelayURL
+	}
+	url = relay.NormalizeRelayURL(url)
+	if url == "" {
 		return c.JSON(http.StatusOK, map[string]any{
 			"success": true,
-			"result":  "",
+			"result":  relay.NormalizeRelayURL(relay.DefaultRelayURL),
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{
@@ -49,18 +53,32 @@ func (r *RelayServer) storeURL(c echo.Context) error {
 		})
 	}
 
-	if err := relay.PingRelayHealth(req.URL); err != nil {
+	normalizedURL := relay.NormalizeRelayURL(req.URL)
+	if normalizedURL == "" {
+		normalizedURL = relay.NormalizeRelayURL(relay.DefaultRelayURL)
+	}
+
+	if err := relay.PingRelayHealth(normalizedURL); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{
 			"success": false,
 			"error":   "relay server is not reachable",
 		})
 	}
 
-	if err := r.keychain.Set("relay_server_url", req.URL); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]any{
-			"success": false,
-			"error":   "failed to store URL",
-		})
+	if normalizedURL == relay.NormalizeRelayURL(relay.DefaultRelayURL) {
+		if err := r.keychain.Delete("relay_server_url"); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]any{
+				"success": false,
+				"error":   "failed to clear URL",
+			})
+		}
+	} else {
+		if err := r.keychain.Set("relay_server_url", normalizedURL); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]any{
+				"success": false,
+				"error":   "failed to store URL",
+			})
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -70,13 +88,8 @@ func (r *RelayServer) storeURL(c echo.Context) error {
 
 func (r *RelayServer) ping(c echo.Context) error {
 	url, err := r.keychain.Get("relay_server_url")
-	if err != nil || url == "" {
-		return c.JSON(http.StatusOK, map[string]any{
-			"success": true,
-			"result": map[string]any{
-				"connected": false,
-			},
-		})
+	if err != nil || relay.NormalizeRelayURL(url) == "" {
+		url = relay.DefaultRelayURL
 	}
 
 	if err := relay.PingRelayHealth(url); err != nil {
@@ -98,11 +111,8 @@ func (r *RelayServer) ping(c echo.Context) error {
 
 func (r *RelayServer) createPairingSession(c echo.Context) error {
 	url, err := r.keychain.Get("relay_server_url")
-	if err != nil || url == "" {
-		return c.JSON(http.StatusBadRequest, map[string]any{
-			"success": false,
-			"error":   "relay URL not configured",
-		})
+	if err != nil || relay.NormalizeRelayURL(url) == "" {
+		url = relay.DefaultRelayURL
 	}
 
 	creds, err := relay.LoadOrCreateDeviceCredentials("", "")

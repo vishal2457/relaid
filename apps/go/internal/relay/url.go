@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const DefaultRelayURL = "https://relaid.derived.dev"
+
 func NormalizeRelayURL(rawURL string) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {

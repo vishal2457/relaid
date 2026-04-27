@@ -14,6 +14,10 @@ import {
   startGithubOAuth,
   type GithubSession,
 } from "@/src/lib/api/github";
+import {
+  getConnectedLocalServers,
+  type ConnectedLocalServer,
+} from "@/src/lib/api/local-servers";
 import { disconnectSseClient } from "@/src/lib/sse";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
@@ -30,6 +34,7 @@ import {
   Button,
   Card,
   IconButton,
+  ActivityIndicator,
   Text,
   TextInput,
   useTheme,
@@ -53,6 +58,13 @@ export default function SettingsScreen() {
   );
   const [githubHydrated, setGithubHydrated] = useState(false);
   const [githubConnecting, setGithubConnecting] = useState(false);
+  const [connectedServers, setConnectedServers] = useState<ConnectedLocalServer[]>(
+    [],
+  );
+  const [connectedServersLoading, setConnectedServersLoading] = useState(false);
+  const [connectedServersError, setConnectedServersError] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +104,31 @@ export default function SettingsScreen() {
       cancelled = true;
     };
   }, [isPaired]);
+
+  const loadConnectedServers = useCallback(async () => {
+    if (!isPaired) {
+      setConnectedServers([]);
+      setConnectedServersError(null);
+      return;
+    }
+
+    try {
+      setConnectedServersLoading(true);
+      setConnectedServersError(null);
+      const servers = await getConnectedLocalServers();
+      setConnectedServers(servers);
+    } catch (error) {
+      console.error("Failed to load connected local servers", error);
+      setConnectedServersError("Unable to load connected local servers");
+    } finally {
+      setConnectedServersLoading(false);
+    }
+  }, [isPaired]);
+
+  useEffect(() => {
+    if (!showPairingSheet) return;
+    void loadConnectedServers();
+  }, [loadConnectedServers, showPairingSheet]);
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, "");
@@ -166,6 +203,14 @@ export default function SettingsScreen() {
   }, []);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
+
+  const formatConnectedTime = useCallback((value: string | null) => {
+    if (!value) return null;
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleString();
+  }, []);
 
   return (
     <SafeAreaView
@@ -286,24 +331,72 @@ export default function SettingsScreen() {
         onClose={() => setShowPairingSheet(false)}
         enableDynamicSizing
       >
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text variant="bodyLarge" style={styles.settingTitle}>
-              Status
-            </Text>
-            <Text variant="bodySmall" style={styles.settingDescription}>
-              {isPaired
-                ? `${session?.serverName || "Paired server"} is connected to this phone`
-                : "This phone is not paired yet"}
-            </Text>
+        {isPaired ? (
+          <View style={styles.connectedServersSection}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text variant="bodyLarge" style={styles.settingTitle}>
+                  Connected Local Servers
+                </Text>
+                <Text variant="bodySmall" style={styles.settingDescription}>
+                  Servers currently online through this relay
+                </Text>
+              </View>
+              <IconButton
+                icon="refresh"
+                size={20}
+                onPress={() => void loadConnectedServers()}
+                disabled={connectedServersLoading}
+              />
+            </View>
+
+            {connectedServersLoading ? (
+              <View style={styles.connectedServersLoadingRow}>
+                <ActivityIndicator size="small" />
+                <Text variant="bodySmall" style={styles.settingDescription}>
+                  Loading connected servers...
+                </Text>
+              </View>
+            ) : connectedServersError ? (
+              <Text variant="bodySmall" style={styles.metaText}>
+                {connectedServersError}
+              </Text>
+            ) : connectedServers.length > 0 ? (
+              connectedServers.map((server) => {
+                const lastConnected = formatConnectedTime(server.lastConnected);
+
+                return (
+                  <View
+                    key={server.id}
+                    style={[
+                      styles.connectedServerItem,
+                      { borderColor },
+                    ]}
+                  >
+                    <Text variant="bodyMedium" style={styles.connectedServerName}>
+                      {server.name}
+                    </Text>
+                    <Text variant="bodySmall" style={styles.settingDescription}>
+                      Server ID: {server.id}
+                    </Text>
+                    {lastConnected ? (
+                      <Text variant="bodySmall" style={styles.settingDescription}>
+                        Last connected: {lastConnected}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })
+            ) : (
+              <Text variant="bodySmall" style={styles.metaText}>
+                No local servers are currently connected.
+              </Text>
+            )}
           </View>
-        </View>
+        ) : null}
 
         {isPaired ? (
           <>
-            <Text variant="bodySmall" style={styles.metaText}>
-              Server ID: {session?.serverId}
-            </Text>
             <Text variant="bodySmall" style={styles.metaText}>
               Device ID: {session?.deviceId}
             </Text>
@@ -455,6 +548,25 @@ const styles = StyleSheet.create({
   metaText: {
     marginTop: 10,
     opacity: 0.7,
+  },
+  connectedServersSection: {
+    marginTop: 20,
+  },
+  connectedServersLoadingRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  connectedServerItem: {
+    marginTop: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+  },
+  connectedServerName: {
+    fontWeight: "600",
+    marginBottom: 4,
   },
   inputOutline: {
     borderRadius: 12,

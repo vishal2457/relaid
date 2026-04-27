@@ -123,11 +123,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) startRelayClient() {
-	relayURL, err := a.keychain.Get(RELAY_URL_KEY)
-	if err != nil || relayURL == "" {
-		log.Println("relay: URL not configured, skipping relay connection")
-		return
-	}
+	relayURL := a.getEffectiveRelayURL()
 
 	creds, err := relay.LoadOrCreateDeviceCredentials(
 		os.Getenv("LOCAL_SERVER_ID"),
@@ -178,12 +174,20 @@ func (a *App) shutdown(ctx context.Context) {
 
 const RELAY_URL_KEY = "relay_server_url"
 
-func (a *App) GetStoredRelayURL() (string, error) {
+func (a *App) getEffectiveRelayURL() string {
 	url, err := a.keychain.Get(RELAY_URL_KEY)
-	if err != nil {
-		return "", nil
+	if err == nil {
+		normalizedURL := relay.NormalizeRelayURL(url)
+		if normalizedURL != "" {
+			return normalizedURL
+		}
 	}
-	return url, nil
+
+	return relay.NormalizeRelayURL(relay.DefaultRelayURL)
+}
+
+func (a *App) GetStoredRelayURL() (string, error) {
+	return a.getEffectiveRelayURL(), nil
 }
 
 func (a *App) StoreRelayURL(url string) error {
@@ -193,13 +197,22 @@ func (a *App) StoreRelayURL(url string) error {
 			log.Printf("relay: failed to clear stored relay URL: %v", err)
 		}
 		a.disconnectRelayClient()
-		return nil
+		normalizedURL = relay.NormalizeRelayURL(relay.DefaultRelayURL)
+	}
+
+	if normalizedURL == "" {
+		return fmt.Errorf("relay URL not configured")
 	}
 
 	if err := relay.PingRelayHealth(normalizedURL); err != nil {
 		return fmt.Errorf("relay server is not reachable: %w", err)
 	}
-	if err := a.keychain.Set(RELAY_URL_KEY, normalizedURL); err != nil {
+
+	if normalizedURL == relay.NormalizeRelayURL(relay.DefaultRelayURL) {
+		if err := a.keychain.Delete(RELAY_URL_KEY); err != nil {
+			log.Printf("relay: failed to clear stored relay URL: %v", err)
+		}
+	} else if err := a.keychain.Set(RELAY_URL_KEY, normalizedURL); err != nil {
 		return fmt.Errorf("failed to store URL: %w", err)
 	}
 
@@ -226,10 +239,7 @@ func (a *App) GetDeviceCredentials() (relay.DeviceCredentials, error) {
 }
 
 func (a *App) CreatePairingSession() (*relay.PairingSessionResponse, error) {
-	url, err := a.keychain.Get(RELAY_URL_KEY)
-	if err != nil || url == "" {
-		return nil, fmt.Errorf("relay URL not configured")
-	}
+	url := a.getEffectiveRelayURL()
 
 	creds, err := relay.LoadOrCreateDeviceCredentials(
 		os.Getenv("LOCAL_SERVER_ID"),
@@ -247,10 +257,7 @@ func (a *App) CreatePairingSession() (*relay.PairingSessionResponse, error) {
 }
 
 func (a *App) PingRelay() (bool, error) {
-	url, err := a.keychain.Get(RELAY_URL_KEY)
-	if err != nil || url == "" {
-		return false, nil
-	}
+	url := a.getEffectiveRelayURL()
 
 	if err := relay.PingRelayHealth(url); err != nil {
 		return false, nil
@@ -280,10 +287,7 @@ func (a *App) PingRelay() (bool, error) {
 }
 
 func (a *App) GetConnectedClients() ([]relay.MobileClient, error) {
-	url, err := a.keychain.Get(RELAY_URL_KEY)
-	if err != nil || url == "" {
-		return nil, fmt.Errorf("relay URL not configured")
-	}
+	url := a.getEffectiveRelayURL()
 
 	creds, err := relay.LoadOrCreateDeviceCredentials(
 		os.Getenv("LOCAL_SERVER_ID"),

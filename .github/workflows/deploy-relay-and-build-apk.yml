@@ -1,9 +1,9 @@
 name: Build Desktop Artifacts
 
 on:
-  push:
-    branches:
-      - main
+  release:
+    types:
+      - published
   workflow_dispatch:
 
 env:
@@ -20,9 +20,6 @@ jobs:
           - platform: linux/amd64
             os: ubuntu-latest
             output: linux-amd64
-          - platform: windows/amd64
-            os: windows-latest
-            output: windows-amd64
           - platform: darwin/amd64
             os: macos-13
             output: darwin-amd64
@@ -128,8 +125,8 @@ jobs:
 
       - name: Build desktop app
         run: |
-          VERSION="${{ github.ref_name }}"
-          if [[ "${{ github.ref_type }}" != "tag" ]]; then
+          VERSION="${{ github.event.release.tag_name || github.ref_name }}"
+          if [[ -z "$VERSION" ]]; then
             VERSION="dev-${GITHUB_SHA::7}"
           fi
 
@@ -187,19 +184,19 @@ jobs:
         run: |
           mkdir -p dist
 
-          REF_NAME="${{ github.ref_name }}"
-          REF_NAME="${REF_NAME//\//-}"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          ARTIFACT_BASENAME="relaid-desktop-${{ matrix.build.output }}-${REF_NAME}-${SHORT_SHA}"
+          VERSION="${{ github.event.release.tag_name || github.ref_name }}"
+          VERSION="${VERSION#v}"
+
+          if [[ -z "$VERSION" ]]; then
+            VERSION="dev-${GITHUB_SHA::7}"
+          fi
+
+          ARTIFACT_BASENAME="relaid-desktop-${{ matrix.build.output }}-v${VERSION}"
 
           case "${{ runner.os }}" in
             Linux)
               ARTIFACT_FILE="${ARTIFACT_BASENAME}.tar.gz"
               tar -C build/bin -czf "dist/${ARTIFACT_FILE}" Relaid
-              ;;
-            Windows)
-              ARTIFACT_FILE="${ARTIFACT_BASENAME}.exe"
-              cp build/bin/Relaid.exe "dist/${ARTIFACT_FILE}"
               ;;
             macOS)
               ARTIFACT_FILE="${ARTIFACT_BASENAME}.zip"
@@ -227,7 +224,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-desktop
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'release' && github.event.action == 'published'
     permissions:
       contents: write
     steps:

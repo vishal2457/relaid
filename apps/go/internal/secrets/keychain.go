@@ -40,7 +40,12 @@ func (k *Keychain) Get(key string) (string, error) {
 
 func (k *Keychain) Delete(key string) error {
 	cmd := exec.Command("security", "delete-generic-password", "-a", key, "-s", serviceName)
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if strings.Contains(message, "could not be found") {
+			return nil
+		}
 		return fmt.Errorf("failed to delete keychain value: %v", err)
 	}
 	return nil

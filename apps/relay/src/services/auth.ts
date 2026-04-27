@@ -354,6 +354,9 @@ export async function claimPairingSession(
     throw new RouteError(404, "Pairing session not found");
   }
 
+  console.log(pairingSession, "aring");
+  
+
   if (pairingSession.expiresAt.getTime() < Date.now()) {
     throw new RouteError(410, "Pairing session has expired");
   }
