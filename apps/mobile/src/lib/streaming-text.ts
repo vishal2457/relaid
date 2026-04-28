@@ -12,8 +12,9 @@ const DEFAULT_FLUSH_INTERVAL_MS = 32;
 export function useBufferedStreamingText(
   flushIntervalMs = DEFAULT_FLUSH_INTERVAL_MS,
 ): BufferedStreamingText {
-  const [text, setText] = React.useState("");
+  const [textState, setTextState] = React.useState({ generation: 0, text: "" });
   const textRef = React.useRef("");
+  const generationRef = React.useRef(0);
   const pendingChunkRef = React.useRef("");
   const flushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -30,7 +31,7 @@ export function useBufferedStreamingText(
     const nextText = textRef.current + pendingChunkRef.current;
     pendingChunkRef.current = "";
     textRef.current = nextText;
-    setText(nextText);
+    setTextState({ generation: generationRef.current, text: nextText });
   }, []);
 
   const scheduleFlush = React.useCallback(() => {
@@ -69,7 +70,8 @@ export function useBufferedStreamingText(
 
     pendingChunkRef.current = "";
     textRef.current = "";
-    setText("");
+    generationRef.current += 1;
+    setTextState({ generation: generationRef.current, text: "" });
   }, []);
 
   React.useEffect(() => {
@@ -81,7 +83,8 @@ export function useBufferedStreamingText(
   }, []);
 
   return {
-    text,
+    text:
+      textState.generation === generationRef.current ? textState.text : "",
     appendChunk,
     flush,
     reset,

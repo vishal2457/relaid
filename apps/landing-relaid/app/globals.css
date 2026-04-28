@@ -1,31 +1,90 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@900&family=Lora:ital,wght@0,400;0,500;1,400;1,500;1,700&display=swap');
 @import "tailwindcss";
 
-:root {
-  --background: #040814;
-  --foreground: #f8fafc;
-}
+@theme {
+  --color-base: #F5F0E8;
+  --color-ink: #1A1A2E;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-heading: "Outfit", sans-serif;
+  --font-body: "Lora", serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  background-color: var(--color-base);
+  font-family: 'Lora', serif;
+  color: var(--color-ink);
+  overflow-x: hidden;
 }
 
-* {
-  box-sizing: border-box;
+.halftone-bg {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(#1A1A2E 1px, transparent 0);
+  background-size: 12px 12px;
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
 }
 
-html {
-  scroll-behavior: smooth;
+.outfit {
+  font-family: 'Outfit', sans-serif;
 }
 
-a {
-  text-decoration: none;
+.manga-panel {
+  border: 1px solid #1A1A2E;
+  outline: 2px solid #1A1A2E;
+  outline-offset: 4px;
+}
+
+.float-slow {
+  animation: float 8s ease-in-out infinite;
+}
+
+.float-medium {
+  animation: float 6s ease-in-out infinite reverse;
+}
+
+.float-fast {
+  animation: float 4s ease-in-out infinite;
+}
+
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+
+  50% {
+    transform: translateY(-15px) rotate(5deg);
+  }
+}
+
+.step-line {
+  background: linear-gradient(to bottom, #1A1A2E, rgba(26, 26, 46, 0.1));
+}
+
+@keyframes blink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    /* IE and Edge */
+    scrollbar-width: none;
+    /* Firefox */
+  }
 }
