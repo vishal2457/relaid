@@ -1,8 +1,8 @@
 "use client";
 
+import { Activity, ChevronDown, Cpu, Send, Zap } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
-import { Send, ChevronDown } from "lucide-react";
 
 export function PhoneMockup() {
   const [messages, setMessages] = useState([
@@ -99,12 +99,44 @@ export function PhoneMockup() {
         </div>
       </div>
 
-      {/* Sparkle decorative element attached to phone */}
-      <div className="absolute -top-6 -right-6 text-amber-400 animate-pulse">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 0L14 10L24 12L14 14L12 24L10 14L0 12L10 10L12 0Z" fill="currentColor" />
-        </svg>
-      </div>
+      {/* Floating tech badges */}
+      <motion.div
+        initial={{ opacity: 0, x: -20, y: 10 }}
+        animate={{ opacity: 1, x: 0, y: 0 }}
+        transition={{ delay: 0.8, duration: 0.8 }}
+        className="absolute top-32 -left-8 sm:-left-20 bg-white border-2 border-[#1A1A2E] px-3 py-2 hidden md:flex items-center gap-2 shadow-[4px_4px_0px_#1A1A2E] z-30"
+      >
+        <div className="p-1 bg-amber-100 rounded">
+          <Zap size={14} className="text-amber-600" />
+        </div>
+        <span className="outfit text-[10px] font-bold tracking-widest uppercase text-[#1A1A2E]">Zero Latency</span>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, x: 20, y: -10 }}
+        animate={{ opacity: 1, x: 0, y: 0 }}
+        transition={{ delay: 0.9, duration: 0.8 }}
+        className="absolute top-16 -right-6 sm:-right-14 bg-white border-2 border-[#1A1A2E] px-3 py-2 hidden md:flex items-center gap-2 shadow-[4px_4px_0px_#1A1A2E] z-30"
+      >
+        <div className="p-1 bg-violet-100 rounded">
+          <Cpu size={14} className="text-violet-600" />
+        </div>
+        <span className="outfit text-[10px] font-bold tracking-widest uppercase text-[#1A1A2E]">Direct Access</span>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, x: -20, y: -10 }}
+        animate={{ opacity: 1, x: 0, y: 0 }}
+        transition={{ delay: 1.0, duration: 0.8 }}
+        className="absolute bottom-28 -left-6 sm:-left-12 bg-white border-2 border-[#1A1A2E] px-3 py-2 hidden md:flex items-center gap-2 shadow-[4px_4px_0px_#1A1A2E] z-30"
+      >
+        <div className="p-1 bg-blue-100 rounded">
+          <Activity size={14} className="text-blue-600" />
+        </div>
+        <span className="outfit text-[10px] font-bold tracking-widest uppercase text-[#1A1A2E]">Real-Time Sync</span>
+      </motion.div>
+
+
     </motion.div>
   );
 }

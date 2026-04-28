@@ -47,12 +47,6 @@ export default async function Home() {
       {/* Halftone patterned background */}
       <div className="halftone-bg" />
 
-      {/* Decorative floating shapes */}
-      <div className="absolute top-20 right-[15%] w-16 h-16 border-2 border-slate-300 rounded-full opacity-40 float-slow pointer-events-none" />
-      <div className="absolute bottom-40 left-[10%] w-12 h-12 border-2 border-slate-300 opacity-40 rotate-45 float-medium pointer-events-none" />
-      <div className="absolute top-1/2 left-[45%] w-4 h-4 bg-amber-400 rounded-full opacity-30 float-fast pointer-events-none" />
-      <div className="absolute top-40 left-[25%] w-10 h-10 border border-slate-300 opacity-20 transform rotate-12 float-slow pointer-events-none" />
-      <div className="absolute bottom-20 right-[30%] w-8 h-8 rounded-full bg-slate-300 opacity-10 float-medium pointer-events-none" />
 
       {/* Navbar */}
       <nav className="relative z-10 flex justify-between items-center px-6 md:px-12 py-8 max-w-7xl mx-auto">

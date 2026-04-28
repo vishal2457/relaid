@@ -11,10 +11,6 @@ export function HeroContent() {
       transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
       className="lg:col-span-7 flex flex-col items-start gap-6"
     >
-      <div className="inline-flex items-center gap-2 bg-white border border-[#1A1A2E] px-3 py-1 outfit uppercase tracking-widest text-[10px]">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-        <span>AI Agent Controller</span>
-      </div>
 
       <h1 className="outfit text-5xl sm:text-6xl lg:text-7xl leading-[0.9] text-[#1A1A2E]">
         Control your AI<br className="hidden lg:block" />agents from your phone.
