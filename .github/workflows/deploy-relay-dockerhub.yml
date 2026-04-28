@@ -49,24 +49,24 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           RELAY_IMAGE: ${{ env.RELAY_IMAGE }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
-          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
-          GITHUB_REDIRECT_URI: ${{ secrets.GITHUB_REDIRECT_URI }}
-          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
-          APP_DEEP_LINK_SCHEME: ${{ secrets.APP_DEEP_LINK_SCHEME }}
-          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
-          SOCKET_REQUEST_TIMEOUT_MS: ${{ secrets.SOCKET_REQUEST_TIMEOUT_MS }}
-          PAIRING_SESSION_TTL_MS: ${{ secrets.PAIRING_SESSION_TTL_MS }}
-          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+          RELAY_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RELAY_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          RELAY_GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+          RELAY_GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+          RELAY_GITHUB_REDIRECT_URI: ${{ secrets.GITHUB_REDIRECT_URI }}
+          RELAY_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          RELAY_APP_DEEP_LINK_SCHEME: ${{ secrets.APP_DEEP_LINK_SCHEME }}
+          RELAY_CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+          RELAY_SOCKET_REQUEST_TIMEOUT_MS: ${{ secrets.SOCKET_REQUEST_TIMEOUT_MS }}
+          RELAY_PAIRING_SESSION_TTL_MS: ${{ secrets.PAIRING_SESSION_TTL_MS }}
+          RELAY_LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script_stop: true
-          envs: RELAY_IMAGE,DATABASE_URL,ENCRYPTION_KEY,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,GITHUB_REDIRECT_URI,PUBLIC_BASE_URL,APP_DEEP_LINK_SCHEME,CORS_ORIGIN,SOCKET_REQUEST_TIMEOUT_MS,PAIRING_SESSION_TTL_MS,LOG_LEVEL
+          envs: RELAY_IMAGE,RELAY_DATABASE_URL,RELAY_ENCRYPTION_KEY,RELAY_GITHUB_CLIENT_ID,RELAY_GITHUB_CLIENT_SECRET,RELAY_GITHUB_REDIRECT_URI,RELAY_PUBLIC_BASE_URL,RELAY_APP_DEEP_LINK_SCHEME,RELAY_CORS_ORIGIN,RELAY_SOCKET_REQUEST_TIMEOUT_MS,RELAY_PAIRING_SESSION_TTL_MS,RELAY_LOG_LEVEL
           script: |
             set -euo pipefail
 
@@ -79,9 +79,27 @@ jobs:
 
             time docker pull "$RELAY_IMAGE"
 
-            docker compose up -d relay nginx
+            docker compose up -d --force-recreate relay nginx
+
+            for i in $(seq 1 12); do
+              RELAY_STATUS=$(docker inspect -f '{{.State.Status}}' relaid-relay)
+              RELAY_HEALTH=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' relaid-relay)
+              if [ "$RELAY_STATUS" = "running" ] && [ "$RELAY_HEALTH" = "healthy" ]; then
+                break
+              fi
+              sleep 5
+            done
 
             docker compose ps relay nginx
+
+            RELAY_STATUS=$(docker inspect -f '{{.State.Status}}' relaid-relay)
+            RELAY_HEALTH=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' relaid-relay)
+            if [ "$RELAY_STATUS" != "running" ] || [ "$RELAY_HEALTH" != "healthy" ]; then
+              docker compose logs --tail=200 relay
+              echo "Relay container failed readiness checks: status=$RELAY_STATUS health=$RELAY_HEALTH"
+              exit 1
+            fi
+
             docker compose logs --tail=80 relay
 
             docker image prune -f

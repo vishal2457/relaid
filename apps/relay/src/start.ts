@@ -1,3 +1,7 @@
+import dotenv from "dotenv";
+
+dotenv.config();
+
 async function main() {
   console.log("[startup] Running database migrations");
   const { runMigrations } = await import("./db/migrate.js");
