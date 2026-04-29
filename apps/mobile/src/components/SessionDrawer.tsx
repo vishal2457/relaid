@@ -18,6 +18,7 @@ import { type Project } from "@/src/lib/api/projects";
 import {
   clearActiveSessionStream,
   getActiveSessionStream,
+  isStreamingSessionStatus,
 } from "@/src/lib/active-session-stream";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -281,6 +282,10 @@ export function SessionDrawer({
           ) : (
             sessions.map((session) => {
               const isActive = session.id === activeSessionId;
+              const isSessionLoading = isStreamingSessionStatus(session.status);
+              const sessionStatusLabel =
+                session.status === "pending" ? "Pending" : "Running";
+
               return (
                 <Pressable
                   key={session.id}
@@ -295,21 +300,46 @@ export function SessionDrawer({
                     },
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel={`Session: ${session.prompt}`}
-                  accessibilityState={{ selected: isActive }}
+                  accessibilityLabel={`Session: ${session.prompt || "Untitled session"}${
+                    isSessionLoading ? `, ${sessionStatusLabel}` : ""
+                  }`}
+                  accessibilityState={{
+                    selected: isActive,
+                    busy: isSessionLoading,
+                  }}
                 >
-                  <Text
-                    variant="titleSmall"
-                    style={[
-                      styles.sessionPrompt,
-                      {
-                        color: isActive ? "#6B7280" : theme.colors.onSurface,
-                      },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {session.prompt || "Untitled session"}
-                  </Text>
+                  <View style={styles.sessionRow}>
+                    <Text
+                      variant="titleSmall"
+                      style={[
+                        styles.sessionPrompt,
+                        {
+                          color: isActive ? "#6B7280" : theme.colors.onSurface,
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {session.prompt || "Untitled session"}
+                    </Text>
+
+                    {isSessionLoading ? (
+                      <View style={styles.sessionLoading}>
+                        <ActivityIndicator
+                          size={14}
+                          color={theme.colors.primary}
+                        />
+                        <Text
+                          variant="labelSmall"
+                          style={[
+                            styles.sessionLoadingText,
+                            { color: theme.colors.primary },
+                          ]}
+                        >
+                          {sessionStatusLabel}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
                 </Pressable>
               );
             })
@@ -447,7 +477,13 @@ const styles = StyleSheet.create({
   sessionItem: {
     paddingVertical: 8,
     paddingLeft: 5,
+    paddingRight: 8,
     borderRadius: 5,
+    gap: 8,
+  },
+  sessionRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   sessionHeader: {
@@ -459,6 +495,16 @@ const styles = StyleSheet.create({
     flex: 1,
     fontWeight: "600",
     lineHeight: 20,
+  },
+  sessionLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    minWidth: 72,
+    justifyContent: "flex-end",
+  },
+  sessionLoadingText: {
+    fontWeight: "700",
   },
   sessionMeta: {
     flexDirection: "row",

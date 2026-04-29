@@ -50,6 +50,19 @@ function parseTimestamp(value: unknown): number | null {
 }
 
 function normalizeSessionStatus(value: unknown): SessionStatus {
+  if (value && typeof value === "object") {
+    const type = (value as Record<string, unknown>).type;
+
+    switch (type) {
+      case "busy":
+        return "running";
+      case "retry":
+        return "pending";
+      case "idle":
+        return "completed";
+    }
+  }
+
   switch (value) {
     case "pending":
     case "running":

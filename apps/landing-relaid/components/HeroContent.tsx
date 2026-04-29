@@ -1,9 +1,20 @@
 "use client";
 
 import { motion } from "motion/react";
-import { Download, Github } from "lucide-react";
+import { Download, Smartphone } from "lucide-react";
 
-export function HeroContent() {
+type DownloadLink = {
+  label: string;
+  detail: string;
+  href: string;
+};
+
+type HeroContentProps = {
+  androidDownload: DownloadLink;
+  desktopDownloads: DownloadLink[];
+};
+
+export function HeroContent({ androidDownload, desktopDownloads }: HeroContentProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 30 }}
@@ -13,11 +24,11 @@ export function HeroContent() {
     >
 
       <h1 className="outfit text-5xl sm:text-6xl lg:text-7xl leading-[0.9] text-[#1A1A2E]">
-        Control your AI<br className="hidden lg:block" />agents from your phone.
+        Keep your AI agents<br className="hidden lg:block" /> moving from anywhere.
       </h1>
 
       <p className="text-lg md:text-xl italic opacity-80 max-w-lg">
-        No more being chained to your desk while Codex or OpenCode runs—monitor builds, approve commands, and view terminal output live from anywhere.
+        Relaid puts your local coding agents on your phone: start sessions, watch output stream in real time, approve risky actions, and switch projects without sitting at your desk.
       </p>
 
       {/* 3 Step Flow */}
@@ -26,31 +37,51 @@ export function HeroContent() {
 
         <div className="relative flex items-center gap-4">
           <div className="w-7 h-7 rounded-full bg-[#1A1A2E] text-white outfit flex flex-shrink-0 items-center justify-center text-xs z-10">1</div>
-          <span className="text-sm font-medium">Open the Relaid mobile app</span>
+          <span className="text-sm font-medium">Connect to the relay running on your machine</span>
         </div>
 
         <div className="relative flex items-center gap-4">
           <div className="w-7 h-7 rounded-full bg-white border-2 border-[#1A1A2E] text-[#1A1A2E] outfit flex flex-shrink-0 items-center justify-center text-xs z-10">2</div>
-          <span className="text-sm font-medium">Send commands & get live output</span>
+          <span className="text-sm font-medium">Pick a project, model, branch, and agent</span>
         </div>
 
         <div className="relative flex items-center gap-4">
           <div className="w-7 h-7 rounded-full bg-[#1A1A2E] text-white outfit flex flex-shrink-0 items-center justify-center text-xs z-10">3</div>
           <span className="text-sm font-medium leading-relaxed">
-            Works with <span className="font-bold outfit px-1.5 py-0.5 bg-[#1A1A2E] text-white rounded mx-1 whitespace-nowrap">Codex</span>, <span className="font-bold outfit px-1.5 py-0.5 border border-[#1A1A2E] rounded mx-1 whitespace-nowrap">OpenCode</span>, & <span className="font-bold outfit px-1.5 py-0.5 bg-slate-200 text-[#1A1A2E] rounded mx-1 whitespace-nowrap">Claude Code</span>
+            Send work to <span className="font-bold outfit px-1.5 py-0.5 bg-[#1A1A2E] text-white rounded mx-1 whitespace-nowrap">Codex</span>, <span className="font-bold outfit px-1.5 py-0.5 border border-[#1A1A2E] rounded mx-1 whitespace-nowrap">OpenCode</span>, or <span className="font-bold outfit px-1.5 py-0.5 bg-slate-200 text-[#1A1A2E] rounded mx-1 whitespace-nowrap">Claude Code</span>
           </span>
         </div>
       </div>
 
-      {/* CTAs */}
-      <div className="flex flex-col sm:flex-row gap-4 mt-4 w-full sm:w-auto">
-        <button className="w-full sm:w-auto bg-[#1A1A2E] text-white outfit uppercase text-xs tracking-widest px-8 py-4 hover:bg-slate-800 transition-colors flex items-center justify-center gap-2">
-          <Download size={16} />
-          Download App
-        </button>
-        <a href="https://github.com/relaid" className="w-full sm:w-auto border-2 border-[#1A1A2E] text-[#1A1A2E] outfit uppercase text-xs tracking-widest px-8 py-4 hover:bg-[#1A1A2E] hover:text-white transition-all flex items-center justify-center gap-2">
-          <Github size={16} />
-          View on GitHub
+      {/* Downloads */}
+      <div className="flex flex-col gap-3 mt-8 w-full">
+        <span className="text-xs font-bold outfit uppercase tracking-widest text-[#1A1A2E]/50">Download Desktop App</span>
+        <div className="flex flex-wrap gap-2">
+          {desktopDownloads.map((download) => (
+            <a
+              key={download.label}
+              href={download.href}
+              className="bg-white border border-[#1A1A2E]/20 text-[#1A1A2E] outfit uppercase tracking-widest text-[10px] font-bold px-4 py-2 hover:bg-[#1A1A2E] hover:text-white transition-all flex items-center justify-center gap-1.5 shadow-sm rounded-sm"
+            >
+              <Download size={14} />
+              {download.label === "Mac Silicon"
+                ? "Mac (Silicon)"
+                : download.label === "Mac Intel"
+                  ? "Mac (Intel)"
+                  : download.label}
+            </a>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 w-full">
+        <span className="text-xs font-bold outfit uppercase tracking-widest text-[#1A1A2E]/50">Download Mobile App</span>
+        <a
+          href={androidDownload.href}
+          className="bg-white border border-[#1A1A2E]/20 text-[#1A1A2E] outfit uppercase tracking-widest text-[10px] font-bold px-4 py-2 hover:bg-[#1A1A2E] hover:text-white transition-all flex w-fit items-center justify-center gap-1.5 shadow-sm rounded-sm"
+        >
+          <Smartphone size={14} />
+          Android App
         </a>
       </div>
     </motion.div>

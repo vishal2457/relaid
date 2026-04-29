@@ -1,5 +1,7 @@
 import express from "express";
 import { createServer } from "http";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import cors from "cors";
 import dotenv from "dotenv";
 import morgan from "morgan";
@@ -144,6 +146,19 @@ app.use("/api/skills", skillsRouter);
 app.use("/api/github", githubRouter);
 app.use("/api/sse", sseRouter);
 app.use("/api/mobile", mobileActionsRouter);
+
+const publicDir = path.join(process.cwd(), "public");
+const publicIndex = path.join(publicDir, "index.html");
+
+if (existsSync(publicDir)) {
+  app.use(express.static(publicDir, { index: false }));
+
+  if (existsSync(publicIndex)) {
+    app.get("/", (_req, res) => {
+      res.sendFile(publicIndex);
+    });
+  }
+}
 
 const io = createSocketServer(httpServer);
 
