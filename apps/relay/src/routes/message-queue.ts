@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Request, Response, Router } from "express";
 import {
   requestConnectedServer,
   requireUserId,
@@ -6,11 +6,10 @@ import {
 } from "../services/local-server-proxy";
 import { logger } from "../shared/logger";
 import type {
-  QueueItemPayload,
-  MessageQueueListResponse,
   MessageQueueAddResponse,
+  MessageQueueListResponse,
   MessageQueueRemoveResponse,
-  MessageQueueUpdateResponse,
+  MessageQueueUpdateResponse
 } from "../shared/types";
 
 function handleRouteError(
