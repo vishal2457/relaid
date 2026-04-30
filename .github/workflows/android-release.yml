@@ -1,29 +1,37 @@
-name: Android CI/CD
+name: Android Preview Build
 
 on:
   push:
     branches:
       - main
+    paths:
+      - "apps/mobile/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/android-release.yml"
+  workflow_dispatch:
 
 jobs:
-  build-and-submit:
+  build-preview:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version-file: .nvmrc
+          cache: pnpm
 
       - run: npm install -g eas-cli
 
-      - run: cd apps/mobile && npm install
+      - run: pnpm install --frozen-lockfile
 
-      - run: cd apps/mobile && eas build --platform android --profile production --non-interactive
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - run: cd apps/mobile && eas submit --platform android --latest --non-interactive
+      - run: cd apps/mobile && eas build --platform android --profile preview --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
