@@ -8,9 +8,10 @@
     "scheme": "relaid",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "jsEngine": "hermes",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.vishal2457.relaid"
+      "bundleIdentifier": "com.derivedlabs.relaid"
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +23,11 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "usesCleartextTraffic": true,
-      "package": "com.vishal2457.relaid"
+      "package": "com.derivedlabs.relaid",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -72,8 +77,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "b386c0d1-0ac9-4b1f-b9eb-f6068a04bc1f"
+        "projectId": "d9c4533e-8331-492c-99d6-2f4b6cfd4ab8"
       }
-    }
+    },
+    "owner": "derived-labs-1"
   }
 }

@@ -73,11 +73,12 @@ function RootLayoutInner() {
 
     if (
       !isPaired &&
+      pathname !== "/onboarding" &&
       pathname !== "/pair" &&
       pathname !== "/settings" &&
       pathname !== "/auth"
     ) {
-      router.replace("/pair" as any);
+      router.replace("/onboarding" as any);
       return;
     }
 
@@ -126,6 +127,7 @@ function RootLayoutInner() {
         </Stack>
       ) : (
         <Stack>
+          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="auth" options={{ headerShown: false }} />
           <Stack.Screen name="pair" options={{ headerShown: false }} />
           <Stack.Screen
