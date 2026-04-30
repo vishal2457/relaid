@@ -8,36 +8,41 @@ type DownloadLink = {
   href: string;
 };
 
-const latestReleaseUrl = "https://github.com/vishal2457/relaid/releases/latest";
+const downloadUrl = (target: string) => `/api/downloads/latest/${target}`;
 
 const desktopTargets = [
   {
     label: "Mac Silicon",
     detail: "Apple Silicon",
+    target: "mac-silicon",
   },
   {
     label: "Mac Intel",
     detail: "Intel Mac",
+    target: "mac-intel",
   },
   {
     label: "Windows",
     detail: "Windows PC",
+    target: "windows",
   },
   {
     label: "Linux",
     detail: "Linux",
+    target: "linux",
   },
 ];
 
 const desktopDownloads: DownloadLink[] = desktopTargets.map((target) => ({
-  ...target,
-  href: latestReleaseUrl,
+  label: target.label,
+  detail: target.detail,
+  href: downloadUrl(target.target),
 }));
 
 const androidDownload: DownloadLink = {
   label: "Android",
   detail: "APK",
-  href: latestReleaseUrl,
+  href: downloadUrl("android"),
 };
 
 export default function Home() {
