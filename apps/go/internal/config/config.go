@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/joho/godotenv"
@@ -33,12 +34,12 @@ func Load() Config {
 	cfg := Config{
 		ServerAddr:              DefaultServerAddr,
 		Runtime:                 getEnv("APP_RUNTIME", "desktop"),
-		OpencodeBin:             getEnv("OPENCODE_BIN", "opencode"),
+		OpencodeBin:             resolveExecutable("OPENCODE_BIN", "opencode", defaultOpenCodeBinPaths()),
 		OpencodeCwd:             getWorkingDir(),
 		OpencodeBaseURL:         getEnv("OPENCODE_BASE_URL", ""),
 		OpencodeDBPath:          getEnv("OPENCODE_DB_PATH", defaultOpenCodeDBPath()),
 		OpencodeMaxPromptLength: getIntEnv("OPENCODE_MAX_PROMPT_LENGTH", 8000),
-		CodexBin:                getEnv("CODEX_BIN", "codex"),
+		CodexBin:                resolveExecutable("CODEX_BIN", "codex", defaultCodexBinPaths()),
 		CodexCwd:                getWorkingDir(),
 		DBPath:                  getEnv("RELAID_DB_PATH", defaultDBPath()),
 	}
@@ -59,6 +60,32 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func resolveExecutable(envKey, fallback string, candidates []string) string {
+	if value, ok := os.LookupEnv(envKey); ok && value != "" {
+		return value
+	}
+
+	if path, err := exec.LookPath(fallback); err == nil {
+		return path
+	}
+
+	for _, candidate := range candidates {
+		if isExecutable(candidate) {
+			return candidate
+		}
+	}
+
+	return fallback
+}
+
+func isExecutable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode().Perm()&0111 != 0
 }
 
 func getWorkingDir() string {
@@ -95,4 +122,34 @@ func defaultOpenCodeDBPath() string {
 		return filepath.Join(".", "opencode.db")
 	}
 	return filepath.Join(homeDir, ".local", "share", "opencode", "opencode.db")
+}
+
+func defaultOpenCodeBinPaths() []string {
+	homeDir, err := os.UserHomeDir()
+	paths := []string{
+		"/opt/homebrew/bin/opencode",
+		"/usr/local/bin/opencode",
+	}
+	if err == nil && homeDir != "" {
+		paths = append([]string{
+			filepath.Join(homeDir, ".opencode", "bin", "opencode"),
+			filepath.Join(homeDir, ".local", "bin", "opencode"),
+		}, paths...)
+	}
+	return paths
+}
+
+func defaultCodexBinPaths() []string {
+	homeDir, err := os.UserHomeDir()
+	paths := []string{
+		"/opt/homebrew/bin/codex",
+		"/usr/local/bin/codex",
+	}
+	if err == nil && homeDir != "" {
+		paths = append([]string{
+			filepath.Join(homeDir, ".codex", "bin", "codex"),
+			filepath.Join(homeDir, ".local", "bin", "codex"),
+		}, paths...)
+	}
+	return paths
 }
