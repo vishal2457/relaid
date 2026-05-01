@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"relaid/internal/agent"
@@ -220,8 +221,12 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var shouldForwardUpdates atomic.Bool
 	conn, err := s.acpClient.Start(runCtx, s.clientInfo, s.protocol, func(update acp.SessionUpdate) {
 		if onChunk == nil {
+			return
+		}
+		if !shouldForwardUpdates.Load() {
 			return
 		}
 		switch update.Update {
@@ -271,6 +276,7 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 	if onChunk != nil {
 		onChunk(agent.StreamChunk{Type: "status", Content: "Thread initialized", MessageID: ""})
 	}
+	shouldForwardUpdates.Store(true)
 
 	modelID := ""
 	if input.Model != nil {

@@ -794,6 +794,10 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		response.SessionID = result.SessionID
 	}
 
+	if session, sessErr := provider.Sessions().Get(context.Background(), req.SessionID); sessErr == nil && session != nil {
+		response.SessionTitle = session.Title
+	}
+
 	h.emit(EventSessionPromptResponse, response)
 }
 

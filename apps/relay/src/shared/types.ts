@@ -90,6 +90,7 @@ export const SessionPromptResponseEventSchema = z.object({
   requestId: z.string(),
   projectId: z.string(),
   sessionId: z.string(),
+  sessionTitle: z.string().optional(),
   success: z.boolean(),
   output: z.string(),
   error: z.string().optional(),

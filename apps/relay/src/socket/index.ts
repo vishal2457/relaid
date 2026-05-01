@@ -295,11 +295,18 @@ async function handleLocalServerConnection(
 
       if (eventName === "session_prompt_response") {
         const responsePayload = payload as SessionPromptResponseEvent;
+        const title = responsePayload.sessionTitle || "Relaid";
+        const maxBodyLen = 150;
         if (responsePayload.success) {
+          const body = responsePayload.output
+            ? responsePayload.output.length > maxBodyLen
+              ? `${responsePayload.output.slice(0, maxBodyLen)}…`
+              : responsePayload.output
+            : "Response ready";
           void sendPushNotification(
             userId,
-            "Request Completed",
-            responsePayload.output || "Response ready",
+            title,
+            body,
             {
               type: "request_completed",
               sessionId: responsePayload.sessionId,
@@ -308,10 +315,15 @@ async function handleLocalServerConnection(
             },
           );
         } else if (!responsePayload.success) {
+          const body = responsePayload.error
+            ? responsePayload.error.length > maxBodyLen
+              ? `${responsePayload.error.slice(0, maxBodyLen)}…`
+              : responsePayload.error
+            : "The request failed with an error";
           void sendPushNotification(
             userId,
-            "Request Failed",
-            responsePayload.error || "The request failed with an error",
+            title,
+            body,
             {
               type: "request_completed",
               sessionId: responsePayload.sessionId,

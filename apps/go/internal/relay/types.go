@@ -333,15 +333,16 @@ type SessionStreamChunkPayload struct {
 }
 
 type SessionPromptResponsePayload struct {
-	RequestID string           `json:"requestId"`
-	ProjectID string           `json:"projectId"`
-	SessionID string           `json:"sessionId"`
-	Success   bool             `json:"success"`
-	Output    string           `json:"output"`
-	Error     string           `json:"error,omitempty"`
-	ExitCode  int              `json:"exitCode"`
-	Duration  int              `json:"duration"`
-	Messages  []MessagePayload `json:"messages,omitempty"`
+	RequestID    string           `json:"requestId"`
+	ProjectID    string           `json:"projectId"`
+	SessionID    string           `json:"sessionId"`
+	SessionTitle string           `json:"sessionTitle,omitempty"`
+	Success      bool             `json:"success"`
+	Output       string           `json:"output"`
+	Error        string           `json:"error,omitempty"`
+	ExitCode     int              `json:"exitCode"`
+	Duration     int              `json:"duration"`
+	Messages     []MessagePayload `json:"messages,omitempty"`
 }
 
 type SessionAbortPayload struct {

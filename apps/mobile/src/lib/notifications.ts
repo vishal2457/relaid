@@ -145,7 +145,7 @@ async function ensureAndroidNotificationChannel(): Promise<void> {
   await Notifications.setNotificationChannelAsync(
     DEFAULT_ANDROID_NOTIFICATION_CHANNEL_ID,
     {
-      name: "Default",
+      name: "Relaid",
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: "#2563EB",
