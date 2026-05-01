@@ -56,9 +56,10 @@ export function HeroContent({ androidDownload, desktopDownloads }: HeroContentPr
     setPlatform(getPlatformInfo());
   }, []);
 
-  const filteredDesktop = filterDesktopDownloads(desktopDownloads, platform.os);
+  const filteredDesktop = platform.isMobile
+    ? desktopDownloads.filter((d) => d.label === "Linux")
+    : filterDesktopDownloads(desktopDownloads, platform.os);
   const showMobile = platform.isMobile;
-  const showDesktop = !platform.isMobile;
 
   return (
     <motion.div
@@ -98,29 +99,28 @@ export function HeroContent({ androidDownload, desktopDownloads }: HeroContentPr
         </div>
       </div>
 
-      {/* Downloads */}
-      {showDesktop && (
-        <div className="flex flex-col gap-3 mt-8 w-full">
-          <span className="text-xs font-bold outfit uppercase tracking-widest text-[#1A1A2E]/50">Download Desktop App</span>
-          <div className="flex flex-wrap gap-2">
-            {filteredDesktop.map((download) => (
-              <a
-                key={download.label}
-                href={download.href}
-                className="bg-white border border-[#1A1A2E]/20 text-[#1A1A2E] outfit uppercase tracking-widest text-[10px] font-bold px-4 py-2 hover:bg-[#1A1A2E] hover:text-white transition-all flex items-center justify-center gap-1.5 shadow-sm rounded-sm"
-              >
-                <Download size={14} />
-                {download.label === "Mac Silicon"
-                  ? "Mac (Silicon)"
-                  : download.label === "Mac Intel"
-                    ? "Mac (Intel)"
-                    : download.label}
-              </a>
-            ))}
-          </div>
+      {/* Desktop Downloads - always show */}
+      <div className="flex flex-col gap-3 mt-8 w-full">
+        <span className="text-xs font-bold outfit uppercase tracking-widest text-[#1A1A2E]/50">Download Desktop App</span>
+        <div className="flex flex-wrap gap-2">
+          {filteredDesktop.map((download) => (
+            <a
+              key={download.label}
+              href={download.href}
+              className="bg-white border border-[#1A1A2E]/20 text-[#1A1A2E] outfit uppercase tracking-widest text-[10px] font-bold px-4 py-2 hover:bg-[#1A1A2E] hover:text-white transition-all flex items-center justify-center gap-1.5 shadow-sm rounded-sm"
+            >
+              <Download size={14} />
+              {download.label === "Mac Silicon"
+                ? "Mac (Silicon)"
+                : download.label === "Mac Intel"
+                  ? "Mac (Intel)"
+                  : download.label}
+            </a>
+          ))}
         </div>
-      )}
+      </div>
 
+      {/* Mobile Download - only show on mobile */}
       {showMobile && (
         <div className="flex flex-col gap-3 w-full">
           <span className="text-xs font-bold outfit uppercase tracking-widest text-[#1A1A2E]/50">Download Mobile App</span>
