@@ -156,7 +156,24 @@ if (existsSync(publicDir)) {
   app.use(express.static(publicDir));
 
   if (existsSync(publicIndex)) {
-    app.get("*", (_req, res) => {
+    app.get("*", (req, res) => {
+      // Try to serve a matching .html file for the route first
+      // e.g. /about -> public/about.html or public/about/index.html
+      const routePath = req.path === "/" ? "" : req.path;
+      
+      const candidates = [
+        path.join(publicDir, `${routePath}.html`),
+        path.join(publicDir, routePath, "index.html"),
+      ];
+
+      for (const candidate of candidates) {
+        if (existsSync(candidate)) {
+          res.sendFile(candidate);
+          return;
+        }
+      }
+
+      // Fallback to root index.html (SPA mode)
       res.sendFile(publicIndex);
     });
   }
