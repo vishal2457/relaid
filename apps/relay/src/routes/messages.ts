@@ -40,6 +40,10 @@ router.get("/", async (req: Request, res: Response) => {
     const userId = requireUserId(req.headers["x-user-id"]);
     const sessionId =
       typeof req.query.sessionId === "string" ? req.query.sessionId : undefined;
+    const agentProviderId =
+      typeof req.query.agentProviderId === "string"
+        ? req.query.agentProviderId
+        : undefined;
 
     if (!sessionId) {
       res.status(400).json({ error: "sessionId is required" });
@@ -50,7 +54,7 @@ router.get("/", async (req: Request, res: Response) => {
       userId,
       "session_get_request",
       "session_get_response",
-      { sessionId },
+      { agentProviderId, sessionId },
       (response) => Boolean(response.session),
     );
 
@@ -69,6 +73,7 @@ router.get("/", async (req: Request, res: Response) => {
       "session_messages_request",
       "session_messages_response",
       {
+        agentProviderId,
         sessionId,
         limit,
       },

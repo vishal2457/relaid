@@ -5,6 +5,7 @@ import { Button, Text, useTheme } from "react-native-paper";
 
 export type PermissionRequest = {
   requestId: string;
+  agentProviderId?: string;
   projectId: string;
   sessionId: string;
   jobId: string;
@@ -17,6 +18,7 @@ export type PermissionRequest = {
 
 export type QuestionRequest = {
   requestId: string;
+  agentProviderId?: string;
   projectId: string;
   sessionId: string;
   jobId: string;

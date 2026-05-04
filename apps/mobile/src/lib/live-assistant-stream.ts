@@ -1,10 +1,10 @@
 import React from "react";
 import {
   adaptStreamActivity,
+  type SessionAssistantBlock,
   type SessionAssistantActivity,
 } from "@/src/lib/api/messages";
 import type { SessionStreamChunkEvent } from "@/src/lib/sse/events";
-import { useBufferedStreamingText } from "@/src/lib/streaming-text";
 
 export type LiveAssistantPhase = "thinking" | "responding" | "complete";
 
@@ -13,6 +13,7 @@ type LiveAssistantState = {
   statusText: string | null;
   reasoningById: Record<string, string>;
   reasoningOrder: string[];
+  blocks: SessionAssistantBlock[];
   activitiesById: Record<string, SessionAssistantActivity>;
   activityOrder: string[];
   revision: number;
@@ -20,7 +21,7 @@ type LiveAssistantState = {
 
 type LiveAssistantAction =
   | { type: "reset" }
-  | { type: "text" }
+  | { type: "text"; chunk: string }
   | { type: "status"; statusText: string }
   | { type: "complete" }
   | { type: "reasoning"; partId: string; content: string; append: boolean }
@@ -31,6 +32,7 @@ const initialState: LiveAssistantState = {
   statusText: null,
   reasoningById: {},
   reasoningOrder: [],
+  blocks: [],
   activitiesById: {},
   activityOrder: [],
   revision: 0,
@@ -44,9 +46,40 @@ function reducer(
     case "reset":
       return initialState;
     case "text":
+      if (!action.chunk) {
+        return state;
+      }
+
+      if (state.blocks[state.blocks.length - 1]?.type === "text") {
+        const nextBlocks = [...state.blocks];
+        const lastBlock = nextBlocks[nextBlocks.length - 1];
+        if (lastBlock?.type === "text") {
+          nextBlocks[nextBlocks.length - 1] = {
+            ...lastBlock,
+            content: lastBlock.content + action.chunk,
+          };
+        }
+
+        return {
+          ...state,
+          phase: "responding",
+          blocks: nextBlocks,
+          revision: state.revision + 1,
+        };
+      }
+
       return {
         ...state,
         phase: "responding",
+        blocks: [
+          ...state.blocks,
+          {
+            id: `stream-text-${state.blocks.length}`,
+            type: "text",
+            content: action.chunk,
+            durationSeconds: null,
+          },
+        ],
         revision: state.revision + 1,
       };
     case "status":
@@ -81,8 +114,31 @@ function reducer(
     }
     case "activity": {
       const isNewPart = !(action.partId in state.activitiesById);
+      const existingBlockIndex = state.blocks.findIndex(
+        (block) => block.id === action.partId && block.type === "tool",
+      );
+      const nextBlocks =
+        existingBlockIndex >= 0
+          ? state.blocks.map((block, index) =>
+              index === existingBlockIndex && block.type === "tool"
+                ? {
+                    ...block,
+                    activity: action.activity,
+                  }
+                : block,
+            )
+          : [
+              ...state.blocks,
+              {
+                id: action.partId,
+                type: "tool" as const,
+                activity: action.activity,
+              },
+            ];
+
       return {
         ...state,
+        blocks: nextBlocks,
         activitiesById: {
           ...state.activitiesById,
           [action.partId]: action.activity,
@@ -110,20 +166,13 @@ function getActivityPartId(
 }
 
 export function useLiveAssistantStream() {
-  const {
-    text: visibleText,
-    appendChunk,
-    flush: flushText,
-    reset: resetText,
-  } = useBufferedStreamingText();
   const [state, dispatch] = React.useReducer(reducer, initialState);
 
   const applyChunk = React.useCallback(
     (payload: SessionStreamChunkEvent) => {
       switch (payload.type) {
         case "text":
-          appendChunk(payload.chunk);
-          dispatch({ type: "text" });
+          dispatch({ type: "text", chunk: payload.chunk });
           return;
         case "reasoning":
           dispatch({
@@ -151,22 +200,18 @@ export function useLiveAssistantStream() {
           dispatch({ type: "status", statusText: payload.chunk });
           return;
         case "complete":
-          flushText();
           dispatch({ type: "complete" });
           return;
       }
     },
-    [appendChunk, flushText],
+    [],
   );
 
   const reset = React.useCallback(() => {
-    resetText();
     dispatch({ type: "reset" });
-  }, [resetText]);
+  }, []);
 
-  const flush = React.useCallback(() => {
-    flushText();
-  }, [flushText]);
+  const flush = React.useCallback(() => {}, []);
 
   const thinkingContent = React.useMemo(() => {
     const content = state.reasoningOrder
@@ -187,6 +232,18 @@ export function useLiveAssistantStream() {
     [state.activitiesById, state.activityOrder],
   );
 
+  const visibleText = React.useMemo(
+    () =>
+      state.blocks
+        .filter(
+          (block): block is Extract<SessionAssistantBlock, { type: "text" }> =>
+            block.type === "text",
+        )
+        .map((block) => block.content)
+        .join(""),
+    [state.blocks],
+  );
+
   const phase: LiveAssistantPhase =
     visibleText.trim().length > 0 && state.phase !== "complete"
       ? "responding"
@@ -195,6 +252,7 @@ export function useLiveAssistantStream() {
   return {
     visibleText,
     thinkingContent,
+    blocks: state.blocks,
     activities,
     phase,
     statusText: state.statusText,

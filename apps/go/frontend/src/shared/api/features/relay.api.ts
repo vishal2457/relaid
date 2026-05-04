@@ -41,6 +41,15 @@ export interface DesktopStatus {
     availableTools: string[];
     errors?: string[];
   };
+  codex: {
+    available: boolean;
+    connected: boolean;
+    statusMessage?: string;
+    providers: DesktopProviderStatus[];
+    agents: DesktopAgentStatus[];
+    availableTools: string[];
+    errors?: string[];
+  };
 }
 
 export const useRelayHooks = () => {

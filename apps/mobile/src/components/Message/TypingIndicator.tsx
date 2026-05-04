@@ -2,8 +2,11 @@ import React from "react";
 import { Animated, Pressable, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Text, useTheme } from "react-native-paper";
-import { FormattedText } from "./FormattedText";
-import type { SessionAssistantActivity } from "@/src/lib/api/messages";
+import { AssistantBlockSequence } from "./AssistantBlockSequence";
+import type {
+  SessionAssistantActivity,
+  SessionAssistantBlock,
+} from "@/src/lib/api/messages";
 import type { LiveAssistantPhase } from "@/src/lib/live-assistant-stream";
 
 const JumpingDot = ({ delay }: { delay: number }) => {
@@ -57,9 +60,8 @@ const JumpingDots = () => {
 };
 
 interface TypingIndicatorProps {
-  streamingContent: string;
   thinkingContent: string | null;
-  activities: SessionAssistantActivity[];
+  blocks: SessionAssistantBlock[];
   phase: LiveAssistantPhase;
   borderColor: string;
   assistantBubble: string;
@@ -82,9 +84,8 @@ function getCurrentActivityDetail(
 
 export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
   ({
-    streamingContent,
     thinkingContent,
-    activities,
+    blocks,
     phase,
     borderColor,
     assistantBubble,
@@ -93,8 +94,33 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
     const theme = useTheme();
     const [isThinkingExpanded, setIsThinkingExpanded] = React.useState(false);
     const blinkOpacity = React.useRef(new Animated.Value(1)).current;
+    const visibleText = React.useMemo(
+      () =>
+        blocks
+          .filter(
+            (
+              block,
+            ): block is Extract<SessionAssistantBlock, { type: "text" }> =>
+              block.type === "text",
+          )
+          .map((block) => block.content)
+          .join(""),
+      [blocks],
+    );
+    const activities = React.useMemo(
+      () =>
+        blocks
+          .filter(
+            (
+              block,
+            ): block is Extract<SessionAssistantBlock, { type: "tool" }> =>
+              block.type === "tool",
+          )
+          .map((block) => block.activity),
+      [blocks],
+    );
     const isThinking =
-      phase === "thinking" && streamingContent.trim().length === 0;
+      phase === "thinking" && visibleText.trim().length === 0;
     const hasThinkingContent = Boolean(thinkingContent?.trim());
     const currentActivity = activities[activities.length - 1] ?? null;
     const currentActivityDetail = getCurrentActivityDetail(currentActivity);
@@ -162,9 +188,12 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
               ) : null}
             </View>
           ) : (
-            <FormattedText
-              text={streamingContent}
-              baseStyle={{ color: theme.colors.onSurface }}
+            <AssistantBlockSequence
+              blocks={blocks}
+              assistantBubble={assistantBubble}
+              textColor={theme.colors.onSurface}
+              metaColor={metaColor}
+              borderColor={borderColor}
             />
           )}
         </View>

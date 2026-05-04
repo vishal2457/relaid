@@ -51,6 +51,7 @@ export const SessionAbortEventSchema = z.object({
   sessionId: z.string(),
   requestId: z.string(),
   projectId: z.string(),
+  agentProviderId: z.string().optional(),
 });
 
 export type SessionAbortEvent = z.infer<typeof SessionAbortEventSchema>;
@@ -65,10 +66,17 @@ export type SessionAbortedEvent = z.infer<typeof SessionAbortedEventSchema>;
 
 export const SessionPromptRequestEventSchema = z.object({
   requestId: z.string(),
+  agentProviderId: z.string().optional(),
   projectId: z.string(),
   sessionId: z.string(),
   prompt: z.string(),
   agent: z.string().optional(),
+  model: z
+    .object({
+      providerId: z.string(),
+      modelId: z.string(),
+    })
+    .optional(),
   userId: z.string().optional(),
 });
 
@@ -162,6 +170,7 @@ export const ProjectDirectoryNodeSchema: z.ZodType<ProjectDirectoryNode> =
 
 export const SessionPayloadSchema = z.object({
   id: z.string(),
+  agentProviderId: z.string().optional(),
   projectId: z.string().optional(),
   directory: z.string().optional(),
   userId: z.string().nullable().optional(),
@@ -262,6 +271,7 @@ export const ProjectDeleteResponseSchema = z.object({
 });
 
 export const SessionsListRequestSchema = z.object({
+  agentProviderId: z.string().optional(),
   cwd: z.string().optional(),
   userId: z.string().optional(),
   status: z.string().optional(),
@@ -273,6 +283,7 @@ export const SessionsListResponseSchema = z.object({
 });
 
 export const SessionGetRequestSchema = z.object({
+  agentProviderId: z.string().optional(),
   sessionId: z.string(),
 });
 
@@ -281,6 +292,7 @@ export const SessionGetResponseSchema = z.object({
 });
 
 export const SessionCreateRequestSchema = z.object({
+  agentProviderId: z.string().optional(),
   projectId: z.string(),
   prompt: z.string(),
   sessionId: z.string().optional(),
@@ -362,6 +374,7 @@ export const MessagePayloadSchema = z.object({
 export type MessagePayload = z.infer<typeof MessagePayloadSchema>;
 
 export const SessionMessagesRequestSchema = z.object({
+  agentProviderId: z.string().optional(),
   sessionId: z.string(),
   limit: z.number().optional(),
 });
@@ -398,6 +411,12 @@ export const MessageCreateResponseSchema = z.object({
 export const ProviderModelSchema = z.object({
   id: z.string(),
   name: z.string(),
+  agentProviderId: z.string().optional(),
+  agentProviderName: z.string().optional(),
+  providerId: z.string().optional(),
+  providerName: z.string().optional(),
+  modelId: z.string().optional(),
+  modelName: z.string().optional(),
 });
 
 export type ProviderModel = z.infer<typeof ProviderModelSchema>;
@@ -405,6 +424,10 @@ export type ProviderModel = z.infer<typeof ProviderModelSchema>;
 export const ProviderPayloadSchema = z.object({
   id: z.string(),
   name: z.string(),
+  agentProviderId: z.string().optional(),
+  agentProviderName: z.string().optional(),
+  providerId: z.string().optional(),
+  providerName: z.string().optional(),
   models: z.array(ProviderModelSchema),
 });
 
@@ -425,6 +448,7 @@ export type PermissionReply = z.infer<typeof PermissionReplySchema>;
 
 export const PermissionRequestEventSchema = z.object({
   requestId: z.string(),
+  agentProviderId: z.string().optional(),
   projectId: z.string(),
   sessionId: z.string(),
   jobId: z.string(),
@@ -440,6 +464,7 @@ export type PermissionRequestEvent = z.infer<
 
 export const PermissionResponseEventSchema = z.object({
   requestId: z.string(),
+  agentProviderId: z.string().optional(),
   sessionId: z.string(),
   jobId: z.string(),
   reply: PermissionReplySchema,
@@ -468,6 +493,7 @@ export type Question = z.infer<typeof QuestionSchema>;
 
 export const QuestionRequestEventSchema = z.object({
   requestId: z.string(),
+  agentProviderId: z.string().optional(),
   projectId: z.string(),
   sessionId: z.string(),
   jobId: z.string(),
@@ -479,6 +505,7 @@ export type QuestionRequestEvent = z.infer<typeof QuestionRequestEventSchema>;
 
 export const QuestionResponseEventSchema = z.object({
   requestId: z.string(),
+  agentProviderId: z.string().optional(),
   sessionId: z.string(),
   jobId: z.string(),
   answers: z.array(z.array(z.string())),

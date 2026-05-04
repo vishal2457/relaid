@@ -1,20 +1,16 @@
 import React from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  useProjects,
-  type Project,
-} from "@/src/lib/api/projects";
+import { useProjects, type Project } from "@/src/lib/api/projects";
 import {
   useProviders,
   type ActiveModel,
   flattenProvidersToModels,
+  groupModelsByRuntime,
 } from "@/src/lib/api/providers";
 import { useAgents, type Agent } from "@/src/lib/api/agents";
 import { useBranches, useSwitchBranch } from "@/src/lib/api/branches";
 import { useGitFileStatus } from "@/src/lib/api/git";
-import {
-  getActiveSessionStream,
-} from "@/src/lib/active-session-stream";
+import { getActiveSessionStream } from "@/src/lib/active-session-stream";
 
 const LAST_SELECTED_PROJECT_ID = "LAST_SELECTED_PROJECT_ID";
 const LAST_SELECTED_MODEL = "LAST_SELECTED_MODEL";
@@ -67,10 +63,14 @@ function fuzzyScore(target: string, query: string): number {
 
 function getModelSearchScore(model: ActiveModel, query: string): number {
   return Math.max(
-    fuzzyScore(model.name, query),
-    fuzzyScore(model.id, query),
+    fuzzyScore(model.modelName, query),
+    fuzzyScore(model.modelId, query),
     fuzzyScore(model.providerName, query),
-    fuzzyScore(`${model.providerName} ${model.name}`, query),
+    fuzzyScore(model.agentProviderName, query),
+    fuzzyScore(
+      `${model.agentProviderName} ${model.providerName} ${model.modelName}`,
+      query,
+    ),
   );
 }
 
@@ -100,6 +100,7 @@ export type HydrationDeps = {
   activeSessionIdRef: React.MutableRefObject<string | null>;
   pendingRequestIdsRef: React.MutableRefObject<Map<string, string>>;
   setActiveSessionId: (id: string | null) => void;
+  setActiveSessionAgentProviderId?: (id: string | undefined) => void;
   setPendingRequestIds: (ids: Map<string, string>) => void;
   setOptimisticMessage: (msg: null) => void;
   resetStreamingContent: () => void;
@@ -193,6 +194,9 @@ export function useChatSession(deps: HydrationDeps) {
             newPending.set(activeStream.sessionId, activeStream.requestId);
             deps.pendingRequestIdsRef.current = newPending;
             setActiveProject(streamingProject);
+            deps.setActiveSessionAgentProviderId?.(
+              activeStream.agentProviderId,
+            );
             deps.setActiveSessionId(activeStream.sessionId);
             deps.setPendingRequestIds(newPending);
             deps.setOptimisticMessage(null);
@@ -330,13 +334,17 @@ export function useChatSession(deps: HydrationDeps) {
         const savedModelJson = await AsyncStorage.getItem(LAST_SELECTED_MODEL);
         if (savedModelJson) {
           const savedModel = JSON.parse(savedModelJson) as ActiveModel;
-          const modelExists = providers.some(
-            (p) =>
-              p.id === savedModel.providerId &&
-              p.models.some((m) => m.id === savedModel.id),
+          const models = flattenProvidersToModels(providers);
+          const modelExists = models.find(
+            (model) =>
+              model.id === savedModel.id ||
+              (model.agentProviderId ===
+                (savedModel.agentProviderId ?? "opencode") &&
+                model.providerId === savedModel.providerId &&
+                model.modelId === (savedModel.modelId ?? savedModel.id)),
           );
           if (modelExists) {
-            setActiveModel(savedModel);
+            setActiveModel(modelExists);
           }
         }
       } catch {}
@@ -399,6 +407,11 @@ export function useChatSession(deps: HydrationDeps) {
     });
     return sorted;
   }, [providers, activeModel, modelSearchQuery]);
+
+  const sortedModelGroups = React.useMemo(
+    () => groupModelsByRuntime(sortedModels),
+    [sortedModels],
+  );
 
   const sortedProjects = React.useMemo(() => {
     if (!activeProject) return projects ?? [];
@@ -484,23 +497,17 @@ export function useChatSession(deps: HydrationDeps) {
     [],
   );
 
-  const handleSelectModel = React.useCallback(
-    (item: ActiveModel) => {
-      setActiveModel(item);
-      setShowProviderSheet(false);
-      setModelSearchQuery("");
-    },
-    [],
-  );
+  const handleSelectModel = React.useCallback((item: ActiveModel) => {
+    setActiveModel(item);
+    setShowProviderSheet(false);
+    setModelSearchQuery("");
+  }, []);
 
-  const handleSelectAgent = React.useCallback(
-    (item: Agent) => {
-      setActiveAgent(item);
-      setShowAgentSheet(false);
-      setAgentSearchQuery("");
-    },
-    [],
-  );
+  const handleSelectAgent = React.useCallback((item: Agent) => {
+    setActiveAgent(item);
+    setShowAgentSheet(false);
+    setAgentSearchQuery("");
+  }, []);
 
   return {
     // State
@@ -529,6 +536,7 @@ export function useChatSession(deps: HydrationDeps) {
     switchBranchMutation,
     // Sorted lists
     sortedModels,
+    sortedModelGroups,
     sortedProjects,
     sortedAgents,
     sortedBranches,

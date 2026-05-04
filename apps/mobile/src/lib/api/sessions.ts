@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import baseApi from "../axios/base";
 import { queryClient } from "../query-client";
 import type { Session as OpenCodeSession } from "../opencode-types";
@@ -16,6 +16,7 @@ export interface Session {
   id: string;
   projectID: string;
   projectName?: string;
+  agentProviderId?: string;
   status: SessionStatus;
   title: string;
   directory: string;
@@ -102,6 +103,10 @@ export function adaptSession(openCodeSession: OpenCodeSession): Session {
       (typeof raw.projectID === "string" && raw.projectID) ||
       (typeof raw.projectId === "string" && raw.projectId) ||
       openCodeSession.projectID,
+    agentProviderId:
+      typeof raw.agentProviderId === "string" && raw.agentProviderId
+        ? raw.agentProviderId
+        : undefined,
     title: openCodeSession.title,
     directory: openCodeSession.directory,
     createdAt,
@@ -137,18 +142,19 @@ export const sessionsKeys = {
   list: (filters: Record<string, unknown>) =>
     [...sessionsKeys.lists(), filters] as const,
   details: () => [...sessionsKeys.all, "detail"] as const,
-  detail: (id: string) => [...sessionsKeys.details(), id] as const,
+  detail: (id: string, agentProviderId?: string) =>
+    [...sessionsKeys.details(), id, agentProviderId ?? "opencode"] as const,
 };
 
-export function useSessions(cwd: string) {
+export function useSessions(cwd: string, agentProviderId?: string) {
   return useQuery<Session[]>({
-    queryKey: sessionsKeys.list({ cwd }),
+    queryKey: sessionsKeys.list({ cwd, agentProviderId }),
     enabled: Boolean(cwd),
     queryFn: async () => {
       const response = await baseApi.get<{ sessions: OpenCodeSession[] }>(
         "/sessions",
         {
-          params: { cwd },
+          params: { cwd, agentProviderId },
         },
       );
       return (response.data.sessions ?? []).map(adaptSession);
@@ -156,24 +162,70 @@ export function useSessions(cwd: string) {
   });
 }
 
-export function useSession(sessionId: string) {
+export function useSessionsForProviders(
+  cwd: string,
+  agentProviderIds: string[],
+) {
+  const uniqueAgentProviderIds = Array.from(
+    new Set(agentProviderIds.map((id) => id.trim()).filter(Boolean)),
+  );
+
+  const results = useQueries({
+    queries: uniqueAgentProviderIds.map((agentProviderId) => ({
+      queryKey: sessionsKeys.list({ cwd, agentProviderId }),
+      enabled: Boolean(cwd),
+      queryFn: async () => {
+        const response = await baseApi.get<{ sessions: OpenCodeSession[] }>(
+          "/sessions",
+          {
+            params: { cwd, agentProviderId },
+          },
+        );
+        return (response.data.sessions ?? []).map(adaptSession);
+      },
+    })),
+  });
+
+  const data = Array.from(
+    new Map(
+      results
+        .flatMap((result) => result.data ?? [])
+        .map((session) => [`${session.agentProviderId ?? "opencode"}:${session.id}`, session]),
+    ).values(),
+  );
+
+  return {
+    data,
+    isLoading: results.some((result) => result.isLoading),
+    error: results.find((result) => result.error)?.error ?? null,
+  };
+}
+
+export function useSession(sessionId: string, agentProviderId?: string) {
   return useQuery<Session | null>({
-    queryKey: sessionsKeys.detail(sessionId),
+    queryKey: sessionsKeys.detail(sessionId, agentProviderId),
     enabled: Boolean(sessionId),
     queryFn: async () => {
       const response = await baseApi.get<{ session: OpenCodeSession | null }>(
         `/sessions/${sessionId}`,
+        {
+          params: { agentProviderId },
+        },
       );
       return response.data.session ? adaptSession(response.data.session) : null;
     },
   });
 }
 
-export async function createSession(projectId: string) {
+export async function createSession(params: {
+  projectId: string;
+  agentProviderId?: string;
+}) {
   const response = await baseApi.post<{ session: OpenCodeSession }>(
     "/sessions",
     {
-      projectId,
+      projectId: params.projectId,
+      agentProviderId: params.agentProviderId,
       prompt: "",
     },
   );

@@ -9,6 +9,7 @@ export type ActiveSessionStream = {
   requestId: string;
   sessionId: string;
   projectId: string;
+  agentProviderId?: string;
   baselineMessageId?: string | null;
 };
 
@@ -22,6 +23,8 @@ function isActiveSessionStream(value: unknown): value is ActiveSessionStream {
     typeof candidate.requestId === "string" &&
     typeof candidate.sessionId === "string" &&
     typeof candidate.projectId === "string" &&
+    (typeof candidate.agentProviderId === "string" ||
+      candidate.agentProviderId == null) &&
     (typeof candidate.baselineMessageId === "string" ||
       candidate.baselineMessageId == null)
   );
