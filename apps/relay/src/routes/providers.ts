@@ -48,9 +48,15 @@ router.get("/", async (req: Request, res: Response) => {
       (result) => result.response.providers || [],
     );
 
-    // Deduplicate providers by ID
+    // Deduplicate by runtime provider and model provider. Different runtimes
+    // can expose the same underlying provider id, such as openai.
     const uniqueProviders = Array.from(
-      new Map(providers.map((provider) => [provider.id, provider])).values(),
+      new Map(
+        providers.map((provider) => [
+          `${provider.agentProviderId ?? "opencode"}:${provider.id}`,
+          provider,
+        ]),
+      ).values(),
     );
 
     res.json({ providers: uniqueProviders });

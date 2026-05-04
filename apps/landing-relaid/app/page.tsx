@@ -1,6 +1,7 @@
 import { HeroContent } from "../components/HeroContent";
 import { PhoneMockup } from "../components/PhoneMockup";
 import Image from "next/image";
+import Link from "next/link";
 
 type DownloadLink = {
   label: string;
@@ -76,6 +77,15 @@ export default function Home() {
         />
         <PhoneMockup />
       </main>
+
+      <footer className="relative z-10 max-w-7xl mx-auto px-6 md:px-12 pb-10">
+        <div className="flex items-center justify-between text-xs opacity-70">
+          <span>© Relaid</span>
+          <Link href="/privacy-policy" className="hover:opacity-100 underline">
+            Privacy Policy
+          </Link>
+        </div>
+      </footer>
 
       <style>{`
         @keyframes fade-in {

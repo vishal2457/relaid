@@ -1,6 +1,5 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { Download, Smartphone } from "lucide-react";
 
@@ -34,11 +33,8 @@ function getPlatformInfo(): { isMobile: boolean; os: string } {
 }
 
 function filterDesktopDownloads(downloads: DownloadLink[], os: string): DownloadLink[] {
-  if (os === "macSilicon") {
-    return downloads.filter((d) => d.label === "Mac Silicon");
-  }
-  if (os === "macIntel") {
-    return downloads.filter((d) => d.label === "Mac Intel");
+  if (os === "macSilicon" || os === "macIntel") {
+    return downloads.filter((d) => d.label === "Mac Silicon" || d.label === "Mac Intel");
   }
   if (os === "windows") {
     return downloads.filter((d) => d.label === "Windows");
@@ -50,11 +46,7 @@ function filterDesktopDownloads(downloads: DownloadLink[], os: string): Download
 }
 
 export function HeroContent({ androidDownload, desktopDownloads }: HeroContentProps) {
-  const [platform, setPlatform] = useState<{ isMobile: boolean; os: string }>({ isMobile: false, os: "unknown" });
-
-  useEffect(() => {
-    setPlatform(getPlatformInfo());
-  }, []);
+  const platform = getPlatformInfo();
 
   const filteredDesktop = platform.isMobile
     ? desktopDownloads.filter((d) => d.label === "Linux")

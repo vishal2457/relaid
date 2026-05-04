@@ -65,6 +65,7 @@ async function processPermissionNotificationResponse(
   try {
     await sendPermissionResponse({
       requestId: data.requestId as string,
+      agentProviderId: data.agentProviderId as string | undefined,
       sessionId: data.sessionId as string,
       jobId: (data.jobId as string) || "",
       reply,
@@ -128,6 +129,7 @@ export async function processLastPermissionNotificationResponse(): Promise<void>
 
 export async function showPermissionNotification(params: {
   requestId: string;
+  agentProviderId?: string;
   projectId: string;
   sessionId: string;
   jobId: string;
@@ -160,6 +162,7 @@ export async function showPermissionNotification(params: {
       data: {
         type: "permission_request",
         requestId,
+        agentProviderId: params.agentProviderId,
         projectId: params.projectId,
         sessionId,
         jobId,

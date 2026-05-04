@@ -2,7 +2,7 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { FormattedText } from "./FormattedText";
-import { ToolPart } from "./ToolPart";
+import { AssistantBlockSequence } from "./AssistantBlockSequence";
 import type { SessionMessage } from "@/src/lib/api/messages";
 
 const roleLabelMap: Record<SessionMessage["role"], string> = {
@@ -75,7 +75,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     const mainContent =
       message.role === "assistant" ? message.visibleContent : message.content;
     const hasVisibleText = mainContent.trim().length > 0;
-    const assistantActivities = message.assistant?.activities ?? [];
+    const assistantBlocks = message.assistant?.blocks ?? [];
     const assistantMeta = [
       formatAssistantMode(message.assistant?.mode),
       message.assistant?.model,
@@ -83,15 +83,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     ]
       .filter(Boolean)
       .join(" • ");
-    const showBubble = !isAssistant || hasVisibleText;
-    const showAssistantDetails = isAssistant && assistantActivities.length > 0;
+    const showBubble =
+      !isAssistant || (hasVisibleText && assistantBlocks.length === 0);
+    const showAssistantBlocks = isAssistant && assistantBlocks.length > 0;
     const showAssistantMeta =
-      isAssistant && hasVisibleText && assistantMeta.length > 0;
+      isAssistant &&
+      hasVisibleText &&
+      assistantMeta.length > 0 &&
+      assistantBlocks.length === 0;
 
     return (
       <View
         style={{
-          marginVertical: showBubble && !showAssistantDetails ? 12 : 0,
+          marginVertical: showBubble && !showAssistantBlocks ? 12 : 0,
           alignItems: isUser ? "flex-end" : "flex-start",
         }}
       >
@@ -138,24 +142,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
           </View>
         ) : null}
 
-        {showAssistantDetails ? (
-          <View
-            style={{
-              width: "85%",
-              marginTop: showBubble ? 10 : 0,
-              flexDirection: 'column',
-              gap: 5,
-            }}
-          >
-            {assistantActivities.map((activity) => (
-              <ToolPart
-                key={activity.id}
-                activity={activity}
-                metaColor={metaColor}
-                borderColor={borderColor}
-                textColor={textColor}
-              />
-            ))}
+        {showAssistantBlocks ? (
+          <View style={{ marginTop: showBubble ? 10 : 0 }}>
+            <AssistantBlockSequence
+              blocks={assistantBlocks}
+              metaText={assistantMeta.length > 0 ? assistantMeta : null}
+              assistantBubble={assistantBubble}
+              textColor={textColor}
+              metaColor={metaColor}
+              borderColor={borderColor}
+            />
           </View>
         ) : null}
       </View>

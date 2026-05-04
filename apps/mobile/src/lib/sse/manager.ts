@@ -93,6 +93,7 @@ export function disconnectSseClient(): void {
 export async function sendPromptRequest(params: {
   sessionId: string;
   requestId: string;
+  agentProviderId?: string;
   projectId: string;
   prompt: string;
   agent?: string;
@@ -100,6 +101,7 @@ export async function sendPromptRequest(params: {
 }): Promise<void> {
   await baseApi.post(`/mobile/sessions/${params.sessionId}/prompt`, {
     requestId: params.requestId,
+    agentProviderId: params.agentProviderId,
     projectId: params.projectId,
     prompt: params.prompt,
     agent: params.agent,
@@ -110,11 +112,13 @@ export async function sendPromptRequest(params: {
 export async function sendAbortRequest(params: {
   sessionId: string;
   requestId?: string;
+  agentProviderId?: string;
   projectId?: string;
 }): Promise<void> {
   const url = `/mobile/sessions/${params.sessionId}/abort`;
   const data = {
     requestId: params.requestId,
+    agentProviderId: params.agentProviderId,
     projectId: params.projectId,
   };
 
@@ -126,10 +130,17 @@ export async function sendAbortRequest(params: {
 
   try {
     const response = await baseApi.post(url, data);
-    console.log("[SSE Manager] sendAbortRequest success:", response.status, JSON.stringify(response.data));
+    console.log(
+      "[SSE Manager] sendAbortRequest success:",
+      response.status,
+      JSON.stringify(response.data),
+    );
   } catch (error: any) {
     console.error("[SSE Manager] sendAbortRequest FAILED:", error?.message);
-    console.error("[SSE Manager] Full URL would be:", `${chatServerApiUrl}/api${url}`);
+    console.error(
+      "[SSE Manager] Full URL would be:",
+      `${chatServerApiUrl}/api${url}`,
+    );
     throw error;
   }
 }
@@ -137,6 +148,7 @@ export async function sendAbortRequest(params: {
 export async function sendPermissionResponse(params: {
   sessionId: string;
   requestId: string;
+  agentProviderId?: string;
   jobId: string;
   reply: "once" | "always" | "reject";
 }): Promise<void> {
@@ -144,6 +156,7 @@ export async function sendPermissionResponse(params: {
     `/mobile/sessions/${params.sessionId}/permission-response`,
     {
       requestId: params.requestId,
+      agentProviderId: params.agentProviderId,
       sessionId: params.sessionId,
       jobId: params.jobId,
       reply: params.reply,
@@ -154,11 +167,13 @@ export async function sendPermissionResponse(params: {
 export async function sendQuestionResponse(params: {
   sessionId: string;
   requestId: string;
+  agentProviderId?: string;
   jobId: string;
   answers: string[][];
 }): Promise<void> {
   await baseApi.post(`/mobile/sessions/${params.sessionId}/question-response`, {
     requestId: params.requestId,
+    agentProviderId: params.agentProviderId,
     sessionId: params.sessionId,
     jobId: params.jobId,
     answers: params.answers,

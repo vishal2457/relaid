@@ -71,10 +71,24 @@ function handleRouteError(
   res.status(500).json({ error: defaultMessage });
 }
 
+function getAgentProviderId(req: Request): string | undefined {
+  if (typeof req.query.agentProviderId === "string") {
+    return req.query.agentProviderId;
+  }
+  if (
+    req.body &&
+    typeof (req.body as Record<string, unknown>).agentProviderId === "string"
+  ) {
+    return (req.body as Record<string, string>).agentProviderId;
+  }
+  return undefined;
+}
+
 router.get("/", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
     const cwd = typeof req.query.cwd === "string" ? req.query.cwd : undefined;
+    const agentProviderId = getAgentProviderId(req);
 
     console.log(userId, "user id");
     console.log(cwd, "cwd");
@@ -84,6 +98,7 @@ router.get("/", async (req: Request, res: Response) => {
       "sessions_list_request",
       "sessions_list_response",
       {
+        agentProviderId,
         cwd,
         status:
           typeof req.query.status === "string" ? req.query.status : undefined,
@@ -136,11 +151,12 @@ router.get("/", async (req: Request, res: Response) => {
 router.get("/:id", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const agentProviderId = getAgentProviderId(req);
     const result = await requestUntilMatch<SessionResponse>(
       userId,
       "session_get_request",
       "session_get_response",
-      { sessionId: req.params.id },
+      { agentProviderId, sessionId: req.params.id },
       (response) => Boolean(response.session),
     );
 
@@ -158,6 +174,7 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.get("/:id/messages", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const agentProviderId = getAgentProviderId(req);
     console.log(userId, "user id");
     console.log(req.params.id, "id");
 
@@ -165,7 +182,7 @@ router.get("/:id/messages", async (req: Request, res: Response) => {
       userId,
       "session_get_request",
       "session_get_response",
-      { sessionId: req.params.id },
+      { agentProviderId, sessionId: req.params.id },
       (response) => Boolean(response.session),
     );
 
@@ -184,6 +201,7 @@ router.get("/:id/messages", async (req: Request, res: Response) => {
       "session_messages_request",
       "session_messages_response",
       {
+        agentProviderId,
         sessionId: req.params.id,
         limit,
       },
@@ -199,11 +217,12 @@ router.get("/:id/messages", async (req: Request, res: Response) => {
 router.get("/:id/diff", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const agentProviderId = getAgentProviderId(req);
     const sessionLookup = await requestUntilMatch<SessionResponse>(
       userId,
       "session_get_request",
       "session_get_response",
-      { sessionId: req.params.id },
+      { agentProviderId, sessionId: req.params.id },
       (response) => Boolean(response.session),
     );
 
@@ -220,6 +239,7 @@ router.get("/:id/diff", async (req: Request, res: Response) => {
       "session_diff_request",
       "session_diff_response",
       {
+        agentProviderId,
         sessionId: req.params.id,
         messageId,
       },
@@ -235,7 +255,13 @@ router.get("/:id/diff", async (req: Request, res: Response) => {
 router.post("/", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
-    const { projectId, prompt, resumeSessionId, localServerId } = req.body;
+    const {
+      projectId,
+      prompt,
+      resumeSessionId,
+      localServerId,
+      agentProviderId,
+    } = req.body;
 
     if (!projectId) {
       res.status(400).json({ error: "projectId is required" });
@@ -266,6 +292,7 @@ router.post("/", async (req: Request, res: Response) => {
       "session_create_request",
       "session_create_response",
       {
+        agentProviderId,
         projectId,
         prompt: typeof prompt === "string" ? prompt : "",
         sessionId: resumeSessionId,
@@ -286,12 +313,14 @@ router.post("/", async (req: Request, res: Response) => {
 router.patch("/:id/status", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const agentProviderId = getAgentProviderId(req);
     const result = await requestUntilMatch<SessionResponse>(
       userId,
       "session_update_request",
       "session_update_response",
       {
         sessionId: req.params.id,
+        agentProviderId,
         status: req.body.status,
         output: req.body.output,
         error: req.body.error,
@@ -316,11 +345,12 @@ router.patch("/:id/status", async (req: Request, res: Response) => {
 router.post("/:id/abort", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const agentProviderId = getAgentProviderId(req);
     const sessionLookup = await requestUntilMatch<SessionResponse>(
       userId,
       "session_get_request",
       "session_get_response",
-      { sessionId: req.params.id },
+      { agentProviderId, sessionId: req.params.id },
       (response) => Boolean(response.session),
     );
 
@@ -337,6 +367,7 @@ router.post("/:id/abort", async (req: Request, res: Response) => {
       "session_abort",
       "session_aborted",
       {
+        agentProviderId,
         sessionId: req.params.id,
         projectId: projectId as string,
       },

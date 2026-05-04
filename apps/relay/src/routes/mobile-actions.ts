@@ -22,8 +22,14 @@ type SessionResponse = {
   error?: string;
 };
 
+type ProjectResponse = {
+  project: Record<string, unknown> | null;
+  error?: string;
+};
+
 type SessionPromptRequest = {
   requestId: string;
+  agentProviderId?: string;
   projectId: string;
   sessionId: string;
   prompt: string;
@@ -33,11 +39,16 @@ type SessionPromptRequest = {
 
 type SessionAbortRequest = {
   requestId: string;
+  agentProviderId?: string;
   sessionId: string;
   projectId: string;
 };
 
 const router: Router = Router();
+
+function shouldSkipSessionPreflight(agentProviderId?: string): boolean {
+  return agentProviderId === "codex";
+}
 
 function handleRouteError(
   res: Response,
@@ -60,7 +71,7 @@ router.post(
     try {
       const userId = requireUserId(req.headers["x-user-id"]);
       const sessionId = req.params.sessionId;
-      const { requestId, projectId, prompt, agent, model } =
+      const { requestId, agentProviderId, projectId, prompt, agent, model } =
         req.body as SessionPromptRequest;
 
       if (!requestId || !projectId) {
@@ -72,11 +83,14 @@ router.post(
         userId,
         "session_get_request",
         "session_get_response",
-        { sessionId },
+        { agentProviderId, sessionId },
         (response) => Boolean(response.session),
       );
 
-      if (!sessionResult?.response.session) {
+      if (
+        !sessionResult?.response.session &&
+        !shouldSkipSessionPreflight(agentProviderId)
+      ) {
         broadcastToUser(userId, "session_prompt_response", {
           requestId,
           projectId,
@@ -84,6 +98,37 @@ router.post(
           success: false,
           output: "",
           error: "Session not found",
+          exitCode: -1,
+          duration: 0,
+          messages: [],
+        } satisfies Partial<SessionPromptResponseEvent> as Record<
+          string,
+          unknown
+        >);
+        res.json({ accepted: true, requestId });
+        return;
+      }
+
+      let targetServerId = sessionResult?.serverId;
+      if (!targetServerId) {
+        const projectResult = await requestUntilMatch<ProjectResponse>(
+          userId,
+          "project_get_request",
+          "project_get_response",
+          { projectId },
+          (response) => Boolean(response.project),
+        );
+        targetServerId = projectResult?.serverId;
+      }
+
+      if (!targetServerId) {
+        broadcastToUser(userId, "session_prompt_response", {
+          requestId,
+          projectId,
+          sessionId,
+          success: false,
+          output: "",
+          error: "Local server not found for project",
           exitCode: -1,
           duration: 0,
           messages: [],
@@ -104,6 +149,7 @@ router.post(
           "session_prompt_response",
           {
             requestId,
+            agentProviderId,
             projectId,
             sessionId,
             prompt,
@@ -111,7 +157,7 @@ router.post(
             model,
             userId,
           },
-          sessionResult.serverId,
+          targetServerId,
         );
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
@@ -142,13 +188,14 @@ router.post(
     try {
       const userId = requireUserId(req.headers["x-user-id"]);
       const sessionId = req.params.sessionId;
-      const { requestId, projectId } = req.body as SessionAbortRequest;
+      const { requestId, agentProviderId, projectId } =
+        req.body as SessionAbortRequest;
 
       const sessionResult = await requestUntilMatch<SessionResponse>(
         userId,
         "session_get_request",
         "session_get_response",
-        { sessionId },
+        { agentProviderId, sessionId },
         (response) => Boolean(response.session),
       );
 
@@ -173,6 +220,7 @@ router.post(
         "session_aborted",
         {
           requestId: requestId || `abort_${Date.now()}`,
+          agentProviderId,
           sessionId,
           projectId: resolvedProjectId,
         },
@@ -203,7 +251,7 @@ router.post(
         userId,
         "session_get_request",
         "session_get_response",
-        { sessionId },
+        { agentProviderId: data.agentProviderId, sessionId },
         (response) => Boolean(response.session),
       );
 
@@ -249,7 +297,7 @@ router.post(
         userId,
         "session_get_request",
         "session_get_response",
-        { sessionId },
+        { agentProviderId: data.agentProviderId, sessionId },
         (response) => Boolean(response.session),
       );
 
