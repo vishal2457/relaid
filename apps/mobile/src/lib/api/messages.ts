@@ -398,6 +398,19 @@ type NormalizedEditData = {
   path: string | null;
 };
 
+function getNormalizedEditChangeKey(change: NormalizedEditChange): string {
+  return JSON.stringify({
+    path: change.path,
+    additions: change.additions,
+    deletions: change.deletions,
+    oldContent: change.oldContent,
+    newContent: change.newContent,
+    patch: change.patch,
+    kind: change.kind,
+    movePath: change.movePath,
+  });
+}
+
 function getEditDiffCounts(part: ToolPart): NormalizedEditData {
   const metadata = getToolStateMetadata(part);
   const metadataDiff = asRecord(metadata?.diff);
@@ -468,7 +481,15 @@ function getEditDiffCounts(part: ToolPart): NormalizedEditData {
         movePath: getStringValue(kind, ["move_path", "movePath"]),
       };
     })
-    .filter((change): change is NormalizedEditChange => change !== null);
+    .filter((change): change is NormalizedEditChange => change !== null)
+    .filter((change, index, list) => {
+      const key = getNormalizedEditChangeKey(change);
+      return (
+        list.findIndex(
+          (candidate) => getNormalizedEditChangeKey(candidate) === key,
+        ) === index
+      );
+    });
 
   if (normalizedChanges.length > 0) {
     const additions = normalizedChanges.reduce(

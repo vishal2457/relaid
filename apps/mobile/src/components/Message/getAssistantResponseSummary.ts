@@ -5,6 +5,23 @@ export interface AssistantResponseSummaryContext {
   summary: MessageSummary;
 }
 
+function hasFileChangeActivity(message: SessionMessage | undefined): boolean {
+  if (!message || message.role !== "assistant") {
+    return false;
+  }
+
+  return (message.assistant?.activities ?? []).some(
+    (activity) =>
+      (activity.kind === "edit" || activity.kind === "write") &&
+      ((activity.items?.length ?? 0) > 0 ||
+        activity.patch !== null ||
+        activity.oldContent !== null ||
+        activity.newContent !== null ||
+        activity.additions !== null ||
+        activity.deletions !== null),
+  );
+}
+
 export function getAssistantResponseSummaryContext(
   messages: SessionMessage[],
   index: number,
@@ -15,11 +32,32 @@ export function getAssistantResponseSummaryContext(
     return undefined;
   }
 
-  if (messages[index + 1]?.role === "assistant") {
+  let segmentEnd = index;
+  while (messages[segmentEnd + 1]?.role === "assistant") {
+    segmentEnd += 1;
+  }
+
+  let segmentStart = index;
+  while (messages[segmentStart - 1]?.role === "assistant") {
+    segmentStart -= 1;
+  }
+
+  let preferredAssistantIndex = -1;
+  for (let cursor = segmentEnd; cursor >= segmentStart; cursor -= 1) {
+    if (hasFileChangeActivity(messages[cursor])) {
+      preferredAssistantIndex = cursor;
+      break;
+    }
+  }
+
+  const eligibleIndex =
+    preferredAssistantIndex >= 0 ? preferredAssistantIndex : segmentEnd;
+
+  if (index !== eligibleIndex) {
     return undefined;
   }
 
-  for (let cursor = index; cursor >= 0; cursor -= 1) {
+  for (let cursor = segmentStart; cursor >= 0; cursor -= 1) {
     const candidate = messages[cursor];
 
     if (!candidate) {
