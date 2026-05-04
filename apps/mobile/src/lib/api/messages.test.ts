@@ -175,6 +175,11 @@ function testCodexSingleFileChange() {
   assertEqual(edit.filename, "foo.ts", "Codex single-file filename");
   assertEqual(edit.additions, 1, "Codex single-file additions");
   assertEqual(edit.deletions, 1, "Codex single-file deletions");
+  assertEqual(
+    Array.isArray(edit.items),
+    false,
+    "Codex single-file edit should not create duplicate child diffs",
+  );
   assertEqual(edit.oldContent, "const a = 1;", "Codex single-file old content");
   assertEqual(edit.newContent, "const a = 2;", "Codex single-file new content");
   assert(edit.patch?.includes("+const a = 2;"), "Codex single-file patch");
@@ -232,6 +237,7 @@ function testCodexMultiFileChange() {
   assertEqual(edit.items?.length, 2, "Multi-file edit should expose per-file items");
   assertEqual(edit.items?.[0]?.filename ?? null, "a.ts", "First per-file item");
   assertEqual(edit.items?.[1]?.filename ?? null, "b.ts", "Second per-file item");
+  assertEqual(edit.items?.[0]?.directory ?? null, null, "Codex multi-file rows should not show full paths");
 }
 
 function testOrdering() {

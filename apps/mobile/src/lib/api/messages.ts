@@ -122,30 +122,27 @@ export interface SessionMessage {
 }
 
 function getToolLabel(part: ToolPart): string {
-  const title =
-    "title" in part.state && typeof part.state.title === "string"
-      ? part.state.title
-      : undefined;
+  const state = asRecord(part.state);
+  const title = getStringValue(state, ["title"]);
   return title || part.tool;
 }
 
 function getToolErrorSummary(toolParts: ToolPart[]): string {
   const failedTool = toolParts.find(
-    (part) =>
-      part.state.status === "error" &&
-      "error" in part.state &&
-      typeof part.state.error === "string" &&
-      part.state.error.trim().length > 0,
+    (part) => {
+      const state = asRecord(part.state);
+      return (
+        getStringValue(state, ["status"]) === "error" &&
+        Boolean(getStringValue(state, ["error"]))
+      );
+    },
   );
 
   if (!failedTool) {
     return "";
   }
 
-  const error =
-    failedTool.state.status === "error" && "error" in failedTool.state
-      ? failedTool.state.error.trim()
-      : "";
+  const error = getStringValue(asRecord(failedTool.state), ["error"]) ?? "";
 
   return error ? `${getToolLabel(failedTool)} failed: ${error}` : "";
 }
@@ -305,11 +302,26 @@ function getNormalizedPath(pathValue: string | null): {
 }
 
 function getToolStateMetadata(part: ToolPart): Record<string, unknown> | null {
-  return "metadata" in part.state ? asRecord(part.state.metadata) : null;
+  const state = asRecord(part.state);
+
+  return (
+    asRecord(state?.metadata) ??
+    asRecord(part.metadata)
+  );
+}
+
+function getToolStateInput(part: ToolPart): Record<string, unknown> | null {
+  const state = asRecord(part.state);
+  return asRecord(state?.input);
+}
+
+function getToolStateTime(part: ToolPart): Record<string, unknown> | null {
+  const state = asRecord(part.state);
+  return asRecord(state?.time);
 }
 
 function getToolPath(part: ToolPart): string | null {
-  const input = asRecord(part.state.input);
+  const input = getToolStateInput(part);
   const metadata = getToolStateMetadata(part);
 
   return (
@@ -389,7 +401,7 @@ type NormalizedEditData = {
 function getEditDiffCounts(part: ToolPart): NormalizedEditData {
   const metadata = getToolStateMetadata(part);
   const metadataDiff = asRecord(metadata?.diff);
-  const input = asRecord(part.state.input);
+  const input = getToolStateInput(part);
   const changes = [
     ...(getArrayValue(input, ["changes"]) ?? []),
     ...(getArrayValue(metadata, ["changes"]) ?? []),
@@ -467,15 +479,28 @@ function getEditDiffCounts(part: ToolPart): NormalizedEditData {
       (total, change) => total + (change.deletions ?? 0),
       0,
     );
+    const [firstChange] = normalizedChanges;
+    if (normalizedChanges.length === 1) {
+      return {
+        additions: firstChange?.additions ?? null,
+        deletions: firstChange?.deletions ?? null,
+        oldContent: firstChange?.oldContent ?? null,
+        newContent: firstChange?.newContent ?? null,
+        patch: firstChange?.patch ?? null,
+        items: undefined,
+        path: firstChange?.path ?? null,
+      };
+    }
+
     const items = normalizedChanges.map((change, index) => ({
       id: `${part.id}-change-${index}`,
       label: change.filename ?? change.path ?? "Edited file",
       detail:
         change.movePath && change.movePath !== change.path
           ? `Moved to ${change.movePath}`
-          : change.directory,
+          : null,
       filename: change.filename,
-      directory: change.directory,
+      directory: null,
       additions: change.additions,
       deletions: change.deletions,
       oldContent: change.oldContent,
@@ -483,20 +508,14 @@ function getEditDiffCounts(part: ToolPart): NormalizedEditData {
       patch: change.patch,
     }));
 
-    const [firstChange] = normalizedChanges;
-    const topLevelPath =
-      normalizedChanges.length === 1 ? (firstChange?.path ?? null) : null;
-
     return {
       additions,
       deletions,
-      oldContent:
-        normalizedChanges.length === 1 ? (firstChange?.oldContent ?? null) : null,
-      newContent:
-        normalizedChanges.length === 1 ? (firstChange?.newContent ?? null) : null,
-      patch: normalizedChanges.length === 1 ? (firstChange?.patch ?? null) : null,
+      oldContent: null,
+      newContent: null,
+      patch: null,
       items,
-      path: topLevelPath,
+      path: null,
     };
   }
 
@@ -550,7 +569,7 @@ function getEditDiffCounts(part: ToolPart): NormalizedEditData {
 
 function getShellDetail(part: ToolPart): string | null {
   const metadata = getToolStateMetadata(part);
-  const input = asRecord(part.state.input);
+  const input = getToolStateInput(part);
   const command = getStringValue(input, [
     "description",
     "command",
@@ -581,15 +600,13 @@ function getShellDetail(part: ToolPart): string | null {
         ? `${command} • ${extras.join(" • ")}`
         : command
       : null) ??
-    ("title" in part.state && typeof part.state.title === "string"
-      ? part.state.title
-      : null)
+    getStringValue(asRecord(part.state), ["title"])
   );
 }
 
 function getGenericToolDetail(part: ToolPart): string | null {
   const metadata = getToolStateMetadata(part);
-  const input = asRecord(part.state.input);
+  const input = getToolStateInput(part);
   const primary =
     getStringValue(metadata, ["description", "title", "summary"]) ??
     getStringValue(input, [
@@ -607,8 +624,15 @@ function getGenericToolDetail(part: ToolPart): string | null {
   const argumentsValue = input?.arguments;
   const formattedArguments =
     argumentsValue !== undefined ? JSON.stringify(argumentsValue) : null;
-  const secondary = [getStringValue(input, ["server"]), getStringValue(input, ["namespace"]), codexType]
-    .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index)
+  const secondary = [
+    getStringValue(input, ["server"]),
+    getStringValue(input, ["namespace"]),
+    codexType,
+  ]
+    .filter(
+      (value, index, values) =>
+        Boolean(value) && values.indexOf(value) === index,
+    )
     .join(" • ");
 
   return (
@@ -623,21 +647,22 @@ function getGenericToolDetail(part: ToolPart): string | null {
 }
 
 function getToolOutput(part: ToolPart): string | null {
-  if ("output" in part.state && typeof part.state.output === "string") {
-    const output = part.state.output.trim();
-    return output.length > 0 ? output : null;
+  const state = asRecord(part.state);
+  const output = getStringValue(state, ["output"]);
+  if (output) {
+    return output;
   }
 
-  if ("error" in part.state && typeof part.state.error === "string") {
-    const error = part.state.error.trim();
-    return error.length > 0 ? error : null;
+  const error = getStringValue(state, ["error"]);
+  if (error) {
+    return error;
   }
 
   return null;
 }
 
 function getExplorationItemDetail(part: ToolPart): string | null {
-  const input = asRecord(part.state.input);
+  const input = getToolStateInput(part);
 
   switch (part.tool) {
     case "read": {
@@ -712,6 +737,8 @@ function formatExplorationSummary(parts: ToolPart[]): string {
 function getToolActivity(part: ToolPart): SessionAssistantActivity {
   if (part.tool === "write" || part.tool === "edit") {
     const diffCounts = part.tool === "edit" ? getEditDiffCounts(part) : null;
+    const metadata = getToolStateMetadata(part);
+    const isCodexFileChange = getStringValue(metadata, ["codexType"]) === "fileChange";
     const pathDetails = getNormalizedPath(
       diffCounts?.path ?? getToolPath(part),
     );
@@ -723,7 +750,7 @@ function getToolActivity(part: ToolPart): SessionAssistantActivity {
       detail: null,
       output: null,
       filename: pathDetails.filename,
-      directory: pathDetails.directory,
+      directory: isCodexFileChange ? null : pathDetails.directory,
       additions: diffCounts?.additions ?? null,
       deletions: diffCounts?.deletions ?? null,
       tool: part.tool,
@@ -1049,19 +1076,17 @@ export function adaptMessage(
         {
           type: "tool" as const,
           content: JSON.stringify(part),
-          durationSeconds:
-            typeof part.state === "object" &&
-            part.state &&
-            "time" in part.state &&
-            typeof part.state.time === "object" &&
-            part.state.time
-              ? "end" in part.state.time && typeof part.state.time.end === "number"
-                ? part.state.time.end -
-                  (typeof part.state.time.start === "number"
-                    ? part.state.time.start
-                    : 0)
-                : null
-              : null,
+          durationSeconds: (() => {
+            const time = getToolStateTime(part);
+            const end = getNumberValue(time, ["end"]);
+            const start = getNumberValue(time, ["start"]);
+
+            if (end === null || start === null) {
+              return null;
+            }
+
+            return end - start;
+          })(),
         },
       ];
     }

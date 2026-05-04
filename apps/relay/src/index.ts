@@ -153,10 +153,10 @@ const publicDir = path.join(process.cwd(), "public");
 const publicIndex = path.join(publicDir, "index.html");
 
 if (existsSync(publicDir)) {
-  app.use(express.static(publicDir, { index: false }));
+  app.use(express.static(publicDir));
 
   if (existsSync(publicIndex)) {
-    app.get("/", (_req, res) => {
+    app.get("*", (_req, res) => {
       res.sendFile(publicIndex);
     });
   }
