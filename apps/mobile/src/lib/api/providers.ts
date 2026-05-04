@@ -46,6 +46,7 @@ export function useProviders() {
     queryFn: async () => {
       const response = await baseApi.get<{ providers: Provider[] }>(
         "/providers",
+        { suppressErrorToast: true },
       );
       return response.data.providers ?? [];
     },

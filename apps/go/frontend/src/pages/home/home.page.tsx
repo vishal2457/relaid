@@ -186,6 +186,11 @@ export const HomePage = () => {
             <OpencodeStatusIcon className="h-4 w-4" />
             <span>{opencodeStatusLabel}</span>
           </div>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">
+            Start OpenCode on this desktop first, then press refresh here. Once
+            it shows connected, pair the mobile app from the Relay section above
+            and the model picker in mobile will populate automatically.
+          </p>
           {desktopStatusError ? (
             <p className="mt-2 text-xs text-red-500">{desktopStatusError}</p>
           ) : null}

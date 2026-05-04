@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Text, useTheme } from "react-native-paper";
 import { SelectionSheet } from "@/src/components/SelectionSheet";
 import type { Project } from "@/src/lib/api/projects";
@@ -9,8 +10,10 @@ type ProjectSelectionSheetProps = {
   projects: Project[];
   activeProjectId?: string | null;
   loading?: boolean;
+  refreshing?: boolean;
   onClose: () => void;
   onSelectProject: (project: Project) => void;
+  onRefresh?: () => void;
 };
 
 export function ProjectSelectionSheet({
@@ -18,8 +21,10 @@ export function ProjectSelectionSheet({
   projects,
   activeProjectId,
   loading = false,
+  refreshing = false,
   onClose,
   onSelectProject,
+  onRefresh,
 }: ProjectSelectionSheetProps) {
   const [searchQuery, setSearchQuery] = React.useState("");
   const theme = useTheme();
@@ -66,6 +71,26 @@ export function ProjectSelectionSheet({
       isLoading={loading}
       emptyText="No projects found"
       selectedId={activeProjectId}
+      titleAction={
+        onRefresh ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Refresh projects"
+            onPress={onRefresh}
+            style={({ pressed }) => [
+              styles.refreshButton,
+              { borderColor },
+              pressed && styles.refreshButtonPressed,
+            ]}
+          >
+            <MaterialCommunityIcons
+              name={refreshing ? "loading" : "refresh"}
+              size={16}
+              color={theme.colors.onSurface}
+            />
+          </Pressable>
+        ) : null
+      }
       getItemId={(item) => item.id}
       renderItem={(item, isSelected) => {
         return (
@@ -142,5 +167,16 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginTop: 2,
+  },
+  refreshButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  refreshButtonPressed: {
+    opacity: 0.7,
   },
 });
