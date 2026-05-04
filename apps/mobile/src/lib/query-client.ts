@@ -8,6 +8,10 @@ export const queryClient = new QueryClient({
         if (failureCount >= 0 && __DEV__) return false;
         if (failureCount > 3) return false;
 
+        if (error instanceof AxiosError && !error.response) {
+          return false;
+        }
+
         return !(
           error instanceof AxiosError &&
           [401, 403].includes(error.response?.status ?? 0)

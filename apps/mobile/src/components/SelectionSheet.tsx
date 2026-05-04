@@ -31,6 +31,7 @@ type SelectionSheetProps<T> = {
   getItemId?: (item: T, index: number) => string | null | undefined;
   renderItem?: (item: T, isSelected: boolean, index: number) => React.ReactNode;
   keyExtractor?: (item: T, index: number) => string;
+  titleAction?: React.ReactNode;
   children?: React.ReactNode;
   snapPoints?: string[];
   enableDynamicSizing?: boolean;
@@ -51,6 +52,7 @@ export function SelectionSheet<T>({
   getItemId,
   renderItem,
   keyExtractor,
+  titleAction,
   children,
   snapPoints: customSnapPoints,
   enableDynamicSizing = false,
@@ -144,13 +146,16 @@ export function SelectionSheet<T>({
       >
         {children ? (
           <BottomSheetView>
-            <View>
-              <Text
-                variant="titleMedium"
-                style={[styles.title, { color: theme.colors.onSurface }]}
-              >
-                {title}
-              </Text>
+            <View style={styles.header}>
+              <View style={styles.headerRow}>
+                <Text
+                  variant="titleMedium"
+                  style={[styles.title, { color: theme.colors.onSurface }]}
+                >
+                  {title}
+                </Text>
+                {titleAction}
+              </View>
 
               {onSearchChange && (
                 <View style={styles.searchContainer}>
@@ -187,13 +192,16 @@ export function SelectionSheet<T>({
           </BottomSheetView>
         ) : (
           <>
-            <View>
-              <Text
-                variant="titleMedium"
-                style={[styles.title, { color: theme.colors.onSurface }]}
-              >
-                {title}
-              </Text>
+            <View style={styles.header}>
+              <View style={styles.headerRow}>
+                <Text
+                  variant="titleMedium"
+                  style={[styles.title, { color: theme.colors.onSurface }]}
+                >
+                  {title}
+                </Text>
+                {titleAction}
+              </View>
 
               {onSearchChange && (
                 <View style={styles.searchContainer}>
@@ -277,6 +285,15 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.4)",
     justifyContent: "flex-end",
+  },
+  header: {
+    paddingTop: 8,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
   },
   title: {
     fontWeight: "700",

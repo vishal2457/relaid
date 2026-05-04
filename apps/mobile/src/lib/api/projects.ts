@@ -74,9 +74,11 @@ export const projectsKeys = {
 export function useProjects() {
   return useQuery<Project[]>({
     queryKey: projectsKeys.lists(),
+    staleTime: 0,
     queryFn: async () => {
       const response = await baseApi.get<{ projects: OpenCodeProject[] }>(
         "/projects",
+        { suppressErrorToast: true },
       );
       return (response.data.projects ?? []).map(adaptProject);
     },

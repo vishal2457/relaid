@@ -126,7 +126,12 @@ export function useChatSession(deps: HydrationDeps) {
   const activeProjectRef = React.useRef<Project | null>(null);
   const projectsRef = React.useRef<Project[] | undefined>(undefined);
 
-  const { data: projects, isLoading: projectsLoading } = useProjects();
+  const {
+    data: projects,
+    isLoading: projectsLoading,
+    isRefetching: projectsRefetching,
+    refetch: refetchProjects,
+  } = useProjects();
   const { data: providers, isLoading: providersLoading } = useProviders();
   const { data: agents = [], isLoading: agentsLoading } = useAgents(
     activeProject?.id ?? "",
@@ -150,6 +155,21 @@ export function useChatSession(deps: HydrationDeps) {
 
   React.useEffect(() => {
     projectsRef.current = projects;
+  }, [projects]);
+
+  React.useEffect(() => {
+    if (!projects || projects.length === 0) {
+      setActiveProject(null);
+      return;
+    }
+
+    setActiveProject((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return projects.find((project) => project.id === current.id) ?? current;
+    });
   }, [projects]);
 
   // Hydration: restore active project from storage or active stream
@@ -331,6 +351,29 @@ export function useChatSession(deps: HydrationDeps) {
     })();
   }, [hydrated, providers]);
 
+  React.useEffect(() => {
+    const models = flattenProvidersToModels(providers ?? []);
+
+    if (models.length === 0) {
+      setActiveModel(null);
+      return;
+    }
+
+    setActiveModel((current) => {
+      if (
+        current &&
+        models.some(
+          (model) =>
+            model.id === current.id && model.providerId === current.providerId,
+        )
+      ) {
+        return current;
+      }
+
+      return models[0];
+    });
+  }, [providers]);
+
   // Sorted/filtered lists
   const sortedModels = React.useMemo(() => {
     const models = flattenProvidersToModels(providers ?? []);
@@ -481,6 +524,8 @@ export function useChatSession(deps: HydrationDeps) {
     // Data
     projects,
     projectsLoading,
+    projectsRefetching,
+    refetchProjects,
     providers,
     providersLoading,
     agents,

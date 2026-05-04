@@ -66,7 +66,7 @@ export function ModelSelectionSheet({
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}
       isLoading={loading}
-      emptyText="No models found"
+      emptyText="No models found. Start OpenCode on desktop, then refresh this screen."
       selectedId={activeModelId}
       getItemId={(item) => item.id}
       keyExtractor={(item) => item.id}

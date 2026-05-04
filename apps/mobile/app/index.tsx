@@ -434,17 +434,23 @@ export default function ChatScreen() {
   );
 
   const handleRefreshPress = React.useCallback(async () => {
-    if (isRefreshing || !activeSessionIdRef.current) {
+    if (isRefreshing) {
       return;
     }
 
     setIsRefreshing(true);
     try {
-      await Promise.all([refetch(), refetchActiveSession()]);
+      const refreshTasks = [session.refetchProjects()];
+
+      if (activeSessionIdRef.current) {
+        refreshTasks.push(refetch(), refetchActiveSession());
+      }
+
+      await Promise.all(refreshTasks);
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, refetch, refetchActiveSession]);
+  }, [isRefreshing, refetch, refetchActiveSession, session.refetchProjects]);
 
   const handleToggleMenu = React.useCallback(() => {
     setMenuExpanded((prev) => !prev);
@@ -1395,7 +1401,11 @@ export default function ChatScreen() {
         projects={session.sortedProjects}
         activeProjectId={session.activeProject?.id}
         loading={session.projectsLoading}
+        refreshing={session.projectsRefetching}
         onClose={session.handleCloseProjectSheet}
+        onRefresh={() => {
+          void session.refetchProjects();
+        }}
         onSelectProject={(item) => {
           if (item.id !== session.activeProject?.id) {
             activeSessionIdRef.current = null;

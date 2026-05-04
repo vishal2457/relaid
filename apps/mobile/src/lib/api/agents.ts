@@ -16,6 +16,7 @@ export function useAgents(projectId: string, enabled = true) {
     enabled: Boolean(projectId) && enabled,
     queryFn: async () => {
       const response = await baseApi.get<{ agents: Agent[] }>("/agents", {
+        suppressErrorToast: true,
         params: { projectId },
       });
       const agents = response.data.agents ?? [];
