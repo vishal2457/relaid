@@ -231,10 +231,11 @@ type ProjectFileMatch struct {
 }
 
 type SessionsListRequest struct {
-	RequestID string `json:"requestId"`
-	Cwd       string `json:"cwd,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	Cwd             string `json:"cwd,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
 }
 
 type SessionsListResponse struct {
@@ -243,8 +244,9 @@ type SessionsListResponse struct {
 }
 
 type SessionGetRequest struct {
-	RequestID string `json:"requestId"`
-	SessionID string `json:"sessionId"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	SessionID       string `json:"sessionId"`
 }
 
 type SessionGetResponse struct {
@@ -253,11 +255,12 @@ type SessionGetResponse struct {
 }
 
 type SessionCreateRequest struct {
-	RequestID string `json:"requestId"`
-	ProjectID string `json:"projectId"`
-	Prompt    string `json:"prompt,omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
-	UserID    string `json:"userId,omitempty"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	ProjectID       string `json:"projectId"`
+	Prompt          string `json:"prompt,omitempty"`
+	SessionID       string `json:"sessionId,omitempty"`
+	UserID          string `json:"userId,omitempty"`
 }
 
 type SessionCreateResponse struct {
@@ -266,9 +269,10 @@ type SessionCreateResponse struct {
 }
 
 type SessionMessagesRequest struct {
-	RequestID string `json:"requestId"`
-	SessionID string `json:"sessionId"`
-	Limit     int    `json:"limit,omitempty"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	SessionID       string `json:"sessionId"`
+	Limit           int    `json:"limit,omitempty"`
 }
 
 type SessionMessagesResponse struct {
@@ -277,8 +281,9 @@ type SessionMessagesResponse struct {
 }
 
 type SessionDiffRequest struct {
-	RequestID string `json:"requestId"`
-	SessionID string `json:"sessionId"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	SessionID       string `json:"sessionId"`
 }
 
 type SessionDiffResponse struct {
@@ -287,13 +292,14 @@ type SessionDiffResponse struct {
 }
 
 type SessionUpdateRequest struct {
-	RequestID string `json:"requestId"`
-	SessionID string `json:"sessionId"`
-	Status    string `json:"status"`
-	Output    string `json:"output,omitempty"`
-	Error     string `json:"error,omitempty"`
-	ExitCode  int    `json:"exitCode,omitempty"`
-	Duration  int    `json:"duration,omitempty"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	SessionID       string `json:"sessionId"`
+	Status          string `json:"status"`
+	Output          string `json:"output,omitempty"`
+	Error           string `json:"error,omitempty"`
+	ExitCode        int    `json:"exitCode,omitempty"`
+	Duration        int    `json:"duration,omitempty"`
 }
 
 type SessionUpdateResponse struct {
@@ -302,13 +308,14 @@ type SessionUpdateResponse struct {
 }
 
 type SessionPromptRequest struct {
-	RequestID string          `json:"requestId"`
-	ProjectID string          `json:"projectId"`
-	SessionID string          `json:"sessionId"`
-	Prompt    string          `json:"prompt"`
-	Agent     string          `json:"agent,omitempty"`
-	UserID    string          `json:"userId,omitempty"`
-	Model     *agent.ModelRef `json:"model,omitempty"`
+	RequestID       string          `json:"requestId"`
+	AgentProviderID string          `json:"agentProviderId,omitempty"`
+	ProjectID       string          `json:"projectId"`
+	SessionID       string          `json:"sessionId"`
+	Prompt          string          `json:"prompt"`
+	Agent           string          `json:"agent,omitempty"`
+	UserID          string          `json:"userId,omitempty"`
+	Model           *agent.ModelRef `json:"model,omitempty"`
 }
 
 type ModelRef struct {
@@ -346,9 +353,10 @@ type SessionPromptResponsePayload struct {
 }
 
 type SessionAbortPayload struct {
-	RequestID string `json:"requestId"`
-	SessionID string `json:"sessionId"`
-	ProjectID string `json:"projectId"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	SessionID       string `json:"sessionId"`
+	ProjectID       string `json:"projectId"`
 }
 
 type SessionAbortedPayload struct {
@@ -359,21 +367,22 @@ type SessionAbortedPayload struct {
 }
 
 type SessionPayload struct {
-	ID          string `json:"id"`
-	ProjectID   string `json:"projectID,omitempty"`
-	Directory   string `json:"directory,omitempty"`
-	UserID      string `json:"userId,omitempty"`
-	Status      string `json:"status"`
-	Prompt      string `json:"prompt"`
-	Output      string `json:"output,omitempty"`
-	Error       string `json:"error,omitempty"`
-	ExitCode    *int   `json:"exitCode,omitempty"`
-	Duration    *int   `json:"duration,omitempty"`
-	SessionID   string `json:"sessionId,omitempty"`
-	CreatedAt   string `json:"createdAt"`
-	UpdatedAt   string `json:"updatedAt"`
-	StartedAt   string `json:"startedAt,omitempty"`
-	CompletedAt string `json:"completedAt,omitempty"`
+	ID              string `json:"id"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	ProjectID       string `json:"projectID,omitempty"`
+	Directory       string `json:"directory,omitempty"`
+	UserID          string `json:"userId,omitempty"`
+	Status          string `json:"status"`
+	Prompt          string `json:"prompt"`
+	Output          string `json:"output,omitempty"`
+	Error           string `json:"error,omitempty"`
+	ExitCode        *int   `json:"exitCode,omitempty"`
+	Duration        *int   `json:"duration,omitempty"`
+	SessionID       string `json:"sessionId,omitempty"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
+	StartedAt       string `json:"startedAt,omitempty"`
+	CompletedAt     string `json:"completedAt,omitempty"`
 }
 
 type MessagePayload struct {
@@ -413,9 +422,10 @@ type ProvidersListResponse struct {
 }
 
 type AgentsListRequest struct {
-	RequestID string `json:"requestId"`
-	ProjectID string `json:"projectId,omitempty"`
-	Directory string `json:"directory,omitempty"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	ProjectID       string `json:"projectId,omitempty"`
+	Directory       string `json:"directory,omitempty"`
 }
 
 type AgentsListResponse struct {
@@ -437,14 +447,24 @@ type ModelRefJSON struct {
 }
 
 type ProviderPayload struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name"`
-	Models []ModelPayload `json:"models"`
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	AgentProviderID   string         `json:"agentProviderId,omitempty"`
+	AgentProviderName string         `json:"agentProviderName,omitempty"`
+	ProviderID        string         `json:"providerId,omitempty"`
+	ProviderName      string         `json:"providerName,omitempty"`
+	Models            []ModelPayload `json:"models"`
 }
 
 type ModelPayload struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	AgentProviderID   string `json:"agentProviderId,omitempty"`
+	AgentProviderName string `json:"agentProviderName,omitempty"`
+	ProviderID        string `json:"providerId,omitempty"`
+	ProviderName      string `json:"providerName,omitempty"`
+	ModelID           string `json:"modelId,omitempty"`
+	ModelName         string `json:"modelName,omitempty"`
 }
 
 type GitStagedFilesRequest struct {
@@ -610,9 +630,9 @@ type GitSwitchBranchResponse struct {
 }
 
 type GitCommitRequest struct {
-	RequestID string `json:"requestId"`
-	ProjectID string `json:"projectId"`
-	Message   string `json:"message"`
+	RequestID string   `json:"requestId"`
+	ProjectID string   `json:"projectId"`
+	Message   string   `json:"message"`
 	Files     []string `json:"files,omitempty"`
 }
 
@@ -859,21 +879,23 @@ type GitAddAllResponse struct {
 }
 
 type PermissionRequestPayload struct {
-	RequestID  string                 `json:"requestId"`
-	ProjectID  string                 `json:"projectId"`
-	SessionID  string                 `json:"sessionId"`
-	JobID      string                 `json:"jobId"`
-	ThreadID   string                 `json:"threadId"`
-	Permission string                 `json:"permission"`
-	Patterns   []string               `json:"patterns"`
-	Metadata   map[string]interface{} `json:"metadata"`
+	RequestID       string                 `json:"requestId"`
+	AgentProviderID string                 `json:"agentProviderId,omitempty"`
+	ProjectID       string                 `json:"projectId"`
+	SessionID       string                 `json:"sessionId"`
+	JobID           string                 `json:"jobId"`
+	ThreadID        string                 `json:"threadId"`
+	Permission      string                 `json:"permission"`
+	Patterns        []string               `json:"patterns"`
+	Metadata        map[string]interface{} `json:"metadata"`
 }
 
 type PermissionResponsePayload struct {
-	RequestID string `json:"requestId"`
-	SessionID string `json:"sessionId"`
-	JobID     string `json:"jobId"`
-	Reply     string `json:"reply"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	SessionID       string `json:"sessionId"`
+	JobID           string `json:"jobId"`
+	Reply           string `json:"reply"`
 }
 
 type QuestionOption struct {
@@ -890,19 +912,21 @@ type Question struct {
 }
 
 type QuestionRequestPayload struct {
-	RequestID string     `json:"requestId"`
-	ProjectID string     `json:"projectId"`
-	SessionID string     `json:"sessionId"`
-	JobID     string     `json:"jobId"`
-	ThreadID  string     `json:"threadId"`
-	Questions []Question `json:"questions"`
+	RequestID       string     `json:"requestId"`
+	AgentProviderID string     `json:"agentProviderId,omitempty"`
+	ProjectID       string     `json:"projectId"`
+	SessionID       string     `json:"sessionId"`
+	JobID           string     `json:"jobId"`
+	ThreadID        string     `json:"threadId"`
+	Questions       []Question `json:"questions"`
 }
 
 type QuestionResponsePayload struct {
-	RequestID string     `json:"requestId"`
-	SessionID string     `json:"sessionId"`
-	JobID     string     `json:"jobId"`
-	Answers   [][]string `json:"answers"`
+	RequestID       string     `json:"requestId"`
+	AgentProviderID string     `json:"agentProviderId,omitempty"`
+	SessionID       string     `json:"sessionId"`
+	JobID           string     `json:"jobId"`
+	Answers         [][]string `json:"answers"`
 }
 
 type ErrorResponse struct {
@@ -924,7 +948,7 @@ type SkillPayload struct {
 }
 
 type SkillsListResponse struct {
-	RequestID string        `json:"requestId"`
+	RequestID string         `json:"requestId"`
 	Skills    []SkillPayload `json:"skills"`
 }
 

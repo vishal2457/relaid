@@ -48,6 +48,14 @@ function getExpandedLines(activity: SessionAssistantActivity): string[] {
   return lines;
 }
 
+function getItemFullPath(item: SessionAssistantActivityItem): string | null {
+  if (!item.filename && !item.directory) {
+    return null;
+  }
+
+  return `${item.directory ?? ""}${item.filename ?? ""}` || null;
+}
+
 const ExpandedItemRow = ({
   item,
   metaColor,
@@ -58,27 +66,58 @@ const ExpandedItemRow = ({
   textColor: string;
 }) => {
   return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "flex-start",
-        gap: 6,
-        paddingLeft: 8,
-      }}
-    >
-      <View style={{ flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        <Text
-          variant="bodySmall"
-          style={{ color: textColor, fontWeight: "600" }}
-        >
-          {item.label}
-        </Text>
-        {item.detail ? (
-          <Text variant="bodySmall" style={{ color: metaColor, flexShrink: 1 }}>
-            {item.detail}
+    <View style={{ gap: 6, paddingLeft: 8 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "flex-start",
+          gap: 6,
+        }}
+      >
+        <View style={{ flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          <Text
+            variant="bodySmall"
+            style={{ color: textColor, fontWeight: "600" }}
+          >
+            {item.label}
           </Text>
+          {item.detail ? (
+            <Text variant="bodySmall" style={{ color: metaColor, flexShrink: 1 }}>
+              {item.detail}
+            </Text>
+          ) : null}
+          {!item.detail && getItemFullPath(item) ? (
+            <Text variant="bodySmall" style={{ color: metaColor, flexShrink: 1 }}>
+              {getItemFullPath(item)}
+            </Text>
+          ) : null}
+        </View>
+        {item.additions !== null &&
+        item.additions !== undefined &&
+        item.deletions !== null &&
+        item.deletions !== undefined ? (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <DiffCount prefix="+" value={item.additions} color="#86EFAC" />
+            <DiffCount prefix="-" value={item.deletions} color="#F97316" />
+          </View>
         ) : null}
       </View>
+      {item.patch ? <RawDiffViewer diff={item.patch} /> : null}
+      {!item.patch && (item.oldContent !== null || item.newContent !== null) ? (
+        <RawDiffViewer
+          diff={toUnifiedDiffSmart({
+            fileName: item.filename ?? "file",
+            oldContent: item.oldContent ?? "",
+            newContent: item.newContent ?? "",
+          })}
+        />
+      ) : null}
     </View>
   );
 };
@@ -185,7 +224,9 @@ export const ToolPart: React.FC<ToolPartProps> = React.memo(
       activity.deletions !== null;
     const hasDiffContent =
       activity.kind === "edit" &&
-      (activity.oldContent !== null || activity.newContent !== null);
+      (activity.patch !== null ||
+        activity.oldContent !== null ||
+        activity.newContent !== null);
 
     return (
       <View style={{ gap: isExpanded ? 5 : 0 }}>
@@ -285,13 +326,17 @@ export const ToolPart: React.FC<ToolPartProps> = React.memo(
               </View>
             ) : null}
             {hasDiffContent && isExpanded ? (
-              <RawDiffViewer
-                diff={toUnifiedDiffSmart({
-                  fileName: activity.filename ?? "",
-                  oldContent: activity.oldContent ?? "",
-                  newContent: activity.newContent ?? "",
-                })}
-              />
+              activity.patch ? (
+                <RawDiffViewer diff={activity.patch} />
+              ) : (
+                <RawDiffViewer
+                  diff={toUnifiedDiffSmart({
+                    fileName: activity.filename ?? "",
+                    oldContent: activity.oldContent ?? "",
+                    newContent: activity.newContent ?? "",
+                  })}
+                />
+              )
             ) : null}
           </View>
         ) : null}

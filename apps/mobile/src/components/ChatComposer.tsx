@@ -61,8 +61,10 @@ type ComposerSelection = {
 
 type ChatComposerProps = {
   activeAgentName: string;
+  activeAgentProviderName: string;
   activeProject: boolean;
   activeProjectName: string;
+  agentProviderLocked?: boolean;
   borderColor: string;
   branchName?: string;
   fileSuggestions?: ProjectFileMatch[];
@@ -77,6 +79,7 @@ type ChatComposerProps = {
   onComposerLayout?: (event: LayoutChangeEvent) => void;
   onInputHeightChange: (height: number) => void;
   onPressAgent: () => void;
+  onPressAgentProvider: () => void;
   onPressBranch: () => void;
   onSelectionChange: (
     event: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
@@ -97,8 +100,10 @@ type ChatComposerProps = {
 
 export function ChatComposer({
   activeAgentName,
+  activeAgentProviderName,
   activeProject,
   activeProjectName,
+  agentProviderLocked = false,
   borderColor,
   branchName,
   fileSuggestions,
@@ -113,6 +118,7 @@ export function ChatComposer({
   onComposerLayout,
   onInputHeightChange,
   onPressAgent,
+  onPressAgentProvider,
   onPressBranch,
   onSelectionChange,
   onSelectFileSuggestion,
@@ -464,20 +470,52 @@ export function ChatComposer({
           />
         </View>
       </View>
-      <Pressable
-        onPress={onPressBranch}
-        style={({ pressed }) => [
-          styles.branchRow,
-          pressed && styles.metaButtonPressed,
-        ]}
-      >
-        <MaterialCommunityIcons
-          name="source-branch"
-          size={14}
-          color={metaColor}
-        />
-        <Text>{branchName}</Text>
-      </Pressable>
+      <View style={styles.footerRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: agentProviderLocked }}
+          disabled={agentProviderLocked}
+          onPress={onPressAgentProvider}
+          style={({ pressed }) => [
+            styles.footerMetaRow,
+            pressed && !agentProviderLocked && styles.metaButtonPressed,
+            agentProviderLocked && styles.footerMetaRowDisabled,
+          ]}
+        >
+          <MaterialCommunityIcons
+            name="server-outline"
+            size={14}
+            color={metaColor}
+          />
+          <Text
+            variant="bodySmall"
+            style={{ color: theme.colors.onSurface }}
+            numberOfLines={1}
+          >
+            {activeAgentProviderName}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onPressBranch}
+          style={({ pressed }) => [
+            styles.footerMetaRow,
+            pressed && styles.metaButtonPressed,
+          ]}
+        >
+          <MaterialCommunityIcons
+            name="source-branch"
+            size={14}
+            color={metaColor}
+          />
+          <Text
+            variant="bodySmall"
+            style={{ color: theme.colors.onSurface }}
+            numberOfLines={1}
+          >
+            {branchName}
+          </Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -530,13 +568,23 @@ const styles = StyleSheet.create({
   metaButtonPressed: {
     opacity: 0.7,
   },
-  branchRow: {
-    justifyContent: "flex-end",
+  footerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 5,
+    gap: 12,
+  },
+  footerMetaRow: {
     flexDirection: "row",
+    alignItems: "center",
     gap: 5,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  footerMetaRowDisabled: {
+    opacity: 0.7,
   },
   metaButtonText: {
     fontSize: 12,

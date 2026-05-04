@@ -15,6 +15,7 @@ import (
 	"relaid/internal/agent"
 	"relaid/internal/config"
 	"relaid/internal/db"
+	codexprovider "relaid/internal/providers/codex"
 	opencodeprovider "relaid/internal/providers/opencode"
 	"relaid/internal/relay"
 	"relaid/internal/secrets"
@@ -45,6 +46,7 @@ type App struct {
 type DesktopStatusPayload struct {
 	Server   DesktopServerStatus   `json:"server"`
 	Opencode DesktopOpencodeStatus `json:"opencode"`
+	Codex    DesktopCodexStatus    `json:"codex"`
 }
 
 type DesktopServerStatus struct {
@@ -53,13 +55,23 @@ type DesktopServerStatus struct {
 }
 
 type DesktopOpencodeStatus struct {
-	Available      bool                   `json:"available"`
-	Connected      bool                   `json:"connected"`
-	StatusMessage  string                 `json:"statusMessage,omitempty"`
-	Providers      []DesktopProvider      `json:"providers"`
-	Agents         []DesktopAgent         `json:"agents"`
-	AvailableTools []string               `json:"availableTools"`
-	Errors         []string               `json:"errors,omitempty"`
+	Available      bool              `json:"available"`
+	Connected      bool              `json:"connected"`
+	StatusMessage  string            `json:"statusMessage,omitempty"`
+	Providers      []DesktopProvider `json:"providers"`
+	Agents         []DesktopAgent    `json:"agents"`
+	AvailableTools []string          `json:"availableTools"`
+	Errors         []string          `json:"errors,omitempty"`
+}
+
+type DesktopCodexStatus struct {
+	Available      bool              `json:"available"`
+	Connected      bool              `json:"connected"`
+	StatusMessage  string            `json:"statusMessage,omitempty"`
+	Providers      []DesktopProvider `json:"providers"`
+	Agents         []DesktopAgent    `json:"agents"`
+	AvailableTools []string          `json:"availableTools"`
+	Errors         []string          `json:"errors,omitempty"`
 }
 
 type DesktopProvider struct {
@@ -337,11 +349,18 @@ func (a *App) GetDesktopStatus() DesktopStatusPayload {
 			Agents:         []DesktopAgent{},
 			AvailableTools: []string{},
 		},
+		Codex: DesktopCodexStatus{
+			Providers:      []DesktopProvider{},
+			Agents:         []DesktopAgent{},
+			AvailableTools: []string{},
+		},
 	}
 
 	if a.server == nil {
 		payload.Opencode.StatusMessage = "Desktop server is unavailable"
 		payload.Opencode.Errors = []string{"desktop server is unavailable"}
+		payload.Codex.StatusMessage = "Desktop server is unavailable"
+		payload.Codex.Errors = []string{"desktop server is unavailable"}
 		return payload
 	}
 
@@ -349,38 +368,62 @@ func (a *App) GetDesktopStatus() DesktopStatusPayload {
 	if err != nil {
 		payload.Opencode.StatusMessage = "OpenCode provider is not registered"
 		payload.Opencode.Errors = []string{err.Error()}
+	} else {
+		if a.server.Healthy() {
+			payload.Server.Healthy = true
+		}
+
+		payload.Opencode.Available = isOpencodeAvailable(a.server)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		agents, agentErr := provider.Agents().List(ctx, "")
+		if agentErr != nil {
+			payload.Opencode.StatusMessage = "OpenCode is unavailable"
+			payload.Opencode.Errors = []string{agentErr.Error()}
+		} else {
+			payload.Opencode.Connected = true
+			payload.Opencode.StatusMessage = "OpenCode connected"
+
+			providers, providerErr := provider.Providers().List(ctx)
+			if providerErr != nil {
+				payload.Opencode.Errors = []string{providerErr.Error()}
+			} else {
+				payload.Opencode.Providers = serializeDesktopProviders(providers)
+			}
+
+			payload.Opencode.Agents, payload.Opencode.AvailableTools = serializeDesktopAgents(agents)
+			if !payload.Opencode.Available {
+				payload.Opencode.Available = true
+			}
+		}
+	}
+
+	codexProvider, err := a.server.Registry().Get(agent.ProviderCodex)
+	if err != nil {
+		payload.Codex.StatusMessage = "Codex provider is not registered"
+		payload.Codex.Errors = []string{err.Error()}
 		return payload
 	}
 
-	if a.server.Healthy() {
-		payload.Server.Healthy = true
-	}
-
-	payload.Opencode.Available = isOpencodeAvailable(a.server)
+	payload.Codex.Available = isCodexAvailable(a.server)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	agents, agentErr := provider.Agents().List(ctx, "")
-	if agentErr != nil {
-		payload.Opencode.StatusMessage = "OpenCode is unavailable"
-		payload.Opencode.Errors = []string{agentErr.Error()}
+	providers, providerErr := codexProvider.Providers().List(ctx)
+	if providerErr != nil {
+		payload.Codex.StatusMessage = "Codex is unavailable"
+		payload.Codex.Errors = []string{providerErr.Error()}
 		return payload
 	}
 
-	payload.Opencode.Connected = true
-	payload.Opencode.StatusMessage = "OpenCode connected"
-
-	providers, providerErr := provider.Providers().List(ctx)
-	if providerErr != nil {
-		payload.Opencode.Errors = []string{providerErr.Error()}
-	} else {
-		payload.Opencode.Providers = serializeDesktopProviders(providers)
-	}
-
-	payload.Opencode.Agents, payload.Opencode.AvailableTools = serializeDesktopAgents(agents)
-	if !payload.Opencode.Available {
-		payload.Opencode.Available = true
+	payload.Codex.Connected = true
+	payload.Codex.StatusMessage = "Codex connected"
+	payload.Codex.Providers = serializeDesktopProviders(providers)
+	if !payload.Codex.Available {
+		payload.Codex.Available = true
 	}
 
 	return payload
@@ -410,6 +453,16 @@ func isOpencodeAvailable(s *server.Server) bool {
 	}
 
 	_, err := exec.LookPath(cfg.OpencodeBin)
+	return err == nil
+}
+
+func isCodexAvailable(s *server.Server) bool {
+	if s == nil {
+		return false
+	}
+
+	cfg := config.Load()
+	_, err := exec.LookPath(cfg.CodexBin)
 	return err == nil
 }
 
@@ -514,10 +567,14 @@ func (a *App) configureRelayClient(relayURL string, creds relay.DeviceCredential
 
 	handler := relay.NewHandler(client, a.server.Registry(), a.workspaces, log.Default())
 
-	bridge := relay.NewRelayPermissionBridge(handler)
 	if p, err := a.server.Registry().Get(agent.ProviderOpencode); err == nil {
 		if op, ok := p.(*opencodeprovider.Provider); ok {
-			op.SetInteractionHandler(bridge)
+			op.SetInteractionHandler(relay.NewRelayPermissionBridge(handler, string(agent.ProviderOpencode)))
+		}
+	}
+	if p, err := a.server.Registry().Get(agent.ProviderCodex); err == nil {
+		if codex, ok := p.(*codexprovider.Provider); ok {
+			codex.SetInteractionHandler(relay.NewRelayPermissionBridge(handler, string(agent.ProviderCodex)))
 		}
 	}
 

@@ -2,11 +2,11 @@ import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Text, useTheme } from "react-native-paper";
 import { SelectionSheet } from "@/src/components/SelectionSheet";
-import type { ActiveModel } from "@/src/lib/api/providers";
+import type { ActiveModel, ModelGroup } from "@/src/lib/api/providers";
 
 type ModelSelectionSheetProps = {
   visible: boolean;
-  models: ActiveModel[];
+  groups: ModelGroup[];
   activeModelId?: string | null;
   loading?: boolean;
   searchQuery: string;
@@ -15,9 +15,13 @@ type ModelSelectionSheetProps = {
   onSelectModel: (model: ActiveModel) => void;
 };
 
+type ModelRow =
+  | { type: "header"; id: string; title: string }
+  | { type: "model"; id: string; model: ActiveModel };
+
 export function ModelSelectionSheet({
   visible,
-  models,
+  groups,
   activeModelId,
   loading = false,
   searchQuery,
@@ -26,17 +30,38 @@ export function ModelSelectionSheet({
   onSelectModel,
 }: ModelSelectionSheetProps) {
   const theme = useTheme();
-  const borderColor = theme.dark
-    ? "rgba(255,255,255,0.1)"
-    : "rgba(0,0,0,0.08)";
+  const borderColor = theme.dark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)";
+  const rows = React.useMemo<ModelRow[]>(() => {
+    const showHeaders = groups.length > 1;
+    return groups.flatMap((group) => [
+      ...(showHeaders
+        ? [
+            {
+              type: "header" as const,
+              id: `runtime:${group.agentProviderId}`,
+              title: group.agentProviderName,
+            },
+          ]
+        : []),
+      ...group.models.map((model) => ({
+        type: "model" as const,
+        id: model.id,
+        model,
+      })),
+    ]);
+  }, [groups]);
 
   return (
     <SelectionSheet
       visible={visible}
       title="Select Model"
-      data={models}
+      data={rows}
       onClose={onClose}
-      onItemPress={onSelectModel}
+      onItemPress={(item) => {
+        if (item.type === "model") {
+          onSelectModel(item.model);
+        }
+      }}
       searchPlaceholder="Search models or providers"
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}
@@ -46,9 +71,30 @@ export function ModelSelectionSheet({
       getItemId={(item) => item.id}
       keyExtractor={(item) => item.id}
       renderItem={(item, isSelected) => {
+        if (item.type === "header") {
+          return (
+            <View
+              style={[
+                styles.header,
+                { backgroundColor: theme.colors.surfaceVariant },
+              ]}
+            >
+              <Text
+                variant="labelLarge"
+                style={[
+                  styles.headerTitle,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {item.title}
+              </Text>
+            </View>
+          );
+        }
+        const model = item.model;
         return (
           <Pressable
-            onPress={() => onSelectModel(item)}
+            onPress={() => onSelectModel(model)}
             style={[
               styles.item,
               {
@@ -76,16 +122,17 @@ export function ModelSelectionSheet({
                       color: theme.colors.onSurface,
                     },
                   ]}
-                  numberOfLines={1}
                 >
-                  {item.name}
+                  {model.modelName}
                 </Text>
                 <Text
                   variant="bodySmall"
-                  style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}
-                  numberOfLines={1}
+                  style={[
+                    styles.subtitle,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
                 >
-                  {item.providerName}
+                  {model.providerName}
                 </Text>
               </View>
             </View>
@@ -97,8 +144,17 @@ export function ModelSelectionSheet({
 }
 
 const styles = StyleSheet.create({
-  item: {
+  header: {
     paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  headerTitle: {
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  item: {
+    paddingLeft: 28,
+    paddingRight: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.05)",
@@ -116,8 +172,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  title: {
-  },
+  title: {},
   subtitle: {
     marginTop: 2,
   },

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sort"
 )
 
 type Registry struct {
@@ -27,6 +28,20 @@ func (r *Registry) Get(id ProviderID) (AgentProvider, error) {
 		return nil, fmt.Errorf("provider %q not registered", id)
 	}
 	return provider, nil
+}
+
+func (r *Registry) List() []AgentProvider {
+	ids := make([]string, 0, len(r.providers))
+	for id := range r.providers {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	providers := make([]AgentProvider, 0, len(ids))
+	for _, id := range ids {
+		providers = append(providers, r.providers[ProviderID(id)])
+	}
+	return providers
 }
 
 func (r *Registry) Shutdown(ctx context.Context) error {

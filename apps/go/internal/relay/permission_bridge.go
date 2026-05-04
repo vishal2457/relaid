@@ -11,13 +11,20 @@ import (
 )
 
 type RelayPermissionBridge struct {
-	handler *Handler
-	logger  *log.Logger
+	handler         *Handler
+	logger          *log.Logger
+	agentProviderID string
 }
 
-func NewRelayPermissionBridge(handler *Handler) *RelayPermissionBridge {
+func NewRelayPermissionBridge(handler *Handler, agentProviderID ...string) *RelayPermissionBridge {
+	providerID := ""
+	if len(agentProviderID) > 0 {
+		providerID = agentProviderID[0]
+	}
 	return &RelayPermissionBridge{
-		handler: handler,
+		handler:         handler,
+		logger:          log.Default(),
+		agentProviderID: providerID,
 	}
 }
 
@@ -38,14 +45,15 @@ func (b *RelayPermissionBridge) HandlePermission(ctx context.Context, req acp.AC
 	}
 
 	payload := PermissionRequestPayload{
-		RequestID:  requestID,
-		ProjectID:  "",
-		SessionID:  req.SessionID,
-		JobID:      fmt.Sprintf("desktop_%d", time.Now().UnixMilli()),
-		ThreadID:   "",
-		Permission: permission,
-		Patterns:   patterns,
-		Metadata:   metadata,
+		RequestID:       requestID,
+		AgentProviderID: b.agentProviderID,
+		ProjectID:       "",
+		SessionID:       req.SessionID,
+		JobID:           fmt.Sprintf("desktop_%d", time.Now().UnixMilli()),
+		ThreadID:        "",
+		Permission:      permission,
+		Patterns:        patterns,
+		Metadata:        metadata,
 	}
 
 	reply, err := b.handler.RequestPermission(payload)
@@ -79,12 +87,13 @@ func (b *RelayPermissionBridge) HandleQuestion(ctx context.Context, req acp.ACPQ
 	}
 
 	payload := QuestionRequestPayload{
-		RequestID: requestID,
-		ProjectID: "",
-		SessionID: req.SessionID,
-		JobID:     fmt.Sprintf("desktop_%d", time.Now().UnixMilli()),
-		ThreadID:  "",
-		Questions: questions,
+		RequestID:       requestID,
+		AgentProviderID: b.agentProviderID,
+		ProjectID:       "",
+		SessionID:       req.SessionID,
+		JobID:           fmt.Sprintf("desktop_%d", time.Now().UnixMilli()),
+		ThreadID:        "",
+		Questions:       questions,
 	}
 
 	answers, err := b.handler.RequestQuestion(payload)

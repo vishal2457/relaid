@@ -27,6 +27,26 @@ declare module "../../wailsjs/go/main/App" {
       availableTools: string[];
       errors?: string[];
     };
+    codex: {
+      available: boolean;
+      connected: boolean;
+      statusMessage?: string;
+      providers: Array<{
+        id: string;
+        name: string;
+        modelCount: number;
+        models: string[];
+      }>;
+      agents: Array<{
+        name: string;
+        description?: string;
+        mode?: string;
+        hidden: boolean;
+        tools: string[];
+      }>;
+      availableTools: string[];
+      errors?: string[];
+    };
   }>;
   export function CreatePairingSession(): Promise<{
     pairingId: string;

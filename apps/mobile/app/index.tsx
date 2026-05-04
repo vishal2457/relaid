@@ -1,4 +1,5 @@
 import { AgentSelectionSheet } from "@/src/components/BottomModals/AgentSelectionSheet";
+import { AgentProviderSelectionSheet } from "@/src/components/BottomModals/AgentProviderSelectionSheet";
 import { BranchSelectionSheet } from "@/src/components/BottomModals/BranchSelectionSheet";
 import { ModelSelectionSheet } from "@/src/components/BottomModals/ModelSelectionSheet";
 import { ProjectSelectionSheet } from "@/src/components/BottomModals/ProjectSelectionSheet";
@@ -16,7 +17,6 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
 import React from "react";
 import {
-  Alert,
   AppState,
   FlatList,
   NativeScrollEvent,
@@ -26,7 +26,7 @@ import {
   StyleSheet,
   View,
   type AppStateStatus,
-  type FlatList as FlatListType
+  type FlatList as FlatListType,
 } from "react-native";
 import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import {
@@ -50,6 +50,10 @@ import {
   useSessionMessages,
   type SessionMessage,
 } from "@/src/lib/api/messages";
+import {
+  flattenProvidersToModels,
+  groupModelsByRuntime,
+} from "@/src/lib/api/providers";
 import {
   sessionsKeys,
   useCreateSession,
@@ -119,11 +123,11 @@ export default function ChatScreen() {
   const [hasActiveStreamEvent, setHasActiveStreamEvent] = React.useState(false);
   const pendingRequestIdsRef = React.useRef<Map<string, string>>(new Map());
   const activeSessionIdRef = React.useRef<string | null>(null);
+  const activeAgentProviderIdRef = React.useRef<string | undefined>(undefined);
   const allowSessionChangeRecoveryRef = React.useRef(false);
   const {
-    visibleText: streamingContent,
     thinkingContent: streamingThinkingContent,
-    activities: streamingActivities,
+    blocks: streamingBlocks,
     phase: streamingPhase,
     revision: streamingRevision,
     applyChunk: applyStreamingChunk,
@@ -141,6 +145,8 @@ export default function ChatScreen() {
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(
     null,
   );
+  const [activeSessionAgentProviderId, setActiveSessionAgentProviderId] =
+    React.useState<string | undefined>(undefined);
   const [errorToastVisible, setErrorToastVisible] = React.useState(false);
   const [errorToastMessage, setErrorToastMessage] = React.useState("");
 
@@ -152,6 +158,8 @@ export default function ChatScreen() {
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showGitDrawer, setShowGitDrawer] = React.useState(false);
   const [showFileDrawer, setShowFileDrawer] = React.useState(false);
+  const [showAgentProviderSheet, setShowAgentProviderSheet] =
+    React.useState(false);
   // Message queue temporarily disabled
   // const [showQueueDrawer, setShowQueueDrawer] = React.useState(false);
   const [isNearBottom, setIsNearBottom] = React.useState(true);
@@ -175,6 +183,7 @@ export default function ChatScreen() {
     activeSessionIdRef,
     pendingRequestIdsRef,
     setActiveSessionId,
+    setActiveSessionAgentProviderId,
     setPendingRequestIds,
     setOptimisticMessage: () => setOptimisticMessage(null),
     resetStreamingContent,
@@ -189,10 +198,99 @@ export default function ChatScreen() {
   const appStateRef = React.useRef<AppStateStatus>(AppState.currentState);
 
   const createSessionMutation = useCreateSession();
+  const selectedModelAgentProviderId = session.activeModel?.agentProviderId;
+  const activeModelAgentProviderId = session.activeModel?.agentProviderId;
+  const setActiveModel = session.setActiveModel;
+  const activeLookupAgentProviderId =
+    activeSessionAgentProviderId ?? selectedModelAgentProviderId;
+  const allModels = React.useMemo(
+    () => flattenProvidersToModels(session.providers ?? []),
+    [session.providers],
+  );
+  const availableAgentProviders = React.useMemo(
+    () => groupModelsByRuntime(allModels),
+    [allModels],
+  );
+  const lockedAgentProviderId = activeSessionId
+    ? activeLookupAgentProviderId
+    : activeSessionAgentProviderId;
+  const selectedAgentProvider = React.useMemo(() => {
+    if (!lockedAgentProviderId) {
+      return availableAgentProviders[0] ?? null;
+    }
+
+    return (
+      availableAgentProviders.find(
+        (provider) => provider.agentProviderId === lockedAgentProviderId,
+      ) ?? null
+    );
+  }, [availableAgentProviders, lockedAgentProviderId]);
+  const visibleModelGroups = React.useMemo(() => {
+    if (!lockedAgentProviderId) {
+      return session.sortedModelGroups;
+    }
+
+    return session.sortedModelGroups.filter(
+      (group) => group.agentProviderId === lockedAgentProviderId,
+    );
+  }, [lockedAgentProviderId, session.sortedModelGroups]);
+  const ensureModelForAgentProvider = React.useCallback(
+    (agentProviderId: string) => {
+      if (activeModelAgentProviderId === agentProviderId) {
+        return;
+      }
+
+      const fallbackModel = allModels.find(
+        (model) => model.agentProviderId === agentProviderId,
+      );
+      if (fallbackModel) {
+        setActiveModel(fallbackModel);
+      }
+    },
+    [activeModelAgentProviderId, allModels, setActiveModel],
+  );
 
   React.useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  React.useEffect(() => {
+    activeAgentProviderIdRef.current = activeLookupAgentProviderId;
+  }, [activeLookupAgentProviderId]);
+
+  React.useEffect(() => {
+    if (activeSessionId) {
+      return;
+    }
+
+    const defaultAgentProviderId =
+      availableAgentProviders[0]?.agentProviderId ?? null;
+    if (!defaultAgentProviderId) {
+      return;
+    }
+
+    if (
+      activeSessionAgentProviderId &&
+      selectedAgentProvider?.agentProviderId === activeSessionAgentProviderId
+    ) {
+      return;
+    }
+
+    setActiveSessionAgentProviderId(defaultAgentProviderId);
+  }, [
+    activeSessionAgentProviderId,
+    activeSessionId,
+    availableAgentProviders,
+    selectedAgentProvider?.agentProviderId,
+  ]);
+
+  React.useEffect(() => {
+    if (!lockedAgentProviderId) {
+      return;
+    }
+
+    ensureModelForAgentProvider(lockedAgentProviderId);
+  }, [ensureModelForAgentProvider, lockedAgentProviderId]);
 
   React.useEffect(() => {
     pendingRequestIdsRef.current = pendingRequestIds;
@@ -211,8 +309,15 @@ export default function ChatScreen() {
     isLoading: messagesLoading,
     error,
     refetch,
-  } = useSessionMessages(activeSessionId ?? "");
-  const { refetch: refetchActiveSession } = useSession(activeSessionId ?? "");
+  } = useSessionMessages(
+    activeSessionId ?? "",
+    100,
+    activeLookupAgentProviderId,
+  );
+  const { refetch: refetchActiveSession } = useSession(
+    activeSessionId ?? "",
+    activeLookupAgentProviderId,
+  );
 
   const activeSessionMessages = React.useMemo(() => {
     if (!activeSessionId) {
@@ -269,11 +374,7 @@ export default function ChatScreen() {
   }, [displayedMessages.length]);
 
   React.useEffect(() => {
-    if (
-      !streamingContent &&
-      !streamingThinkingContent &&
-      streamingActivities.length === 0
-    ) {
+    if (streamingBlocks.length === 0 && !streamingThinkingContent) {
       return;
     }
 
@@ -289,8 +390,7 @@ export default function ChatScreen() {
     }, 120);
   }, [
     isNearBottom,
-    streamingActivities.length,
-    streamingContent,
+    streamingBlocks.length,
     streamingRevision,
     streamingThinkingContent,
   ]);
@@ -445,7 +545,7 @@ export default function ChatScreen() {
             );
             break;
           case "session_stream_chunk":
-            console.log("handle stream");
+            console.log("handle stream", data);
 
             handleStreamChunkRef.current(
               data as unknown as SessionStreamChunkEvent,
@@ -542,19 +642,34 @@ export default function ChatScreen() {
   const handlePromptResponseRef = React.useRef(
     (payload: SessionPromptResponseEvent) => {
       const pending = pendingRequestIdsRef.current;
+      let requestSessionId: string | null = null;
+      for (const [sessionId, requestId] of pending) {
+        if (requestId === payload.requestId) {
+          requestSessionId = sessionId;
+          break;
+        }
+      }
       if (
-        pending.get(payload.sessionId) !== payload.requestId ||
-        payload.sessionId !== activeSessionIdRef.current
+        !requestSessionId ||
+        requestSessionId !== activeSessionIdRef.current
       ) {
         return;
       }
 
+      const responseSessionId = payload.sessionId || requestSessionId;
+      if (responseSessionId !== requestSessionId) {
+        activeSessionIdRef.current = responseSessionId;
+        allowSessionChangeRecoveryRef.current = false;
+        setActiveSessionId(responseSessionId);
+        setActiveSessionAgentProviderId(activeAgentProviderIdRef.current);
+      }
+
       flushStreamingContent();
-      clearPendingStreamState(payload.sessionId, payload.requestId);
+      clearPendingStreamState(requestSessionId, payload.requestId);
 
       if (payload.messages) {
         queryClient.setQueryData(
-          messageKeys.list(payload.sessionId),
+          messageKeys.list(responseSessionId, activeAgentProviderIdRef.current),
           payload.messages,
         );
       }
@@ -578,7 +693,7 @@ export default function ChatScreen() {
           lastMessage.content.slice(0, 100),
           {
             projectId: payload.projectId,
-            sessionId: payload.sessionId,
+            sessionId: responseSessionId,
           },
         );
       }
@@ -609,6 +724,8 @@ export default function ChatScreen() {
     (payload: PermissionRequestEvent) => {
       const currentProject = session.activeProjectRef.current;
       const availableProjects = session.projectsRef.current ?? [];
+      const requestAgentProviderId =
+        payload.agentProviderId ?? activeAgentProviderIdRef.current;
 
       if (currentProject?.id !== payload.projectId) {
         const matchingProject = availableProjects.find(
@@ -621,7 +738,10 @@ export default function ChatScreen() {
 
       if (activeSessionIdRef.current !== payload.sessionId) {
         activeSessionIdRef.current = payload.sessionId;
+        setActiveSessionAgentProviderId(requestAgentProviderId);
         setActiveSessionId(payload.sessionId);
+      } else if (requestAgentProviderId) {
+        setActiveSessionAgentProviderId(requestAgentProviderId);
       }
 
       setPendingPermission(payload);
@@ -630,6 +750,7 @@ export default function ChatScreen() {
       if (!isAppInForeground()) {
         showPermissionNotification({
           requestId: payload.requestId,
+          agentProviderId: requestAgentProviderId,
           projectId: payload.projectId,
           sessionId: payload.sessionId,
           jobId: payload.jobId,
@@ -650,6 +771,8 @@ export default function ChatScreen() {
     (payload: QuestionRequestEvent) => {
       const currentProject = session.activeProjectRef.current;
       const availableProjects = session.projectsRef.current ?? [];
+      const requestAgentProviderId =
+        payload.agentProviderId ?? activeAgentProviderIdRef.current;
 
       if (currentProject?.id !== payload.projectId) {
         const matchingProject = availableProjects.find(
@@ -662,7 +785,10 @@ export default function ChatScreen() {
 
       if (activeSessionIdRef.current !== payload.sessionId) {
         activeSessionIdRef.current = payload.sessionId;
+        setActiveSessionAgentProviderId(requestAgentProviderId);
         setActiveSessionId(payload.sessionId);
+      } else if (requestAgentProviderId) {
+        setActiveSessionAgentProviderId(requestAgentProviderId);
       }
 
       setPendingQuestion(payload);
@@ -726,24 +852,27 @@ export default function ChatScreen() {
       ) + 8
     : 0;
   const composerHeight =
-    Math.min(MAX_INPUT_HEIGHT, Math.max(MIN_INPUT_HEIGHT, composer.inputHeight)) +
+    Math.min(
+      MAX_INPUT_HEIGHT,
+      Math.max(MIN_INPUT_HEIGHT, composer.inputHeight),
+    ) +
     COMPOSER_TOP_PADDING +
     Math.max(insets.bottom, COMPOSER_BOTTOM_PADDING) +
     mentionSuggestionHeight +
     skillSuggestionHeight +
     keyboardHeight +
     (keyboardHeight > 0 ? KEYBOARD_ADDITIONAL_PADDING : 0);
-  const measuredComposerHeight = composer.composerLayoutHeight || composerHeight;
+  const measuredComposerHeight =
+    composer.composerLayoutHeight || composerHeight;
   const isSessionSending = creatingSessionId
     ? true
     : activeSessionId
       ? pendingRequestIds.has(activeSessionId)
       : false;
-  const footerStreamingContent = hasActiveStreamEvent ? streamingContent : "";
   const footerThinkingContent = hasActiveStreamEvent
     ? streamingThinkingContent
     : null;
-  const footerActivities = hasActiveStreamEvent ? streamingActivities : [];
+  const footerBlocks = hasActiveStreamEvent ? streamingBlocks : [];
   const footerPhase = hasActiveStreamEvent ? streamingPhase : "thinking";
 
   const handleSend = React.useCallback(async () => {
@@ -758,6 +887,8 @@ export default function ChatScreen() {
     const optimisticMessageId = `optimistic_${requestId}`;
     let sessionId = activeSessionId;
     const isCreatingSession = !sessionId;
+    const requestAgentProviderId =
+      activeSessionAgentProviderId ?? session.activeModel?.agentProviderId;
 
     setOptimisticMessage({
       id: optimisticMessageId,
@@ -778,12 +909,14 @@ export default function ChatScreen() {
       const tempRequestId = `creating_${Date.now()}`;
       setCreatingSessionId(tempRequestId);
       try {
-        const newSession = await createSessionMutation.mutateAsync(
-          session.activeProject.id,
-        );
+        const newSession = await createSessionMutation.mutateAsync({
+          projectId: session.activeProject.id,
+          agentProviderId: requestAgentProviderId,
+        });
         const resolvedSessionId = newSession.id;
         sessionId = resolvedSessionId;
         allowSessionChangeRecoveryRef.current = false;
+        setActiveSessionAgentProviderId(requestAgentProviderId);
         setActiveSessionId(resolvedSessionId);
         setCreatingSessionId(null);
         setOptimisticMessage((current) =>
@@ -809,6 +942,7 @@ export default function ChatScreen() {
       requestId,
       projectId: session.activeProject.id,
       sessionId,
+      agentProviderId: requestAgentProviderId,
       baselineMessageId: isCreatingSession
         ? null
         : (activeSessionMessages[activeSessionMessages.length - 1]?.id ?? null),
@@ -826,13 +960,14 @@ export default function ChatScreen() {
       await sendPromptRequest({
         sessionId,
         requestId,
+        agentProviderId: requestAgentProviderId,
         projectId: session.activeProject.id,
         prompt,
         agent: session.activeAgent?.name,
         model: session.activeModel
           ? {
               providerId: session.activeModel.providerId,
-              modelId: session.activeModel.id,
+              modelId: session.activeModel.modelId,
             }
           : undefined,
       });
@@ -843,8 +978,8 @@ export default function ChatScreen() {
     }
   }, [
     session.activeProject,
+    activeSessionAgentProviderId,
     activeSessionId,
-    composer.trimmedInput,
     isSessionSending,
     pendingRequestIds,
     activeSessionMessages,
@@ -854,6 +989,7 @@ export default function ChatScreen() {
     recoverPendingStream,
     session.activeModel,
     session.activeAgent,
+    showError,
     resetStreamingContent,
     composer,
   ]);
@@ -884,11 +1020,17 @@ export default function ChatScreen() {
     sendAbortRequest({
       sessionId,
       requestId,
+      agentProviderId: activeLookupAgentProviderId,
       projectId: session.activeProject.id,
     }).catch((error) => {
       console.error("[Chat] Failed to abort:", error);
     });
-  }, [session.activeProject, clearRequestRecoveryTimeout, resetStreamingContent]);
+  }, [
+    session.activeProject,
+    activeLookupAgentProviderId,
+    clearRequestRecoveryTimeout,
+    resetStreamingContent,
+  ]);
 
   const handlePermissionResponse = React.useCallback(
     async (reply: "once" | "always" | "reject") => {
@@ -901,6 +1043,8 @@ export default function ChatScreen() {
       try {
         await sendPermissionResponse({
           requestId: pendingPermission.requestId,
+          agentProviderId:
+            pendingPermission.agentProviderId ?? activeLookupAgentProviderId,
           sessionId: pendingPermission.sessionId,
           jobId: pendingPermission.jobId,
           reply,
@@ -908,12 +1052,14 @@ export default function ChatScreen() {
         setPendingPermission(null);
       } catch (error) {
         console.error("[PermissionResponse] Failed to send:", error);
-        showError("The permission response was not delivered. Please try again.");
+        showError(
+          "The permission response was not delivered. Please try again.",
+        );
       } finally {
         setIsRespondingToPermission(false);
       }
     },
-    [pendingPermission],
+    [pendingPermission, activeLookupAgentProviderId, showError],
   );
 
   const handleQuestionResponse = React.useCallback(
@@ -927,6 +1073,8 @@ export default function ChatScreen() {
       try {
         await sendQuestionResponse({
           requestId: pendingQuestion.requestId,
+          agentProviderId:
+            pendingQuestion.agentProviderId ?? activeLookupAgentProviderId,
           sessionId: pendingQuestion.sessionId,
           jobId: pendingQuestion.jobId,
           answers,
@@ -939,7 +1087,7 @@ export default function ChatScreen() {
         setIsRespondingToQuestion(false);
       }
     },
-    [pendingQuestion],
+    [pendingQuestion, activeLookupAgentProviderId, showError],
   );
 
   // Phase 3: Use a ref for displayedMessages so renderMessage stays stable
@@ -987,10 +1135,26 @@ export default function ChatScreen() {
   // Phase 4: Stable callbacks for drawers
   const handleOpenDrawer = React.useCallback(() => setShowDrawer(true), []);
   const handleCloseDrawer = React.useCallback(() => setShowDrawer(false), []);
-  const handleOpenGitDrawer = React.useCallback(() => setShowGitDrawer(true), []);
-  const handleCloseGitDrawer = React.useCallback(() => setShowGitDrawer(false), []);
-  const handleOpenFileDrawer = React.useCallback(() => setShowFileDrawer(true), []);
-  const handleCloseFileDrawer = React.useCallback(() => setShowFileDrawer(false), []);
+  const handleOpenGitDrawer = React.useCallback(
+    () => setShowGitDrawer(true),
+    [],
+  );
+  const handleCloseGitDrawer = React.useCallback(
+    () => setShowGitDrawer(false),
+    [],
+  );
+  const handleOpenFileDrawer = React.useCallback(
+    () => setShowFileDrawer(true),
+    [],
+  );
+  const handleCloseFileDrawer = React.useCallback(
+    () => setShowFileDrawer(false),
+    [],
+  );
+  const handleCloseAgentProviderSheet = React.useCallback(
+    () => setShowAgentProviderSheet(false),
+    [],
+  );
   const handleNewSession = React.useCallback(() => {
     setActiveSessionId(null);
     setOptimisticMessage(null);
@@ -1073,7 +1237,10 @@ export default function ChatScreen() {
               </Text>
               <Pressable
                 onPress={() => refetch()}
-                style={[styles.retryButton, { borderColor: colors.borderColor }]}
+                style={[
+                  styles.retryButton,
+                  { borderColor: colors.borderColor },
+                ]}
               >
                 <Text style={{ color: theme.colors.primary }}>Retry</Text>
               </Pressable>
@@ -1121,9 +1288,8 @@ export default function ChatScreen() {
                         ? pendingRequestIds.get(activeSessionId)
                         : creatingSessionId) ?? "typing"
                     }
-                    streamingContent={footerStreamingContent}
                     thinkingContent={footerThinkingContent}
-                    activities={footerActivities}
+                    blocks={footerBlocks}
                     phase={footerPhase}
                     borderColor={colors.borderColor}
                     assistantBubble={colors.assistantBubble}
@@ -1173,7 +1339,11 @@ export default function ChatScreen() {
         <ChatComposer
           activeProject={Boolean(session.activeProject)}
           activeAgentName={session.activeAgent?.name ?? "Default agent"}
+          activeAgentProviderName={
+            selectedAgentProvider?.agentProviderName ?? "No provider"
+          }
           activeProjectName={session.activeProject?.name ?? "No project"}
+          agentProviderLocked={Boolean(activeSessionId)}
           borderColor={colors.borderColor}
           branchName={session.currentBranch}
           fileSuggestions={composer.fileSuggestions}
@@ -1183,6 +1353,7 @@ export default function ChatScreen() {
           inputText={composer.inputText}
           isSending={isSessionSending}
           onPressAgent={session.handleOpenAgentSheet}
+          onPressAgentProvider={() => setShowAgentProviderSheet(true)}
           onPressBranch={session.handleOpenBranchSheet}
           mentionQuery={composer.activeMention?.query ?? ""}
           metaColor={colors.metaColor}
@@ -1195,7 +1366,9 @@ export default function ChatScreen() {
           onSelectFileSuggestion={composer.handleSelectFileSuggestion}
           onSend={() => void handleSend()}
           onAbort={handleAbort}
-          selectedModelDisplayName={session.activeModel ? session.activeModel.name : "No model"}
+          selectedModelDisplayName={
+            session.activeModel ? session.activeModel.name : "No model"
+          }
           showMentionSuggestions={composer.showMentionSuggestions}
           showSkillSuggestions={composer.showSkillSuggestions}
           skillSuggestions={composer.skillSuggestions}
@@ -1209,7 +1382,9 @@ export default function ChatScreen() {
           onDismiss={() => setErrorToastVisible(false)}
           bottomOffset={
             keyboardHeight > 0
-              ? keyboardHeight + measuredComposerHeight + KEYBOARD_ADDITIONAL_PADDING
+              ? keyboardHeight +
+                measuredComposerHeight +
+                KEYBOARD_ADDITIONAL_PADDING
               : measuredComposerHeight
           }
         />
@@ -1236,13 +1411,25 @@ export default function ChatScreen() {
 
       <ModelSelectionSheet
         visible={session.showProviderSheet}
-        models={session.sortedModels}
+        groups={visibleModelGroups}
         activeModelId={session.activeModel?.id}
         loading={session.providersLoading}
         searchQuery={session.modelSearchQuery}
         onSearchChange={session.setModelSearchQuery}
         onClose={session.handleCloseProviderSheet}
         onSelectModel={session.handleSelectModel}
+      />
+
+      <AgentProviderSelectionSheet
+        visible={showAgentProviderSheet}
+        providers={availableAgentProviders}
+        activeAgentProviderId={selectedAgentProvider?.agentProviderId}
+        onClose={handleCloseAgentProviderSheet}
+        onSelectProvider={(provider) => {
+          setActiveSessionAgentProviderId(provider.agentProviderId);
+          ensureModelForAgentProvider(provider.agentProviderId);
+          setShowAgentProviderSheet(false);
+        }}
       />
 
       <AgentSelectionSheet
@@ -1278,7 +1465,7 @@ export default function ChatScreen() {
         onClose={handleCloseDrawer}
         activeProject={session.activeProject}
         activeSessionId={activeSessionId}
-        onSelectSession={(sessionId) => {
+        onSelectSession={(sessionId, sessionAgentProviderId) => {
           if (sessionId === null) {
             activeSessionIdRef.current = null;
             clearPendingStreamState();
@@ -1287,6 +1474,9 @@ export default function ChatScreen() {
             hasScrolledToBottom.current = false;
           } else {
             clearRequestRecoveryTimeout();
+            setActiveSessionAgentProviderId(
+              sessionAgentProviderId ?? selectedModelAgentProviderId,
+            );
             setActiveSessionId(sessionId);
             activeSessionIdRef.current = sessionId;
             setOptimisticMessage(null);

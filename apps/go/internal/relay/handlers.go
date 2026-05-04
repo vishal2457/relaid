@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,6 +185,25 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 
 func (h *Handler) getProvider() (agent.AgentProvider, error) {
 	return h.registry.Get(agent.ProviderOpencode)
+}
+
+func (h *Handler) resolveProvider(agentProviderID string) (agent.AgentProvider, error) {
+	id := strings.TrimSpace(agentProviderID)
+	if id == "" {
+		id = string(agent.ProviderOpencode)
+	}
+	return h.registry.Get(agent.ProviderID(id))
+}
+
+func runtimeProviderName(provider agent.AgentProvider) string {
+	switch provider.ID() {
+	case agent.ProviderOpencode:
+		return "opencode"
+	case agent.ProviderCodex:
+		return "codex"
+	default:
+		return string(provider.ID())
+	}
 }
 
 func (h *Handler) resolveWorktree(projectID string) (string, error) {
@@ -506,13 +526,13 @@ func (h *Handler) handleSessionsList(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
 		return
 	}
 
-	h.logger.Printf("[sessions-debug] sessions list request: %v", req.Cwd)
+	h.logger.Printf("[sessions-debug] sessions list request: %v", req)
 
 	filters := agent.SessionFilters{
 		Cwd:    req.Cwd,
@@ -534,7 +554,10 @@ func (h *Handler) handleSessionsList(args []json.RawMessage) {
 		Sessions:  make([]SessionPayload, 0, len(sessions)),
 	}
 	for _, s := range sessions {
-		payload.Sessions = append(payload.Sessions, h.convertSession(s))
+		payload.Sessions = append(
+			payload.Sessions,
+			h.convertSession(s, provider.ID()),
+		)
 	}
 
 	h.emit(EventSessionsListResponse, payload)
@@ -550,11 +573,13 @@ func (h *Handler) handleSessionGet(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
 		return
 	}
+
+	log.Printf("[sessions-debug] session get request: %v", req.SessionID)
 
 	session, err := provider.Sessions().Get(context.Background(), req.SessionID)
 	if err != nil || session == nil {
@@ -567,7 +592,7 @@ func (h *Handler) handleSessionGet(args []json.RawMessage) {
 
 	h.emit(EventSessionGetResponse, SessionGetResponse{
 		RequestID: req.RequestID,
-		Session:   h.convertSessionPtr(session),
+		Session:   h.convertSessionPtr(session, provider.ID()),
 	})
 }
 
@@ -581,7 +606,7 @@ func (h *Handler) handleSessionMessages(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
 		return
@@ -612,7 +637,7 @@ func (h *Handler) handleSessionCreate(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
 		return
@@ -633,7 +658,7 @@ func (h *Handler) handleSessionCreate(args []json.RawMessage) {
 
 	h.emit(EventSessionCreateResponse, SessionCreateResponse{
 		RequestID: req.RequestID,
-		Session:   h.convertSession(*session),
+		Session:   h.convertSession(*session, provider.ID()),
 	})
 }
 
@@ -647,7 +672,7 @@ func (h *Handler) handleSessionDiff(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
 		return
@@ -690,7 +715,7 @@ func (h *Handler) handleSessionUpdate(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
 		return
@@ -707,7 +732,7 @@ func (h *Handler) handleSessionUpdate(args []json.RawMessage) {
 
 	h.emit(EventSessionUpdateResponse, SessionUpdateResponse{
 		RequestID: req.RequestID,
-		Session:   h.convertSessionPtr(session),
+		Session:   h.convertSessionPtr(session, provider.ID()),
 	})
 }
 
@@ -727,7 +752,7 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		SessionID: req.SessionID,
 	})
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emit(EventSessionPromptResponse, SessionPromptResponsePayload{
 			RequestID: req.RequestID,
@@ -794,7 +819,7 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		response.SessionID = result.SessionID
 	}
 
-	if session, sessErr := provider.Sessions().Get(context.Background(), req.SessionID); sessErr == nil && session != nil {
+	if session, sessErr := provider.Sessions().Get(context.Background(), response.SessionID); sessErr == nil && session != nil {
 		response.SessionTitle = session.Title
 	}
 
@@ -811,7 +836,7 @@ func (h *Handler) handleSessionAbort(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emit(EventSessionAborted, SessionAbortedPayload{
 			RequestID: req.RequestID,
@@ -850,35 +875,63 @@ func (h *Handler) handleProvidersList(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
-	if err != nil {
-		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
-		return
-	}
-
-	providers, err := provider.Providers().List(context.Background())
-	if err != nil {
-		h.emit(EventProvidersListResponse, ProvidersListResponse{
-			RequestID: req.RequestID,
-			Providers: []ProviderPayload{},
-		})
-		return
-	}
-
 	payload := ProvidersListResponse{
 		RequestID: req.RequestID,
-		Providers: make([]ProviderPayload, 0, len(providers)),
+		Providers: []ProviderPayload{},
 	}
-	for _, p := range providers {
-		models := make([]ModelPayload, 0, len(p.Models))
-		for _, m := range p.Models {
-			models = append(models, ModelPayload{ID: m.ID, Name: m.Name})
+	for _, runtime := range h.registry.List() {
+		if !runtime.Capabilities().SessionsList {
+			continue
 		}
+
+		runtimeID := string(runtime.ID())
+		runtimeName := runtimeProviderName(runtime)
+
+		// Always expose a runtime placeholder so mobile can discover which
+		// agent providers are available for session fan-out, even if provider
+		// listing is unsupported, empty, or temporarily failing.
 		payload.Providers = append(payload.Providers, ProviderPayload{
-			ID:     p.ID,
-			Name:   p.Name,
-			Models: models,
+			ID:                runtimeID,
+			Name:              runtimeName,
+			AgentProviderID:   runtimeID,
+			AgentProviderName: runtimeName,
+			ProviderID:        runtimeID,
+			ProviderName:      runtimeName,
+			Models:            []ModelPayload{},
 		})
+
+		if !runtime.Capabilities().ProvidersList || runtime.Providers() == nil {
+			continue
+		}
+		providers, err := runtime.Providers().List(context.Background())
+		if err != nil {
+			h.logger.Printf("providers list failed for %s: %v", runtime.ID(), err)
+			continue
+		}
+		for _, p := range providers {
+			models := make([]ModelPayload, 0, len(p.Models))
+			for _, m := range p.Models {
+				models = append(models, ModelPayload{
+					ID:                m.ID,
+					Name:              m.Name,
+					AgentProviderID:   runtimeID,
+					AgentProviderName: runtimeName,
+					ProviderID:        p.ID,
+					ProviderName:      p.Name,
+					ModelID:           m.ID,
+					ModelName:         m.Name,
+				})
+			}
+			payload.Providers = append(payload.Providers, ProviderPayload{
+				ID:                p.ID,
+				Name:              p.Name,
+				AgentProviderID:   runtimeID,
+				AgentProviderName: runtimeName,
+				ProviderID:        p.ID,
+				ProviderName:      p.Name,
+				Models:            models,
+			})
+		}
 	}
 
 	h.emit(EventProvidersListResponse, payload)
@@ -894,9 +947,16 @@ func (h *Handler) handleAgentsList(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
+		return
+	}
+	if !provider.Capabilities().AgentsList || provider.Agents() == nil {
+		h.emit(EventAgentsListResponse, AgentsListResponse{
+			RequestID: req.RequestID,
+			Agents:    []AgentPayload{},
+		})
 		return
 	}
 
@@ -1935,15 +1995,19 @@ func (h *Handler) RequestQuestion(payload QuestionRequestPayload) ([][]string, e
 	}
 }
 
-func (h *Handler) convertSession(s agent.Session) SessionPayload {
+func (h *Handler) convertSession(
+	s agent.Session,
+	providerID agent.ProviderID,
+) SessionPayload {
 	sp := SessionPayload{
-		ID:        s.ID,
-		ProjectID: s.ProjectID,
-		Directory: s.Directory,
-		Prompt:    s.Title,
-		Status:    string(s.Status),
-		CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
-		UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05.000Z"),
+		ID:              s.ID,
+		AgentProviderID: string(providerID),
+		ProjectID:       s.ProjectID,
+		Directory:       s.Directory,
+		Prompt:          s.Title,
+		Status:          string(s.Status),
+		CreatedAt:       s.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
+		UpdatedAt:       s.UpdatedAt.Format("2006-01-02T15:04:05.000Z"),
 	}
 	if s.Output != "" {
 		sp.Output = s.Output
@@ -1967,11 +2031,14 @@ func (h *Handler) convertSession(s agent.Session) SessionPayload {
 	return sp
 }
 
-func (h *Handler) convertSessionPtr(s *agent.Session) *SessionPayload {
+func (h *Handler) convertSessionPtr(
+	s *agent.Session,
+	providerID agent.ProviderID,
+) *SessionPayload {
 	if s == nil {
 		return nil
 	}
-	sp := h.convertSession(*s)
+	sp := h.convertSession(*s, providerID)
 	return &sp
 }
 

@@ -84,10 +84,35 @@ export const HomePage = () => {
   const opencodeStatusLabel = opencodeConnected
     ? "Connected"
     : "Disconnected";
+  const codexAvailable = desktopStatus?.codex.available ?? false;
+  const codexConnected = desktopStatus?.codex.connected ?? false;
+  const codexStatusColor = codexConnected
+    ? "text-green-500"
+    : codexAvailable
+      ? "text-yellow-500"
+      : "text-muted-foreground";
+  const CodexStatusIcon = codexConnected ? Wifi : WifiOff;
+  const codexStatusLabel = codexConnected ? "Connected" : "Disconnected";
 
   const openConfigDialog = () => {
     setRelayUrl(storedUrl);
     setShowConfigDialog(true);
+  };
+
+  const handleCreatePairing = () => {
+    if (!storedUrl) {
+      return;
+    }
+
+    createPairing().then((data) => {
+      if (data) {
+        setPairingData({
+          pairingUrl: data.pairingUrl,
+          expiresAt: data.expiresAt,
+        });
+        setShowQrDialog(true);
+      }
+    });
   };
 
   return (
@@ -134,32 +159,6 @@ export const HomePage = () => {
                 </TooltipTrigger>
                 <TooltipContent>Configure</TooltipContent>
               </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-l-none border-l-0"
-                    onClick={() => {
-                      if (storedUrl) {
-                        createPairing().then((data) => {
-                          if (data) {
-                            setPairingData({
-                              pairingUrl: data.pairingUrl,
-                              expiresAt: data.expiresAt,
-                            });
-                            setShowQrDialog(true);
-                          }
-                        });
-                      }
-                    }}
-                    disabled={!storedUrl || isCreating}
-                  >
-                    <Link2 className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Pair</TooltipContent>
-              </Tooltip>
             </div>
           </div>
         </section>
@@ -167,7 +166,7 @@ export const HomePage = () => {
         <section className="rounded-lg border p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              OpenCode
+              Provider Status
             </h2>
 
             <Button
@@ -182,10 +181,24 @@ export const HomePage = () => {
             </Button>
           </div>
 
-          <div className={`mt-4 flex items-center gap-2 text-sm ${opencodeStatusColor}`}>
-            <OpencodeStatusIcon className="h-4 w-4" />
-            <span>{opencodeStatusLabel}</span>
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between rounded-md border px-3 py-2">
+              <span className="text-sm text-foreground">OpenCode</span>
+              <div className={`flex items-center gap-2 text-sm ${opencodeStatusColor}`}>
+                <OpencodeStatusIcon className="h-4 w-4" />
+                <span>{opencodeStatusLabel}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-md border px-3 py-2">
+              <span className="text-sm text-foreground">Codex</span>
+              <div className={`flex items-center gap-2 text-sm ${codexStatusColor}`}>
+                <CodexStatusIcon className="h-4 w-4" />
+                <span>{codexStatusLabel}</span>
+              </div>
+            </div>
           </div>
+
           {desktopStatusError ? (
             <p className="mt-2 text-xs text-red-500">{desktopStatusError}</p>
           ) : null}
@@ -198,10 +211,27 @@ export const HomePage = () => {
                 <Smartphone className="h-4 w-4" />
                 Clients
               </h2>
-              <Button variant="ghost" size="sm" onClick={refreshClients}>
-                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                Refresh
-              </Button>
+              <div className="flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCreatePairing}
+                      disabled={!storedUrl || isCreating}
+                    >
+                      <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                      Pair
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Pair a new client</TooltipContent>
+                </Tooltip>
+
+                <Button variant="ghost" size="sm" onClick={refreshClients}>
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  Refresh
+                </Button>
+              </div>
             </div>
 
             {clients.length === 0 ? (

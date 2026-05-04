@@ -13,8 +13,9 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ActivityIndicator, Text, useTheme } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useSessions } from "@/src/lib/api/sessions";
+import { type Session, useSessionsForProviders } from "@/src/lib/api/sessions";
 import { type Project } from "@/src/lib/api/projects";
+import { useProviders } from "@/src/lib/api/providers";
 import {
   clearActiveSessionStream,
   getActiveSessionStream,
@@ -25,13 +26,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DRAWER_WIDTH = Math.min(320, SCREEN_WIDTH * 0.85);
 const DRAWER_ANIMATION_DURATION = 220;
+const INITIAL_SESSION_LIMIT = 5;
+
+type SessionGroup = {
+  providerId: string;
+  providerLabel: string;
+  sessions: Session[];
+};
 
 type SessionDrawerProps = {
   visible: boolean;
   onClose: () => void;
   activeProject: Project | null;
   activeSessionId: string | null;
-  onSelectSession: (sessionId: string | null) => void;
+  onSelectSession: (sessionId: string | null, agentProviderId?: string) => void;
 };
 
 export function SessionDrawer({
@@ -45,21 +53,87 @@ export function SessionDrawer({
   const insets = useSafeAreaInsets();
   const [isMounted, setIsMounted] = React.useState(visible);
   const [hasPendingSession, setHasPendingSession] = React.useState(false);
+  const [expandedProviders, setExpandedProviders] = React.useState<Set<string>>(
+    new Set(),
+  );
   const slideAnim = React.useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const backdropAnim = React.useRef(new Animated.Value(0)).current;
+  const { data: providers = [], isLoading: providersLoading } = useProviders();
+  const availableAgentProviderIds = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          providers
+            .map((provider) => provider.agentProviderId ?? "opencode")
+            .filter(Boolean),
+        ),
+      ),
+    [providers],
+  );
   const {
     data: sessions,
     isLoading: sessionsLoading,
     error: sessionsError,
-  } = useSessions(activeProject?.folder ?? "");
+  } = useSessionsForProviders(
+    activeProject?.folder ?? "",
+    availableAgentProviderIds,
+  );
+  const isSessionsLoading = providersLoading || sessionsLoading;
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
   const metaColor = theme.dark ? "#B8C2D1" : "#526277";
   const surfaceColor = theme.dark ? "#1E293B" : "#FFFFFF";
   const surfaceVariant = theme.dark ? "#111827" : "#F8FAFC";
+  const providerChipBackground = theme.dark ? "#273449" : "#E8EEF6";
 
-  const handleSelectSession = (sessionId: string) => {
-    onSelectSession(sessionId);
+  const groupedSessions = React.useMemo<SessionGroup[]>(() => {
+    if (!sessions) return [];
+
+    const groups = new Map<string, SessionGroup>();
+
+    for (const session of sessions) {
+      const providerId = session.agentProviderId ?? "opencode";
+      const existing = groups.get(providerId);
+      const providerLabel =
+        providerId === "opencode"
+          ? "OpenCode"
+          : providerId === "codex"
+            ? "Codex"
+            : providerId.charAt(0).toUpperCase() + providerId.slice(1);
+
+      if (existing) {
+        existing.sessions.push(session);
+        continue;
+      }
+
+      groups.set(providerId, {
+        providerId,
+        providerLabel,
+        sessions: [session],
+      });
+    }
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        sessions: [...group.sessions].sort((left, right) => {
+          const updatedDifference = right.updatedAt - left.updatedAt;
+          if (updatedDifference !== 0) return updatedDifference;
+          return right.createdAt - left.createdAt;
+        }),
+      }))
+      .sort((left, right) => {
+        const leftLatest = left.sessions[0]?.updatedAt ?? 0;
+        const rightLatest = right.sessions[0]?.updatedAt ?? 0;
+        return rightLatest - leftLatest;
+      });
+  }, [sessions]);
+
+  const handleSelectSession = (
+    sessionId: string,
+    sessionAgentProviderId?: string,
+  ) => {
+    onSelectSession(sessionId, sessionAgentProviderId);
     onClose();
   };
 
@@ -103,6 +177,22 @@ export function SessionDrawer({
       isCancelled = true;
     };
   }, [visible]);
+
+  React.useEffect(() => {
+    setExpandedProviders(new Set());
+  }, [activeProject?.id, visible]);
+
+  const toggleProviderExpansion = (providerId: string) => {
+    setExpandedProviders((current) => {
+      const next = new Set(current);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
+  };
 
   React.useEffect(() => {
     if (visible) {
@@ -221,7 +311,7 @@ export function SessionDrawer({
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         >
-          {sessionsLoading ? (
+          {isSessionsLoading ? (
             <View style={styles.centered}>
               <ActivityIndicator />
               <Text
@@ -259,7 +349,7 @@ export function SessionDrawer({
                 Select a project first
               </Text>
             </View>
-          ) : !sessions || sessions.length === 0 ? (
+          ) : groupedSessions.length === 0 ? (
             <View style={styles.centered}>
               <MaterialCommunityIcons
                 name="chat-outline"
@@ -280,67 +370,168 @@ export function SessionDrawer({
               </Text>
             </View>
           ) : (
-            sessions.map((session) => {
-              const isActive = session.id === activeSessionId;
-              const isSessionLoading = isStreamingSessionStatus(session.status);
-              const sessionStatusLabel =
-                session.status === "pending" ? "Pending" : "Running";
+            groupedSessions.map((group) => {
+              const isExpanded = expandedProviders.has(group.providerId);
+              const visibleProviderSessions = isExpanded
+                ? group.sessions
+                : group.sessions.slice(0, INITIAL_SESSION_LIMIT);
+              const hiddenCount = group.sessions.length - INITIAL_SESSION_LIMIT;
 
               return (
-                <Pressable
-                  key={session.id}
-                  onPress={() => handleSelectSession(session.id)}
-                  style={[
-                    styles.sessionItem,
-                    {
-                      backgroundColor: isActive
-                        ? "rgba(156, 163, 175, 0.15)"
-                        : "transparent",
-                      borderColor,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Session: ${session.prompt || "Untitled session"}${
-                    isSessionLoading ? `, ${sessionStatusLabel}` : ""
-                  }`}
-                  accessibilityState={{
-                    selected: isActive,
-                    busy: isSessionLoading,
-                  }}
+                <View
+                  key={group.providerId}
+                  style={styles.providerSection}
                 >
-                  <View style={styles.sessionRow}>
-                    <Text
-                      variant="titleSmall"
-                      style={[
-                        styles.sessionPrompt,
-                        {
-                          color: isActive ? "#6B7280" : theme.colors.onSurface,
-                        },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {session.prompt || "Untitled session"}
-                    </Text>
-
-                    {isSessionLoading ? (
-                      <View style={styles.sessionLoading}>
-                        <ActivityIndicator
-                          size={14}
-                          color={theme.colors.primary}
-                        />
+                  <View style={styles.providerSectionHeader}>
+                    <View style={styles.providerSectionTitleRow}>
+                      <View
+                        style={[
+                          styles.providerChip,
+                          { backgroundColor: providerChipBackground },
+                        ]}
+                      >
                         <Text
                           variant="labelSmall"
                           style={[
-                            styles.sessionLoadingText,
-                            { color: theme.colors.primary },
+                            styles.providerChipText,
+                            { color: theme.colors.onSurfaceVariant },
                           ]}
                         >
-                          {sessionStatusLabel}
+                          {group.providerLabel}
                         </Text>
                       </View>
+                      <Text
+                        variant="bodySmall"
+                        style={{ color: metaColor }}
+                      >
+                        {group.sessions.length} sessions
+                      </Text>
+                    </View>
+
+                    {group.sessions.length > INITIAL_SESSION_LIMIT ? (
+                      <Pressable
+                        onPress={() => toggleProviderExpansion(group.providerId)}
+                        style={styles.providerExpandButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isExpanded
+                            ? `Collapse ${group.providerLabel} sessions`
+                            : `Load more ${group.providerLabel} sessions`
+                        }
+                      >
+                        <Text
+                          variant="labelMedium"
+                          style={{ color: theme.colors.primary, fontWeight: "600" }}
+                        >
+                          {isExpanded ? "Show Less" : `View All`}
+                        </Text>
+                        <MaterialCommunityIcons
+                          name={isExpanded ? "chevron-up" : "chevron-down"}
+                          size={18}
+                          color={theme.colors.primary}
+                        />
+                      </Pressable>
                     ) : null}
                   </View>
-                </Pressable>
+
+                  <View style={styles.providerSectionBody}>
+                    {visibleProviderSessions.map((session) => {
+                      const isActive = session.id === activeSessionId;
+                      const isSessionLoading = isStreamingSessionStatus(
+                        session.status,
+                      );
+                      const sessionStatusLabel =
+                        session.status === "pending" ? "Pending" : "Running";
+
+                      return (
+                        <Pressable
+                          key={session.id}
+                          onPress={() =>
+                            handleSelectSession(session.id, session.agentProviderId)
+                          }
+                          style={[
+                            styles.sessionItem,
+                            {
+                              backgroundColor: isActive
+                                ? "rgba(156, 163, 175, 0.15)"
+                                : "transparent",
+                              borderColor,
+                            },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${group.providerLabel} session: ${session.prompt || "Untitled session"}${
+                            isSessionLoading ? `, ${sessionStatusLabel}` : ""
+                          }`}
+                          accessibilityState={{
+                            selected: isActive,
+                            busy: isSessionLoading,
+                          }}
+                        >
+                          <View style={styles.sessionRow}>
+                            <View style={styles.sessionTextBlock}>
+                              <Text
+                                variant="titleSmall"
+                                style={[
+                                  styles.sessionPrompt,
+                                  {
+                                    color: isActive
+                                      ? "#6B7280"
+                                      : theme.colors.onSurface,
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {session.prompt || "Untitled session"}
+                              </Text>
+                            </View>
+
+                            {isSessionLoading ? (
+                              <View style={styles.sessionLoading}>
+                                <ActivityIndicator
+                                  size={14}
+                                  color={theme.colors.primary}
+                                />
+                                <Text
+                                  variant="labelSmall"
+                                  style={[
+                                    styles.sessionLoadingText,
+                                    { color: theme.colors.primary },
+                                  ]}
+                                >
+                                  {sessionStatusLabel}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+
+                    {!isExpanded && hiddenCount > 0 ? (
+                      <Pressable
+                        onPress={() => toggleProviderExpansion(group.providerId)}
+                        style={[styles.loadMoreButton, { borderColor }]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Load ${hiddenCount} more ${group.providerLabel} sessions`}
+                      >
+                        <Text
+                          variant="labelLarge"
+                          style={{
+                            color: theme.colors.onSurfaceVariant,
+                            fontWeight: "600",
+                          }}
+                        >
+                          Load {hiddenCount} More
+                        </Text>
+                        <MaterialCommunityIcons
+                          name="chevron-down"
+                          size={20}
+                          color={theme.colors.onSurfaceVariant}
+                        />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
               );
             })
           )}
@@ -472,18 +663,59 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 24,
-    gap: 8,
+    gap: 12,
+  },
+  providerSection: {
+    gap: 6,
+  },
+  providerSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  providerSectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  providerSectionBody: {
+    paddingBottom: 2,
+  },
+  providerExpandButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
   },
   sessionItem: {
     paddingVertical: 8,
-    paddingLeft: 5,
+    paddingLeft: 8,
     paddingRight: 8,
-    borderRadius: 5,
+    borderRadius: 10,
     gap: 8,
   },
   sessionRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  sessionTextBlock: {
+    flex: 1,
+    gap: 6,
+  },
+  loadMoreButton: {
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
   },
   sessionHeader: {
@@ -492,9 +724,19 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   sessionPrompt: {
-    flex: 1,
     fontWeight: "600",
     lineHeight: 20,
+  },
+  providerChip: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  providerChipText: {
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
   },
   sessionLoading: {
     flexDirection: "row",

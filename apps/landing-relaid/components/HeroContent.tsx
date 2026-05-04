@@ -34,11 +34,8 @@ function getPlatformInfo(): { isMobile: boolean; os: string } {
 }
 
 function filterDesktopDownloads(downloads: DownloadLink[], os: string): DownloadLink[] {
-  if (os === "macSilicon") {
-    return downloads.filter((d) => d.label === "Mac Silicon");
-  }
-  if (os === "macIntel") {
-    return downloads.filter((d) => d.label === "Mac Intel");
+  if (os === "macSilicon" || os === "macIntel") {
+    return downloads.filter((d) => d.label === "Mac Silicon" || d.label === "Mac Intel");
   }
   if (os === "windows") {
     return downloads.filter((d) => d.label === "Windows");
