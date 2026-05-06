@@ -32,6 +32,7 @@ type Provider struct {
 	capabilities agent.CapabilitySet
 	sessions     *sessionService
 	providers    *providerService
+	apps         *appService
 }
 
 func New(cfg config.Config, logger *log.Logger) *Provider {
@@ -52,6 +53,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			ProvidersList:  true,
 			AgentsList:     false,
 			SkillsList:     false,
+			AppsList:       true,
 		},
 		sessions: &sessionService{
 			cfg:    cfg,
@@ -60,6 +62,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			active: &activeRunStore{runs: map[string]context.CancelFunc{}},
 		},
 		providers: &providerService{client: client},
+		apps:      &appService{client: client},
 	}
 
 	return p
@@ -72,6 +75,7 @@ func (p *Provider) Sessions() agent.SessionService                 { return p.se
 func (p *Provider) Providers() agent.ProviderService               { return p.providers }
 func (p *Provider) Agents() agent.AgentService                     { return nil }
 func (p *Provider) Skills() agent.SkillsService                    { return nil }
+func (p *Provider) Apps() agent.AppService                         { return p.apps }
 func (p *Provider) SetInteractionHandler(h acp.InteractionHandler) { p.sessions.client.handler = h }
 func (p *Provider) Shutdown(context.Context) error {
 	p.sessions.client.closeShared()
@@ -114,6 +118,68 @@ func (s *providerService) List(ctx context.Context) ([]agent.Provider, error) {
 	})
 
 	return []agent.Provider{{ID: "openai", Name: "OpenAI", Models: result}}, nil
+}
+
+// ---------------------------------------------------------------------------
+// appService
+// ---------------------------------------------------------------------------
+
+type appService struct {
+	client *appServerClient
+}
+
+func (s *appService) List(ctx context.Context, input agent.AppListInput) ([]agent.App, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
+
+	conn, err := s.client.sharedConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	params := appListParams{
+		ThreadID:     emptyToNil(input.ThreadID),
+		Limit:        &limit,
+		ForceRefetch: input.ForceRefetch,
+	}
+
+	result, err := conn.appList(ctx, params)
+	if err != nil && input.ThreadID != "" {
+		params.ThreadID = nil
+		result, err = conn.appList(ctx, params)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if input.ThreadID != "" && len(result.Data) == 0 {
+		params.ThreadID = nil
+		result, err = conn.appList(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	apps := make([]agent.App, 0, len(result.Data))
+	for _, item := range result.Data {
+		apps = append(apps, agent.App{
+			ID:           item.ID,
+			Name:         item.Name,
+			Description:  item.Description,
+			IsAccessible: item.IsAccessible,
+			IsEnabled:    item.IsEnabled,
+			Labels:       stringSlice(item.Labels),
+		})
+	}
+	sort.Slice(apps, func(i, j int) bool {
+		return strings.ToLower(apps[i].Name) < strings.ToLower(apps[j].Name)
+	})
+
+	return apps, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -403,13 +469,9 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 
 	turnResult, err := conn.turnStart(runCtx, turnStartParams{
 		ThreadID: threadID,
-		Input: []userInput{{
-			Type:         "text",
-			Text:         prompt,
-			TextElements: []any{},
-		}},
-		Cwd:   emptyToNil(input.WorkingDir),
-		Model: modelToNil(input.Model),
+		Input:    buildUserInputs(prompt, input.Items),
+		Cwd:      emptyToNil(input.WorkingDir),
+		Model:    modelToNil(input.Model),
 	})
 	if err != nil {
 		return nil, err
@@ -539,6 +601,29 @@ func (s *sessionService) Abort(_ context.Context, sessionID string, _ string) (b
 	}
 	cancel()
 	return true, nil
+}
+
+func buildUserInputs(prompt string, items []agent.InputItem) []userInput {
+	inputs := []userInput{{
+		Type:         "text",
+		Text:         prompt,
+		TextElements: []any{},
+	}}
+
+	for _, item := range items {
+		kind := strings.TrimSpace(item.Type)
+		if kind == "" {
+			continue
+		}
+		inputs = append(inputs, userInput{
+			Type: kind,
+			Text: item.Text,
+			Name: item.Name,
+			Path: item.Path,
+		})
+	}
+
+	return inputs
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +839,11 @@ func (c *appServerConn) turnInterrupt(ctx context.Context, threadID, turnID stri
 func (c *appServerConn) modelList(ctx context.Context) (*modelListResponse, error) {
 	var r modelListResponse
 	return &r, c.call(ctx, "model/list", map[string]any{"includeHidden": false}, &r)
+}
+
+func (c *appServerConn) appList(ctx context.Context, p appListParams) (*appListResponse, error) {
+	var r appListResponse
+	return &r, c.call(ctx, "app/list", p, &r)
 }
 
 // Low-level JSON-RPC -----------------------------------------------------------
@@ -1645,6 +1735,13 @@ type threadListParams struct {
 	Cwd            any      `json:"cwd,omitempty"`
 }
 
+type appListParams struct {
+	ThreadID     *string `json:"threadId,omitempty"`
+	Cursor       *string `json:"cursor,omitempty"`
+	Limit        *int    `json:"limit,omitempty"`
+	ForceRefetch bool    `json:"forceRefetch"`
+}
+
 type turnStartParams struct {
 	ThreadID string      `json:"threadId"`
 	Input    []userInput `json:"input"`
@@ -1654,8 +1751,10 @@ type turnStartParams struct {
 
 type userInput struct {
 	Type         string `json:"type"`
-	Text         string `json:"text"`
-	TextElements []any  `json:"text_elements"`
+	Text         string `json:"text,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Path         string `json:"path,omitempty"`
+	TextElements []any  `json:"text_elements,omitempty"`
 }
 
 type threadStartResponse struct {
@@ -1676,11 +1775,25 @@ type modelListResponse struct {
 	NextCursor *string      `json:"nextCursor"`
 }
 
+type appListResponse struct {
+	Data       []codexApp `json:"data"`
+	NextCursor *string    `json:"nextCursor"`
+}
+
 type codexModel struct {
 	ID          string `json:"id"`
 	Model       string `json:"model"`
 	DisplayName string `json:"displayName"`
 	Hidden      bool   `json:"hidden"`
+}
+
+type codexApp struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	IsAccessible bool   `json:"isAccessible"`
+	IsEnabled    bool   `json:"isEnabled"`
+	Labels       any    `json:"labels"`
 }
 
 type thread struct {

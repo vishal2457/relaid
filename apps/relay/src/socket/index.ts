@@ -21,6 +21,7 @@ import {
 } from "../services/push-notification";
 import { logger } from "../shared/logger";
 import type {
+  AppPayload,
   ProjectPayload,
   ProviderPayload,
   RunRequestEvent,
@@ -119,6 +120,11 @@ type ProjectDeleteResponse = {
 
 type ProvidersListResponse = {
   providers: ProviderPayload[];
+  error?: string;
+};
+
+type AppsListResponse = {
+  apps: AppPayload[];
   error?: string;
 };
 
@@ -355,6 +361,7 @@ async function handleLocalServerConnection(
   pipeResponse("local_servers_list_response");
   pipeResponse("local_server_register_response");
   pipeResponse("providers_list_response");
+  pipeResponse("apps_list_response");
   pipeResponse("agents_list_response");
   pipeResponse("git_staged_files_response");
   pipeResponse("git_stage_files_response");
@@ -1162,6 +1169,58 @@ function handleMobileConnection(socket: Socket, userId: string): void {
       );
     }
   });
+
+  socket.on(
+    "apps_list_request",
+    async (data: {
+      requestId: string;
+      agentProviderId?: string;
+      projectId?: string;
+      sessionId?: string;
+      limit?: number;
+      forceRefetch?: boolean;
+    }) => {
+      try {
+        let targetServerId: string | undefined;
+        if (data.projectId) {
+          const projectResult = await requestUntilMatch<ProjectResponse>(
+            userId,
+            "project_get_request",
+            "project_get_response",
+            { projectId: data.projectId },
+            (response) => Boolean(response.project),
+          );
+          targetServerId = projectResult?.serverId;
+        }
+
+        const result = await requestConnectedServer<AppsListResponse>(
+          userId,
+          "apps_list_request",
+          "apps_list_response",
+          {
+            agentProviderId: data.agentProviderId,
+            sessionId: data.sessionId,
+            limit: data.limit,
+            forceRefetch: data.forceRefetch,
+          },
+          targetServerId,
+        );
+
+        socket.emit("apps_list_response", {
+          requestId: data.requestId,
+          apps: result.response.apps || [],
+        });
+      } catch (error) {
+        emitSocketError(
+          socket,
+          "apps_list_response",
+          data.requestId,
+          { apps: [] },
+          error,
+        );
+      }
+    },
+  );
 
   socket.on(
     "agents_list_request",

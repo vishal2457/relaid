@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { type ProjectFileMatch } from "@/src/lib/api/projects";
 import { type Skill } from "@/src/lib/api/skills";
+import { type ProviderApp } from "@/src/lib/api/providers";
 
 export const MIN_INPUT_HEIGHT = 44;
 export const MAX_INPUT_HEIGHT = 150;
@@ -64,6 +65,8 @@ type ChatComposerProps = {
   activeAgentProviderName: string;
   activeProject: boolean;
   activeProjectName: string;
+  appSuggestions?: ProviderApp[];
+  appSuggestionsLoading: boolean;
   agentProviderLocked?: boolean;
   borderColor: string;
   branchName?: string;
@@ -85,6 +88,7 @@ type ChatComposerProps = {
     event: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
   ) => void;
   onSelectFileSuggestion: (match: ProjectFileMatch) => void;
+  onSelectAppSuggestion: (app: ProviderApp) => void;
   onSend: () => void;
   onAbort?: () => void;
   onPressModel: () => void;
@@ -103,6 +107,8 @@ export function ChatComposer({
   activeAgentProviderName,
   activeProject,
   activeProjectName,
+  appSuggestions,
+  appSuggestionsLoading,
   agentProviderLocked = false,
   borderColor,
   branchName,
@@ -122,6 +128,7 @@ export function ChatComposer({
   onPressBranch,
   onSelectionChange,
   onSelectFileSuggestion,
+  onSelectAppSuggestion,
   onSend,
   onAbort,
   onPressModel,
@@ -188,6 +195,22 @@ export function ChatComposer({
     [onSelectSkillSuggestion],
   );
 
+  const handleAppSuggestionPress = React.useCallback(
+    (app: ProviderApp) => {
+      onSelectAppSuggestion(app);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+    },
+    [onSelectAppSuggestion],
+  );
+
+  const hasFileSuggestions = Boolean(
+    fileSuggestions && fileSuggestions.length > 0,
+  );
+  const hasAppSuggestions = Boolean(appSuggestions && appSuggestions.length > 0);
+  const showMentionLoading = fileSuggestionsLoading || appSuggestionsLoading;
+
   return (
     <View
       onLayout={onComposerLayout}
@@ -210,65 +233,130 @@ export function ChatComposer({
             },
           ]}
         >
-          {!mentionQuery.trim() ? (
-            <View style={styles.mentionEmptyState}>
-              <Text variant="bodySmall" style={{ color: metaColor }}>
-                Type to search for files
-              </Text>
-            </View>
-          ) : fileSuggestionsLoading ? (
+          {showMentionLoading ? (
             <View style={styles.mentionEmptyState}>
               <ActivityIndicator size="small" />
             </View>
-          ) : fileSuggestions && fileSuggestions.length > 0 ? (
+          ) : hasFileSuggestions || hasAppSuggestions ? (
             <ScrollView
               style={styles.mentionResults}
               contentContainerStyle={styles.mentionResultsContent}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
             >
-              {fileSuggestions.map((item) => (
-                <Pressable
-                  key={`${item.type}:${item.path}`}
-                  onPress={() => handleSuggestionPress(item)}
-                  style={styles.mentionItem}
+              {!mentionQuery.trim() ? (
+                <Text
+                  variant="bodySmall"
+                  style={[styles.mentionHint, { color: metaColor }]}
                 >
-                  <MaterialCommunityIcons
-                    name={
-                      item.type === "directory"
-                        ? "folder-outline"
-                        : "file-outline"
-                    }
-                    size={18}
-                    color={
-                      item.type === "directory"
-                        ? theme.colors.primary
-                        : theme.colors.onSurfaceVariant
-                    }
-                  />
-                  <View style={styles.mentionItemContent}>
-                    <Text
-                      variant="bodyMedium"
-                      style={{ color: theme.colors.onSurface }}
-                      numberOfLines={1}
+                  Type after `@` to search files. Codex apps are available below.
+                </Text>
+              ) : null}
+              {hasFileSuggestions ? (
+                <>
+                  <Text
+                    variant="labelSmall"
+                    style={[styles.mentionSectionLabel, { color: metaColor }]}
+                  >
+                    Files
+                  </Text>
+                  {fileSuggestions?.map((item) => (
+                    <Pressable
+                      key={`${item.type}:${item.path}`}
+                      onPress={() => handleSuggestionPress(item)}
+                      style={styles.mentionItem}
                     >
-                      {item.name}
-                    </Text>
-                    <Text
-                      variant="bodySmall"
-                      style={{ color: metaColor }}
-                      numberOfLines={1}
+                      <MaterialCommunityIcons
+                        name={
+                          item.type === "directory"
+                            ? "folder-outline"
+                            : "file-outline"
+                        }
+                        size={18}
+                        color={
+                          item.type === "directory"
+                            ? theme.colors.primary
+                            : theme.colors.onSurfaceVariant
+                        }
+                      />
+                      <View style={styles.mentionItemContent}>
+                        <Text
+                          variant="bodyMedium"
+                          style={{ color: theme.colors.onSurface }}
+                          numberOfLines={1}
+                        >
+                          {item.name}
+                        </Text>
+                        <Text
+                          variant="bodySmall"
+                          style={{ color: metaColor }}
+                          numberOfLines={1}
+                        >
+                          {item.path}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                </>
+              ) : null}
+              {hasFileSuggestions && hasAppSuggestions ? (
+                <View
+                  style={[
+                    styles.mentionSectionDivider,
+                    { backgroundColor: borderColor },
+                  ]}
+                />
+              ) : null}
+              {hasAppSuggestions ? (
+                <>
+                  <Text
+                    variant="labelSmall"
+                    style={[styles.mentionSectionLabel, { color: metaColor }]}
+                  >
+                    Codex Apps
+                  </Text>
+                  {appSuggestions?.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => handleAppSuggestionPress(item)}
+                      style={styles.mentionItem}
                     >
-                      {item.path}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
+                      <MaterialCommunityIcons
+                        name="connection"
+                        size={18}
+                        color={theme.colors.primary}
+                      />
+                      <View style={styles.mentionItemContent}>
+                        <Text
+                          variant="bodyMedium"
+                          style={{ color: theme.colors.onSurface }}
+                          numberOfLines={1}
+                        >
+                          {item.name}
+                        </Text>
+                        <Text
+                          variant="bodySmall"
+                          style={{ color: metaColor }}
+                          numberOfLines={2}
+                        >
+                          {item.description || item.id}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                </>
+              ) : null}
             </ScrollView>
+          ) : !mentionQuery.trim() ? (
+            <View style={styles.mentionEmptyState}>
+              <Text variant="bodySmall" style={{ color: metaColor }}>
+                Type to search for files or Codex apps
+              </Text>
+            </View>
           ) : (
             <View style={styles.mentionEmptyState}>
               <Text variant="bodySmall" style={{ color: metaColor }}>
-                No matching files or folders
+                No matching files or Codex apps
               </Text>
             </View>
           )}
@@ -596,6 +684,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  mentionHint: {
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+  },
   mentionItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -605,6 +698,16 @@ const styles = StyleSheet.create({
   },
   mentionItemContent: {
     flex: 1,
+  },
+  mentionSectionDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 8,
+  },
+  mentionSectionLabel: {
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    marginBottom: 6,
+    textTransform: "uppercase",
   },
   mentionPanel: {
     borderWidth: 1,

@@ -71,6 +71,14 @@ export const SessionPromptRequestEventSchema = z.object({
   sessionId: z.string(),
   prompt: z.string(),
   agent: z.string().optional(),
+  appMentions: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+      }),
+    )
+    .optional(),
   model: z
     .object({
       providerId: z.string(),
@@ -441,6 +449,17 @@ export const ProvidersListResponseSchema = z.object({
 
 export type ProvidersListRequest = z.infer<typeof ProvidersListRequestSchema>;
 export type ProvidersListResponse = z.infer<typeof ProvidersListResponseSchema>;
+
+export const AppPayloadSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  isAccessible: z.boolean(),
+  isEnabled: z.boolean(),
+  labels: z.array(z.string()).optional(),
+});
+
+export type AppPayload = z.infer<typeof AppPayloadSchema>;
 
 export const PermissionReplySchema = z.enum(["once", "always", "reject"]);
 

@@ -29,6 +29,7 @@ type Provider struct {
 	providers    *providerService
 	agents       *agentService
 	skills       *skillService
+	apps         agent.AppService
 	serverMgr    *ServerManager
 }
 
@@ -66,6 +67,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			ProvidersList:  true,
 			AgentsList:     true,
 			SkillsList:     true,
+			AppsList:       false,
 		},
 		sessions: &sessionService{
 			cfg:       cfg,
@@ -126,6 +128,10 @@ func (p *Provider) Agents() agent.AgentService {
 
 func (p *Provider) Skills() agent.SkillsService {
 	return p.skills
+}
+
+func (p *Provider) Apps() agent.AppService {
+	return p.apps
 }
 
 func (p *Provider) SetInteractionHandler(handler acp.InteractionHandler) {

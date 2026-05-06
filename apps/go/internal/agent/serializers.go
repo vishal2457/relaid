@@ -45,6 +45,15 @@ type ProviderJSON struct {
 	Models []ModelJSON `json:"models"`
 }
 
+type AppJSON struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	IsAccessible bool     `json:"isAccessible"`
+	IsEnabled    bool     `json:"isEnabled"`
+	Labels       []string `json:"labels,omitempty"`
+}
+
 type ModelJSON struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -143,6 +152,17 @@ func SerializeRunResult(value RunResult) RunResultJSON {
 		ExitCode:  value.ExitCode,
 		Duration:  value.Duration.Milliseconds(),
 		SessionID: value.SessionID,
+	}
+}
+
+func SerializeApp(value App) AppJSON {
+	return AppJSON{
+		ID:           value.ID,
+		Name:         value.Name,
+		Description:  value.Description,
+		IsAccessible: value.IsAccessible,
+		IsEnabled:    value.IsEnabled,
+		Labels:       value.Labels,
 	}
 }
 

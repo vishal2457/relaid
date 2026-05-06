@@ -39,6 +39,15 @@ export type ModelGroup = {
   models: ActiveModel[];
 };
 
+export type ProviderApp = {
+  id: string;
+  name: string;
+  description: string;
+  isAccessible: boolean;
+  isEnabled: boolean;
+  labels?: string[];
+};
+
 export function flattenProvidersToModels(providers: Provider[]): ActiveModel[] {
   const models = providers.flatMap((provider) =>
     (provider.models ?? []).map((model) => {
@@ -101,6 +110,9 @@ export const providersKeys = {
     [...providersKeys.lists(), filters] as const,
   details: () => [...providersKeys.all, "detail"] as const,
   detail: (id: string) => [...providersKeys.details(), id] as const,
+  apps: () => [...providersKeys.all, "apps"] as const,
+  appList: (providerId: string, sessionId?: string) =>
+    [...providersKeys.apps(), providerId, sessionId ?? ""] as const,
 };
 
 export function useProviders() {
@@ -112,6 +124,33 @@ export function useProviders() {
         { suppressErrorToast: true },
       );
       return response.data.providers ?? [];
+    },
+  });
+}
+
+export function useProviderApps(
+  providerId: string,
+  sessionId?: string,
+  projectId?: string,
+  enabled = true,
+) {
+  return useQuery<ProviderApp[]>({
+    queryKey: [...providersKeys.appList(providerId, sessionId), projectId ?? ""],
+    enabled: Boolean(providerId) && enabled,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const response = await baseApi.get<{ apps: ProviderApp[] }>(
+        `/providers/${providerId}/apps`,
+        {
+          params: {
+            ...(sessionId ? { sessionId } : undefined),
+            ...(projectId ? { projectId } : undefined),
+            limit: 100,
+          },
+          suppressErrorToast: true,
+        },
+      );
+      return response.data.apps ?? [];
     },
   });
 }

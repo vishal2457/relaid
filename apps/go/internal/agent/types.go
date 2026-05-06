@@ -26,12 +26,22 @@ type CapabilitySet struct {
 	ProvidersList  bool `json:"providersList"`
 	AgentsList     bool `json:"agentsList"`
 	SkillsList     bool `json:"skillsList"`
+	AppsList       bool `json:"appsList"`
 }
 
 type Skill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"`
+}
+
+type App struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	IsAccessible bool     `json:"isAccessible"`
+	IsEnabled    bool     `json:"isEnabled"`
+	Labels       []string `json:"labels,omitempty"`
 }
 
 type AgentProvider interface {
@@ -42,11 +52,22 @@ type AgentProvider interface {
 	Providers() ProviderService
 	Agents() AgentService
 	Skills() SkillsService
+	Apps() AppService
 	Shutdown(context.Context) error
 }
 
 type SkillsService interface {
 	List(ctx context.Context, projectID string, query string) ([]Skill, error)
+}
+
+type AppListInput struct {
+	ThreadID     string
+	Limit        int
+	ForceRefetch bool
+}
+
+type AppService interface {
+	List(ctx context.Context, input AppListInput) ([]App, error)
 }
 
 type FileMatch struct {
@@ -110,6 +131,14 @@ type RunInput struct {
 	Agent        string
 	SystemPrompt string
 	Model        *ModelRef
+	Items        []InputItem
+}
+
+type InputItem struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
+	Path string `json:"path,omitempty"`
+	Text string `json:"text,omitempty"`
 }
 
 type RunResult struct {

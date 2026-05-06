@@ -48,6 +48,8 @@ const (
 	EventProvidersListResponse = "providers_list_response"
 	EventAgentsListRequest     = "agents_list_request"
 	EventAgentsListResponse    = "agents_list_response"
+	EventAppsListRequest       = "apps_list_request"
+	EventAppsListResponse      = "apps_list_response"
 
 	EventGitStagedFilesRequest   = "git_staged_files_request"
 	EventGitStagedFilesResponse  = "git_staged_files_response"
@@ -316,6 +318,12 @@ type SessionPromptRequest struct {
 	Agent           string          `json:"agent,omitempty"`
 	UserID          string          `json:"userId,omitempty"`
 	Model           *agent.ModelRef `json:"model,omitempty"`
+	AppMentions     []AppMention    `json:"appMentions,omitempty"`
+}
+
+type AppMention struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type ModelRef struct {
@@ -419,6 +427,28 @@ type ProvidersListRequest struct {
 type ProvidersListResponse struct {
 	RequestID string            `json:"requestId"`
 	Providers []ProviderPayload `json:"providers"`
+}
+
+type AppsListRequest struct {
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	SessionID       string `json:"sessionId,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
+	ForceRefetch    bool   `json:"forceRefetch,omitempty"`
+}
+
+type AppPayload struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	IsAccessible bool     `json:"isAccessible"`
+	IsEnabled    bool     `json:"isEnabled"`
+	Labels       []string `json:"labels,omitempty"`
+}
+
+type AppsListResponse struct {
+	RequestID string       `json:"requestId"`
+	Apps      []AppPayload `json:"apps"`
 }
 
 type AgentsListRequest struct {

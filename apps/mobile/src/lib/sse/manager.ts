@@ -97,6 +97,7 @@ export async function sendPromptRequest(params: {
   projectId: string;
   prompt: string;
   agent?: string;
+  appMentions?: Array<{ id: string; name: string }>;
   model?: { providerId: string; modelId: string };
 }): Promise<void> {
   await baseApi.post(`/mobile/sessions/${params.sessionId}/prompt`, {
@@ -105,6 +106,7 @@ export async function sendPromptRequest(params: {
     projectId: params.projectId,
     prompt: params.prompt,
     agent: params.agent,
+    appMentions: params.appMentions,
     model: params.model,
   });
 }

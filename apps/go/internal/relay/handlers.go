@@ -83,6 +83,8 @@ func (h *Handler) OnEvent(event string, args []json.RawMessage) {
 		go h.handleProvidersList(args)
 	case EventAgentsListRequest:
 		go h.handleAgentsList(args)
+	case EventAppsListRequest:
+		go h.handleAppsList(args)
 	case EventSkillsListRequest:
 		go h.handleSkillsList(args)
 	case EventGitStagedFilesRequest:
@@ -780,6 +782,19 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		WorkingDir: directory,
 		Agent:      req.Agent,
 	}
+	if len(req.AppMentions) > 0 {
+		runInput.Items = make([]agent.InputItem, 0, len(req.AppMentions))
+		for _, mention := range req.AppMentions {
+			if strings.TrimSpace(mention.ID) == "" {
+				continue
+			}
+			runInput.Items = append(runInput.Items, agent.InputItem{
+				Type: "mention",
+				Name: mention.Name,
+				Path: "app://" + mention.ID,
+			})
+		}
+	}
 	if req.Model != nil {
 		runInput.Model = &agent.ModelRef{
 			ProviderID: req.Model.ProviderID,
@@ -935,6 +950,64 @@ func (h *Handler) handleProvidersList(args []json.RawMessage) {
 	}
 
 	h.emit(EventProvidersListResponse, payload)
+}
+
+func (h *Handler) handleAppsList(args []json.RawMessage) {
+	if len(args) == 0 {
+		return
+	}
+	var req AppsListRequest
+	if err := json.Unmarshal(args[0], &req); err != nil {
+		h.logger.Printf("relay: failed to parse apps_list_request: %v", err)
+		return
+	}
+
+	provider, err := h.resolveProvider(req.AgentProviderID)
+	if err != nil {
+		h.emit(EventAppsListResponse, AppsListResponse{
+			RequestID: req.RequestID,
+			Apps:      []AppPayload{},
+		})
+		return
+	}
+	if !provider.Capabilities().AppsList || provider.Apps() == nil {
+		h.emit(EventAppsListResponse, AppsListResponse{
+			RequestID: req.RequestID,
+			Apps:      []AppPayload{},
+		})
+		return
+	}
+
+	apps, err := provider.Apps().List(context.Background(), agent.AppListInput{
+		ThreadID:     req.SessionID,
+		Limit:        req.Limit,
+		ForceRefetch: req.ForceRefetch,
+	})
+	if err != nil {
+		h.logger.Printf("apps list failed for %s: %v", provider.ID(), err)
+		h.emit(EventAppsListResponse, AppsListResponse{
+			RequestID: req.RequestID,
+			Apps:      []AppPayload{},
+		})
+		return
+	}
+
+	payload := AppsListResponse{
+		RequestID: req.RequestID,
+		Apps:      make([]AppPayload, 0, len(apps)),
+	}
+	for _, app := range apps {
+		payload.Apps = append(payload.Apps, AppPayload{
+			ID:           app.ID,
+			Name:         app.Name,
+			Description:  app.Description,
+			IsAccessible: app.IsAccessible,
+			IsEnabled:    app.IsEnabled,
+			Labels:       app.Labels,
+		})
+	}
+
+	h.emit(EventAppsListResponse, payload)
 }
 
 func (h *Handler) handleAgentsList(args []json.RawMessage) {

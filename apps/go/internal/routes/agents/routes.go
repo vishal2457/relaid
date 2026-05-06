@@ -135,6 +135,38 @@ func Register(api *echo.Group, registry RegistryProvider) {
 		return httpresponse.Success(c, map[string]any{"providers": payload}, "Providers fetched successfully")
 	})
 
+	api.GET("/:provider/apps", func(c echo.Context) error {
+		provider, err := resolveProvider(c, registry)
+		if err != nil {
+			return err
+		}
+		if !provider.Capabilities().AppsList || provider.Apps() == nil {
+			return unsupported(provider, "apps.list")
+		}
+
+		limit := 100
+		if raw := c.QueryParam("limit"); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+
+		apps, err := provider.Apps().List(c.Request().Context(), agent.AppListInput{
+			ThreadID:     c.QueryParam("sessionId"),
+			Limit:        limit,
+			ForceRefetch: c.QueryParam("forceRefetch") == "true",
+		})
+		if err != nil {
+			return err
+		}
+
+		payload := make([]agent.AppJSON, 0, len(apps))
+		for _, item := range apps {
+			payload = append(payload, agent.SerializeApp(item))
+		}
+		return httpresponse.Success(c, map[string]any{"apps": payload}, "Apps fetched successfully")
+	})
+
 	api.POST("/:provider/run", func(c echo.Context) error {
 		provider, err := resolveProvider(c, registry)
 		if err != nil {

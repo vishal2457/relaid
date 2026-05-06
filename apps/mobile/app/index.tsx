@@ -189,8 +189,6 @@ export default function ChatScreen() {
     resetStreamingContent,
   });
 
-  const composer = useComposerState(session.activeProject?.id);
-
   const [, setConnectionState] =
     React.useState<ConnectionState>("disconnected");
   const sseClientRef = React.useRef<SseClient | null>(null);
@@ -203,6 +201,11 @@ export default function ChatScreen() {
   const setActiveModel = session.setActiveModel;
   const activeLookupAgentProviderId =
     activeSessionAgentProviderId ?? selectedModelAgentProviderId;
+  const composer = useComposerState(
+    session.activeProject?.id,
+    activeLookupAgentProviderId,
+    activeSessionId,
+  );
   const allModels = React.useMemo(
     () => flattenProvidersToModels(session.providers ?? []),
     [session.providers],
@@ -440,7 +443,7 @@ export default function ChatScreen() {
 
     setIsRefreshing(true);
     try {
-      const refreshTasks = [session.refetchProjects()];
+      const refreshTasks: Promise<unknown>[] = [session.refetchProjects()];
 
       if (activeSessionIdRef.current) {
         refreshTasks.push(refetch(), refetchActiveSession());
@@ -843,7 +846,9 @@ export default function ChatScreen() {
     return () => subscription.remove();
   }, [connectSse, recoverPendingStream]);
 
-  const mentionSuggestionCount = composer.fileSuggestions?.length ?? 0;
+  const mentionSuggestionCount =
+    (composer.fileSuggestions?.length ?? 0) +
+    (composer.appSuggestions?.length ?? 0);
   const mentionSuggestionHeight = composer.showMentionSuggestions
     ? Math.min(
         mentionSuggestionCount > 0 ? mentionSuggestionCount * 52 + 16 : 88,
@@ -887,6 +892,7 @@ export default function ChatScreen() {
     }
 
     const prompt = composer.trimmedInput;
+    const appMentions = composer.selectedAppMentions;
     const requestId = `mobile_${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 9)}`;
@@ -933,7 +939,7 @@ export default function ChatScreen() {
       } catch (createError) {
         setCreatingSessionId(null);
         setOptimisticMessage(null);
-        composer.restoreInput(prompt);
+        composer.restoreInput(prompt, appMentions);
         console.error(createError);
         showError("Failed to create session");
         return;
@@ -970,6 +976,7 @@ export default function ChatScreen() {
         projectId: session.activeProject.id,
         prompt,
         agent: session.activeAgent?.name,
+        appMentions,
         model: session.activeModel
           ? {
               providerId: session.activeModel.providerId,
@@ -980,6 +987,7 @@ export default function ChatScreen() {
     } catch (error) {
       console.error("[Chat] Failed to send prompt:", error);
       clearPendingStreamState(sessionId, requestId);
+      composer.restoreInput(prompt, appMentions);
       showError("Failed to send message. Please try again.");
     }
   }, [
@@ -1354,6 +1362,8 @@ export default function ChatScreen() {
             selectedAgentProvider?.agentProviderName ?? "No provider"
           }
           activeProjectName={session.activeProject?.name ?? "No project"}
+          appSuggestions={composer.appSuggestions}
+          appSuggestionsLoading={composer.appSuggestionsLoading}
           agentProviderLocked={Boolean(activeSessionId)}
           borderColor={colors.borderColor}
           branchName={session.currentBranch}
@@ -1374,6 +1384,7 @@ export default function ChatScreen() {
           onPressModel={session.handleOpenProviderSheet}
           onPressProject={session.handleOpenProjectSheet}
           onSelectionChange={composer.handleInputSelectionChange}
+          onSelectAppSuggestion={composer.handleSelectAppSuggestion}
           onSelectFileSuggestion={composer.handleSelectFileSuggestion}
           onSend={() => void handleSend()}
           onAbort={handleAbort}
