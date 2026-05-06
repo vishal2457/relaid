@@ -1106,11 +1106,16 @@ export default function ChatScreen() {
         displayedMessagesRef.current,
         index,
       );
+      const isLastAssistantMessage =
+        item.role !== "assistant" ||
+        displayedMessagesRef.current[index + 1]?.role !== "assistant";
 
       return (
         <MessageRow
           message={item}
           responseSummary={responseSummaryContext}
+          showAssistantMeta={isLastAssistantMessage}
+          showResponseSummary={isLastAssistantMessage}
           borderColor={colors.borderColor}
           metaColor={colors.metaColor}
           userBubble={colors.userBubble}

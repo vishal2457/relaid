@@ -1,4 +1,5 @@
 import { fetch as expoFetch } from "expo/fetch";
+import { invalidateSession, isUnauthorizedStatus } from "../pairing/auth";
 import { chatServerApiUrl } from "../axios/base";
 import { getCurrentAccessToken } from "../pairing/session";
 
@@ -109,6 +110,13 @@ export class SseClient {
       console.log("[SSE] Connection error:", errMsg);
       this.state = "error";
       this.options.onError(error instanceof Error ? error : new Error(errMsg));
+
+      if (
+        error instanceof SseHttpError &&
+        isUnauthorizedStatus(error.status)
+      ) {
+        void invalidateSession();
+      }
 
       if (this.shouldReconnect(error)) {
         this.scheduleReconnect();

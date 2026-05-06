@@ -371,11 +371,15 @@ export function SessionDrawer({
             </View>
           ) : (
             groupedSessions.map((group) => {
+              const isSingleProvider = groupedSessions.length === 1;
               const isExpanded = expandedProviders.has(group.providerId);
+              const limitedSessions = group.sessions.slice(0, INITIAL_SESSION_LIMIT);
               const visibleProviderSessions = isExpanded
                 ? group.sessions
-                : group.sessions.slice(0, INITIAL_SESSION_LIMIT);
-              const hiddenCount = group.sessions.length - INITIAL_SESSION_LIMIT;
+                : isSingleProvider
+                  ? group.sessions
+                  : limitedSessions;
+              const hiddenCount = group.sessions.length - visibleProviderSessions.length;
 
               return (
                 <View
@@ -400,15 +404,10 @@ export function SessionDrawer({
                           {group.providerLabel}
                         </Text>
                       </View>
-                      <Text
-                        variant="bodySmall"
-                        style={{ color: metaColor }}
-                      >
-                        {group.sessions.length} sessions
-                      </Text>
+                      
                     </View>
 
-                    {group.sessions.length > INITIAL_SESSION_LIMIT ? (
+                    {!isSingleProvider && group.sessions.length > INITIAL_SESSION_LIMIT ? (
                       <Pressable
                         onPress={() => toggleProviderExpansion(group.providerId)}
                         style={styles.providerExpandButton}
@@ -507,7 +506,7 @@ export function SessionDrawer({
                       );
                     })}
 
-                    {!isExpanded && hiddenCount > 0 ? (
+                    {!isSingleProvider && !isExpanded && hiddenCount > 0 ? (
                       <Pressable
                         onPress={() => toggleProviderExpansion(group.providerId)}
                         style={[styles.loadMoreButton, { borderColor }]}
@@ -521,7 +520,7 @@ export function SessionDrawer({
                             fontWeight: "600",
                           }}
                         >
-                          Load {hiddenCount} More
+                          Load More
                         </Text>
                         <MaterialCommunityIcons
                           name="chevron-down"

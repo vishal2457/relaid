@@ -5,6 +5,28 @@ export interface AssistantResponseSummaryContext {
   summary: MessageSummary;
 }
 
+function hasVisibleDiffData({
+  additions,
+  deletions,
+  patch,
+  oldContent,
+  newContent,
+}: {
+  additions?: number | null;
+  deletions?: number | null;
+  patch?: string | null;
+  oldContent?: string | null;
+  newContent?: string | null;
+}): boolean {
+  return Boolean(
+    patch ||
+      (oldContent !== null && oldContent !== undefined) ||
+      (newContent !== null && newContent !== undefined) ||
+      (typeof additions === "number" && additions > 0) ||
+      (typeof deletions === "number" && deletions > 0),
+  );
+}
+
 function hasFileChangeActivity(message: SessionMessage | undefined): boolean {
   if (!message || message.role !== "assistant") {
     return false;
@@ -13,13 +35,23 @@ function hasFileChangeActivity(message: SessionMessage | undefined): boolean {
   return (message.assistant?.activities ?? []).some(
     (activity) =>
       (activity.kind === "edit" || activity.kind === "write") &&
-      ((activity.items?.length ?? 0) > 0 ||
-        activity.patch !== null ||
-        activity.oldContent !== null ||
-        activity.newContent !== null ||
-        activity.additions !== null ||
-        activity.deletions !== null),
+      ((activity.items?.some((item) => hasVisibleDiffData(item)) ?? false) ||
+        hasVisibleDiffData(activity)),
   );
+}
+
+function segmentHasFileChangeActivity(
+  messages: SessionMessage[],
+  start: number,
+  end: number,
+): boolean {
+  for (let cursor = start; cursor <= end; cursor += 1) {
+    if (hasFileChangeActivity(messages[cursor])) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function getAssistantResponseSummaryContext(
@@ -42,18 +74,13 @@ export function getAssistantResponseSummaryContext(
     segmentStart -= 1;
   }
 
-  let preferredAssistantIndex = -1;
-  for (let cursor = segmentEnd; cursor >= segmentStart; cursor -= 1) {
-    if (hasFileChangeActivity(messages[cursor])) {
-      preferredAssistantIndex = cursor;
-      break;
-    }
-  }
+  const hasFileChangeSummary = segmentHasFileChangeActivity(
+    messages,
+    segmentStart,
+    segmentEnd,
+  );
 
-  const eligibleIndex =
-    preferredAssistantIndex >= 0 ? preferredAssistantIndex : segmentEnd;
-
-  if (index !== eligibleIndex) {
+  if (index !== segmentEnd) {
     return undefined;
   }
 
@@ -69,6 +96,10 @@ export function getAssistantResponseSummaryContext(
     }
 
     if (candidate.role === "user" && candidate.summary) {
+      if (candidate.summary.diffs.length > 0 && !hasFileChangeSummary) {
+        return undefined;
+      }
+
       return {
         messageID: candidate.id,
         summary: candidate.summary,

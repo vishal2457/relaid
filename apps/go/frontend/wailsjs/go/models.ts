@@ -251,3 +251,34 @@ export namespace relay {
 
 }
 
+export namespace services {
+	
+	export class UpdateResponse {
+	    isUpdateAvailable: boolean;
+	    downloadUrl: string;
+	    fileName: string;
+	    currentVersion: string;
+	    latestVersion: string;
+	    releaseTag: string;
+	    target: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.isUpdateAvailable = source["isUpdateAvailable"];
+	        this.downloadUrl = source["downloadUrl"];
+	        this.fileName = source["fileName"];
+	        this.currentVersion = source["currentVersion"];
+	        this.latestVersion = source["latestVersion"];
+	        this.releaseTag = source["releaseTag"];
+	        this.target = source["target"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+

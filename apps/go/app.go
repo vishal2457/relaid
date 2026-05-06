@@ -20,6 +20,7 @@ import (
 	"relaid/internal/relay"
 	"relaid/internal/secrets"
 	"relaid/internal/server"
+	"relaid/internal/services"
 	"relaid/internal/workspace"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -662,4 +663,32 @@ func serializeWorkspace(item workspace.Workspace) WorkspacePayload {
 		CreatedAt:   item.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   item.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+func (a *App) GetFullVersionInfo() map[string]string {
+	return map[string]string{
+		"version":   Version,
+		"commit":    GitCommit,
+		"buildDate": BuildDate,
+	}
+}
+
+func (a *App) GetVersionString() string {
+	return fmt.Sprintf("v%s (commit: %.7s, built: %s)", Version, GitCommit, BuildDate)
+}
+
+func (a *App) GetCurrentVersion() string {
+	return Version
+}
+
+func (a *App) CheckForUpdates() (services.UpdateResponse, error) {
+	return services.CheckForUpdates(a.getEffectiveRelayURL(), Version)
+}
+
+func (a *App) DownloadAndInstallUpdate(downloadURL string, fileName string) error {
+	return services.DownloadAndInstallUpdate(a.ctx, downloadURL, fileName)
+}
+
+func (a *App) InstallFromBinaryData(binaryData []byte, fileName string) error {
+	return services.InstallFromBinaryData(a.ctx, binaryData, fileName)
 }

@@ -1,5 +1,9 @@
 import axios, { type AxiosRequestConfig } from "axios";
 import { ToastAndroid, Platform } from "react-native";
+import {
+  invalidateSession,
+  isUnauthorizedStatus,
+} from "@/src/lib/pairing/auth";
 import { getCurrentAccessToken } from "@/src/lib/pairing/session";
 
 const DEFAULT_BASE_URL = "http://100.95.62.14:3001";
@@ -54,8 +58,9 @@ instance.interceptors.request.use(
 instance.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      console.error("Unauthorized: Redirecting to login...");
+    if (isUnauthorizedStatus(error.response?.status)) {
+      console.error("Unauthorized: clearing pairing session");
+      void invalidateSession();
     }
 
     const status = error.response?.status;

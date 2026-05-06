@@ -6,8 +6,10 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { clearActiveSessionStream } from "@/src/lib/active-session-stream";
 import { disconnectSseClient } from "@/src/lib/sse";
 import { queryClient } from "@/src/lib/query-client";
+import { registerSessionInvalidationHandler } from "@/src/lib/pairing/auth";
 import {
   clearPairingSession as clearStoredPairingSession,
   loadStoredPairingSession,
@@ -53,9 +55,16 @@ export function PairingSessionProvider({
   const clearSession = useCallback(async () => {
     disconnectSseClient();
     await clearStoredPairingSession();
+    await clearActiveSessionStream();
     queryClient.clear();
     setSession(null);
   }, []);
+
+  useEffect(() => {
+    return registerSessionInvalidationHandler(async () => {
+      await clearSession();
+    });
+  }, [clearSession]);
 
   const value = useMemo(
     () => ({

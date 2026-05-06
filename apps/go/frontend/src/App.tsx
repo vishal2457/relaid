@@ -3,7 +3,10 @@ import { NuqsAdapter } from "nuqs/adapters/react";
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { AppRouter } from "./routes/router";
+import { updateApi, type UpdateStatus } from "./shared/api/features/update.api";
 import { TooltipProvider } from "./shared/components/ui/tooltip";
+import { UpdateDialog } from "./shared/components/update-dialog/update-dialog";
+import { ipcRuntime } from "./shared/ipc/ipc-runtime";
 import { healthApi } from "./shared/api/features/health.api";
 import {
   getApiBaseUrl,
@@ -19,6 +22,9 @@ function App() {
   const [healthMessage, setHealthMessage] = useState(
     "Starting desktop services...",
   );
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -93,6 +99,70 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (healthState !== "ready") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const checkForUpdates = async () => {
+      try {
+        const result = await updateApi.checkForUpdates();
+        if (cancelled || !result.isUpdateAvailable || !result.downloadUrl) {
+          return;
+        }
+
+        setUpdateStatus(result);
+        setIsUpdateDialogOpen(true);
+      } catch (error) {
+        console.error("Failed to check for updates:", error);
+      }
+    };
+
+    void checkForUpdates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [healthState]);
+
+  useEffect(() => {
+    const eventsOn = ipcRuntime.getEventsOn();
+    if (!eventsOn) {
+      return;
+    }
+
+    const disposeStart = eventsOn("update_loading_start", () => {
+      setIsUpdating(true);
+    });
+    const disposeEnd = eventsOn("update_loading_end", () => {
+      setIsUpdating(false);
+    });
+
+    return () => {
+      disposeStart?.();
+      disposeEnd?.();
+    };
+  }, []);
+
+  const handleUpdate = async () => {
+    if (!updateStatus || isUpdating) {
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      await updateApi.downloadAndInstallUpdate(
+        updateStatus.downloadUrl,
+        updateStatus.fileName,
+      );
+    } catch (error) {
+      console.error("Failed to install update:", error);
+      setIsUpdating(false);
+    }
+  };
+
   if (healthState !== "ready") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
@@ -121,6 +191,16 @@ function App() {
       <NuqsAdapter>
         <QueryClientProvider client={queryClient}>
           <AppRouter />
+          {updateStatus ? (
+            <UpdateDialog
+              open={isUpdateDialogOpen}
+              setOpen={setIsUpdateDialogOpen}
+              handleUpdate={handleUpdate}
+              isUpdating={isUpdating}
+              currentVersion={updateStatus.currentVersion}
+              latestVersion={updateStatus.latestVersion}
+            />
+          ) : null}
         </QueryClientProvider>
         <Toaster
           visibleToasts={5}

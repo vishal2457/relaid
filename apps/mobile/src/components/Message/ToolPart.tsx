@@ -2,7 +2,6 @@ import React from "react";
 import { Pressable, View } from "react-native";
 import { Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import InlineDiffViewer from "../InlineDiffViewer";
 import type {
   SessionAssistantActivity,
   SessionAssistantActivityItem,
@@ -74,7 +73,7 @@ const ExpandedItemRow = ({
           gap: 6,
         }}
       >
-        <View style={{ flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        <View style={{ flexDirection: "row", gap: 6 }}>
           <Text
             variant="bodySmall"
             style={{ color: textColor, fontWeight: "600" }}
@@ -82,20 +81,20 @@ const ExpandedItemRow = ({
             {item.label}
           </Text>
           {item.detail ? (
-            <Text variant="bodySmall" style={{ color: metaColor, flexShrink: 1 }}>
+            <Text variant="bodySmall" style={{ color: metaColor }}>
               {item.detail}
             </Text>
           ) : null}
           {!item.detail && getItemFullPath(item) ? (
-            <Text variant="bodySmall" style={{ color: metaColor, flexShrink: 1 }}>
+            <Text variant="bodySmall" style={{ color: metaColor }}>
               {getItemFullPath(item)}
             </Text>
           ) : null}
         </View>
         {item.additions !== null &&
-        item.additions !== undefined &&
-        item.deletions !== null &&
-        item.deletions !== undefined ? (
+          item.additions !== undefined &&
+          item.deletions !== null &&
+          item.deletions !== undefined ? (
           <View
             style={{
               flexDirection: "row",
@@ -108,7 +107,7 @@ const ExpandedItemRow = ({
           </View>
         ) : null}
       </View>
-      {item.patch ? <RawDiffViewer diff={item.patch} /> : null}
+      {/* {item.patch ? <RawDiffViewer diff={item.patch} /> : null}
       {!item.patch && (item.oldContent !== null || item.newContent !== null) ? (
         <RawDiffViewer
           diff={toUnifiedDiffSmart({
@@ -117,25 +116,22 @@ const ExpandedItemRow = ({
             newContent: item.newContent ?? "",
           })}
         />
-      ) : null}
+      ) : null} */}
     </View>
   );
 };
 
 const ActivityDetailText = ({
   activity,
-  metaColor,
   textColor,
 }: {
   activity: SessionAssistantActivity;
-  metaColor: string;
   textColor: string;
 }) => {
   if (activity.filename || activity.directory) {
     return (
       <View
         style={{
-          flex: 1,
           flexDirection: "row",
           alignItems: "center",
           gap: 2,
@@ -151,16 +147,6 @@ const ActivityDetailText = ({
             {activity.filename}
           </Text>
         ) : null}
-        {activity.directory ? (
-          <Text
-            variant="bodySmall"
-            style={{ color: metaColor, flexShrink: 1 }}
-            numberOfLines={1}
-            ellipsizeMode="head"
-          >
-            {activity.directory}
-          </Text>
-        ) : null}
       </View>
     );
   }
@@ -173,7 +159,7 @@ const ActivityDetailText = ({
     <Text
       variant="bodySmall"
       numberOfLines={1}
-      style={{ color: metaColor, flex: 1, flexShrink: 1 }}
+      style={{ color: textColor, maxWidth: "80%" }}
     >
       {activity.detail}
     </Text>
@@ -296,13 +282,13 @@ export const ToolPart: React.FC<ToolPartProps> = React.memo(
           >
             {expandedItems.length > 0
               ? expandedItems.map((item) => (
-                  <ExpandedItemRow
-                    key={item.id}
-                    item={item}
-                    metaColor={metaColor}
-                    textColor={textColor}
-                  />
-                ))
+                <ExpandedItemRow
+                  key={item.id}
+                  item={item}
+                  metaColor={metaColor}
+                  textColor={textColor}
+                />
+              ))
               : null}
             {hasShellOutput ? (
               <View

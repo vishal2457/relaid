@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/go-git/go-git/v5 v5.13.2
 	github.com/google/uuid v1.6.0
+	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.13.3
 	github.com/sst/opencode-sdk-go v0.19.0

@@ -44,6 +44,7 @@ const formatAssistantDuration = (durationMs: number | null | undefined) => {
 
 interface MessageBubbleProps {
   message: SessionMessage;
+  showAssistantMeta?: boolean;
   borderColor: string;
   metaColor: string;
   userBubble: string;
@@ -55,6 +56,7 @@ interface MessageBubbleProps {
 export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
   ({
     message,
+    showAssistantMeta = true,
     borderColor,
     metaColor,
     userBubble,
@@ -86,8 +88,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     const showBubble =
       !isAssistant || (hasVisibleText && assistantBlocks.length === 0);
     const showAssistantBlocks = isAssistant && assistantBlocks.length > 0;
-    const showAssistantMeta =
+    const shouldShowAssistantMeta =
       isAssistant &&
+      showAssistantMeta &&
       hasVisibleText &&
       assistantMeta.length > 0 &&
       assistantBlocks.length === 0;
@@ -129,7 +132,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                   text={mainContent}
                   baseStyle={{ color: textColor }}
                 />
-                {showAssistantMeta ? (
+                {shouldShowAssistantMeta ? (
                   <Text
                     variant="labelSmall"
                     style={{ color: metaColor, marginTop: 10 }}
@@ -147,6 +150,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             <AssistantBlockSequence
               blocks={assistantBlocks}
               metaText={assistantMeta.length > 0 ? assistantMeta : null}
+              showMetaText={showAssistantMeta}
               assistantBubble={assistantBubble}
               textColor={textColor}
               metaColor={metaColor}

@@ -85,6 +85,10 @@ func buildRelayEndpointURL(rawURL string, endpointPath string) (string, error) {
 	return u.String(), nil
 }
 
+func BuildRelayEndpointURL(rawURL string, endpointPath string) (string, error) {
+	return buildRelayEndpointURL(rawURL, endpointPath)
+}
+
 func joinURLPath(basePath string, appendPath string) string {
 	basePath = strings.TrimRight(basePath, "/")
 	appendPath = "/" + strings.TrimLeft(appendPath, "/")

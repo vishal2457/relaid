@@ -3,7 +3,12 @@ import { logger } from "../shared/logger";
 
 const router: Router = Router();
 
-type DownloadTarget = "android" | "mac-silicon" | "mac-intel" | "linux" | "windows";
+type DownloadTarget =
+  | "android"
+  | "mac-silicon"
+  | "mac-intel"
+  | "linux"
+  | "windows";
 
 type GithubReleaseAsset = {
   id: number;
@@ -16,6 +21,16 @@ type GithubReleaseAsset = {
 type GithubRelease = {
   tag_name: string;
   assets: GithubReleaseAsset[];
+};
+
+type ReleaseCheckResponse = {
+  currentVersion: string;
+  latestVersion: string;
+  releaseTag: string;
+  target: DownloadTarget;
+  fileName: string;
+  downloadUrl: string;
+  isUpdateAvailable: boolean;
 };
 
 type CachedBuild = {
@@ -75,6 +90,56 @@ function parseTarget(value: string | undefined): DownloadTarget | null {
   }
 
   return null;
+}
+
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function resolveBaseUrl(req: Request): string {
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL;
+  if (publicBaseUrl?.trim()) {
+    return trimTrailingSlashes(publicBaseUrl.trim());
+  }
+
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const protocol =
+    typeof forwardedProto === "string" && forwardedProto.trim()
+      ? forwardedProto.trim()
+      : req.protocol;
+
+  return trimTrailingSlashes(`${protocol}://${req.get("host")}`);
+}
+
+function normalizeVersion(value: string): string {
+  return value.trim().replace(/^v/i, "");
+}
+
+function parseVersion(value: string): number[] {
+  return normalizeVersion(value)
+    .split(/[.-]/)
+    .map((part) => Number.parseInt(part, 10))
+    .filter((part) => Number.isFinite(part));
+}
+
+function compareVersions(a: string, b: string): number {
+  const aParts = parseVersion(a);
+  const bParts = parseVersion(b);
+  const length = Math.max(aParts.length, bParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const aPart = aParts[index] ?? 0;
+    const bPart = bParts[index] ?? 0;
+
+    if (aPart > bPart) {
+      return 1;
+    }
+    if (aPart < bPart) {
+      return -1;
+    }
+  }
+
+  return 0;
 }
 
 function findAssetForTarget(
@@ -202,6 +267,83 @@ function sendBuild(res: Response, build: CachedBuild): void {
   res.setHeader("X-Release-Tag", build.releaseTag);
   res.send(build.buffer);
 }
+
+router.get("/check", async (req: Request, res: Response) => {
+  const target = parseTarget(
+    typeof req.query.target === "string" ? req.query.target : undefined,
+  );
+  const currentVersion =
+    typeof req.query.currentVersion === "string"
+      ? req.query.currentVersion
+      : "";
+
+  if (!target) {
+    res.status(400).json({
+      error:
+        "Invalid download target. Use android, mac-silicon, mac-intel, linux, or windows.",
+    });
+    return;
+  }
+
+  if (!currentVersion.trim()) {
+    res.status(400).json({
+      error: "currentVersion query parameter is required.",
+    });
+    return;
+  }
+
+  try {
+    const token = getGithubToken();
+    if (!token) {
+      throw Object.assign(new Error("GITHUB_RELEASE_TOKEN is not configured"), {
+        statusCode: 500,
+      });
+    }
+
+    const { owner, repo } = getGithubRepository();
+    const release = await fetchGithubJson<GithubRelease>(
+      `https://api.github.com/repos/${owner}/${repo}/releases/latest`,
+      token,
+    );
+    const asset = findAssetForTarget(release, target);
+
+    if (!asset) {
+      throw Object.assign(
+        new Error(`No latest release asset found for ${target}`),
+        { statusCode: 404 },
+      );
+    }
+
+    const latestVersion = normalizeVersion(release.tag_name);
+    const normalizedCurrentVersion = normalizeVersion(currentVersion);
+    const payload: ReleaseCheckResponse = {
+      currentVersion: normalizedCurrentVersion,
+      latestVersion,
+      releaseTag: release.tag_name,
+      target,
+      fileName: asset.name,
+      downloadUrl: `${resolveBaseUrl(req)}/api/downloads/latest/${target}`,
+      isUpdateAvailable:
+        compareVersions(latestVersion, normalizedCurrentVersion) > 0,
+    };
+
+    res.json(payload);
+  } catch (error) {
+    const statusCode =
+      error instanceof Error && "statusCode" in error
+        ? Number((error as Error & { statusCode: number }).statusCode)
+        : 500;
+    const message = error instanceof Error ? error.message : String(error);
+
+    logger.error("Failed to check latest GitHub release version", {
+      target,
+      error: message,
+    });
+    res.status(Number.isFinite(statusCode) ? statusCode : 500).json({
+      error: message,
+    });
+  }
+});
 
 router.get("/latest/:target", async (req: Request, res: Response) => {
   const target = parseTarget(req.params.target);

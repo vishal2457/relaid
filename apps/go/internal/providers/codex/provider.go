@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -600,6 +602,7 @@ func (c *appServerClient) closeShared() {
 func (c *appServerClient) dial(lifetimeCtx, initCtx context.Context) (*appServerConn, error) {
 	cmd := exec.CommandContext(lifetimeCtx, c.command, "app-server", "--listen", "stdio://")
 	cmd.Dir = c.cwd
+	cmd.Env = envWithExecutableDir(c.command)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -646,6 +649,23 @@ func (c *appServerClient) dial(lifetimeCtx, initCtx context.Context) (*appServer
 	_ = conn.notify("initialized", nil)
 
 	return conn, nil
+}
+
+func envWithExecutableDir(command string) []string {
+	if !filepath.IsAbs(command) {
+		return nil
+	}
+
+	dir := filepath.Dir(command)
+	env := os.Environ()
+	pathKey := "PATH="
+	for i, item := range env {
+		if strings.HasPrefix(item, pathKey) {
+			env[i] = pathKey + dir + string(os.PathListSeparator) + strings.TrimPrefix(item, pathKey)
+			return env
+		}
+	}
+	return append(env, pathKey+dir)
 }
 
 // ---------------------------------------------------------------------------

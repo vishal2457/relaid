@@ -6,6 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -142,14 +145,75 @@ func defaultOpenCodeBinPaths() []string {
 func defaultCodexBinPaths() []string {
 	homeDir, err := os.UserHomeDir()
 	paths := []string{
+		"/Applications/Codex.app/Contents/Resources/codex",
 		"/opt/homebrew/bin/codex",
 		"/usr/local/bin/codex",
 	}
 	if err == nil && homeDir != "" {
-		paths = append([]string{
+		userPaths := []string{
 			filepath.Join(homeDir, ".codex", "bin", "codex"),
 			filepath.Join(homeDir, ".local", "bin", "codex"),
-		}, paths...)
+		}
+		userPaths = append(userPaths, nvmExecutablePaths(homeDir, "codex")...)
+		paths = append(userPaths, paths...)
 	}
 	return paths
+}
+
+func nvmExecutablePaths(homeDir, executable string) []string {
+	base := filepath.Join(homeDir, ".nvm", "versions", "node")
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil
+	}
+
+	versions := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "v") {
+			versions = append(versions, entry.Name())
+		}
+	}
+	sort.SliceStable(versions, func(i, j int) bool {
+		return compareNodeVersions(versions[i], versions[j]) > 0
+	})
+
+	paths := make([]string, 0, len(versions))
+	for _, version := range versions {
+		paths = append(paths, filepath.Join(base, version, "bin", executable))
+	}
+	return paths
+}
+
+func compareNodeVersions(a, b string) int {
+	aParts := versionParts(strings.TrimPrefix(a, "v"))
+	bParts := versionParts(strings.TrimPrefix(b, "v"))
+	for i := 0; i < len(aParts) || i < len(bParts); i++ {
+		var av, bv int
+		if i < len(aParts) {
+			av = aParts[i]
+		}
+		if i < len(bParts) {
+			bv = bParts[i]
+		}
+		if av > bv {
+			return 1
+		}
+		if av < bv {
+			return -1
+		}
+	}
+	return 0
+}
+
+func versionParts(version string) []int {
+	raw := strings.Split(version, ".")
+	parts := make([]int, 0, len(raw))
+	for _, item := range raw {
+		value, err := strconv.Atoi(item)
+		if err != nil {
+			value = 0
+		}
+		parts = append(parts, value)
+	}
+	return parts
 }

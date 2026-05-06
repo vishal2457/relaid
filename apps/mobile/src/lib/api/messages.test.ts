@@ -4,6 +4,7 @@ import {
   type SessionAssistantActivity,
 } from "./messages";
 import type { SessionMessageResponse } from "../opencode-types";
+import { getAssistantResponseSummaryContext } from "@/src/components/Message/getAssistantResponseSummary";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -47,6 +48,37 @@ function createAssistantMessageResponse(parts: any[]): SessionMessageResponse {
       },
     },
     parts,
+  };
+}
+
+function createUserMessageResponse(summary?: {
+  title?: string;
+  body?: string;
+  diffs: Array<{
+    file: string;
+    before: string;
+    after: string;
+    additions: number;
+    deletions: number;
+    patch?: string;
+  }>;
+}): SessionMessageResponse {
+  return {
+    info: {
+      id: "user-1",
+      sessionID: "session-1",
+      role: "user",
+      time: {
+        created: 500,
+      },
+      summary,
+      agent: "test-agent",
+      model: {
+        providerID: "openai",
+        modelID: "gpt-test",
+      },
+    },
+    parts: [],
   };
 }
 
@@ -133,6 +165,87 @@ function testCodexShell() {
   assert(
     shell.detail?.includes("/repo/apps/mobile"),
     "Codex shell should include cwd detail",
+  );
+}
+
+function testOpenCodeWrite() {
+  const message = adaptMessage(
+    createAssistantMessageResponse([
+      {
+        id: "tool-write-1",
+        callID: "call-write-1",
+        messageID: "assistant-1",
+        sessionID: "session-1",
+        type: "tool",
+        tool: "write",
+        state: completedState({
+          status: "completed",
+          input: {
+            filePath: "src/new-file.ts",
+            content: "export const value = 1;\n",
+          },
+          metadata: {
+            additions: 1,
+            deletions: 0,
+          },
+        }),
+      },
+    ]),
+  );
+
+  const write = getActivityByKind(message.assistant?.activities, "write");
+  assert(write, "Expected OpenCode write activity");
+  assertEqual(write.filename, "new-file.ts", "OpenCode write filename");
+  assertEqual(write.additions, 1, "OpenCode write additions");
+  assertEqual(write.deletions, 0, "OpenCode write deletions");
+  assertEqual(
+    write.newContent,
+    "export const value = 1;\n",
+    "OpenCode write content",
+  );
+}
+
+function testOpenCodeReadSearchDoNotProduceDiffActivity() {
+  const message = adaptMessage(
+    createAssistantMessageResponse([
+      {
+        id: "tool-read-1",
+        callID: "call-read-1",
+        messageID: "assistant-1",
+        sessionID: "session-1",
+        type: "tool",
+        tool: "read",
+        state: completedState({
+          status: "completed",
+          input: {
+            path: "src/example.ts",
+          },
+        }),
+      },
+      {
+        id: "tool-grep-1",
+        callID: "call-grep-1",
+        messageID: "assistant-1",
+        sessionID: "session-1",
+        type: "tool",
+        tool: "grep",
+        state: completedState({
+          status: "completed",
+          input: {
+            pattern: "value",
+          },
+        }),
+      },
+    ]),
+  );
+
+  const fileChangeActivities = (message.assistant?.activities ?? []).filter(
+    (activity) => activity.kind === "edit" || activity.kind === "write",
+  );
+  assertEqual(
+    fileChangeActivities.length,
+    0,
+    "Read/search tools should not produce file-change activities",
   );
 }
 
@@ -372,8 +485,210 @@ function testStreamFallback() {
   assertEqual(activity.label, "Tool", "Fallback stream label");
 }
 
+function testDiffSummaryRequiresFileChangeActivity() {
+  const user = adaptMessage(
+    createUserMessageResponse({
+      diffs: [
+        {
+          file: "src/example.ts",
+          before: "old",
+          after: "new",
+          additions: 1,
+          deletions: 1,
+        },
+      ],
+    }),
+  );
+  const assistant = adaptMessage(
+    createAssistantMessageResponse([
+      {
+        id: "tool-shell-1",
+        callID: "call-shell-1",
+        messageID: "assistant-1",
+        sessionID: "session-1",
+        type: "tool",
+        tool: "shell",
+        state: completedState({
+          status: "completed",
+          input: {
+            command: "git status",
+          },
+          metadata: {
+            codexType: "commandExecution",
+          },
+        }),
+      },
+    ]),
+  );
+
+  const context = getAssistantResponseSummaryContext([user, assistant], 1);
+  assertEqual(
+    context,
+    undefined,
+    "Non-file-change assistant segments should not inherit diff summaries",
+  );
+}
+
+function testTextOnlySummaryStillAttachesWithoutFileDiffs() {
+  const user = adaptMessage(
+    createUserMessageResponse({
+      title: "Summary",
+      body: "Read files and prepared a response.",
+      diffs: [],
+    }),
+  );
+  const assistant = adaptMessage(
+    createAssistantMessageResponse([
+      {
+        id: "tool-read-1",
+        callID: "call-read-1",
+        messageID: "assistant-1",
+        sessionID: "session-1",
+        type: "tool",
+        tool: "read",
+        state: completedState({
+          status: "completed",
+          input: {
+            path: "src/example.ts",
+          },
+        }),
+      },
+    ]),
+  );
+
+  const context = getAssistantResponseSummaryContext([user, assistant], 1);
+  assert(context, "Text-only summaries should still attach");
+  assertEqual(context.summary.title, "Summary", "Text-only summary title");
+}
+
+function testZeroCountPlaceholderDoesNotCountAsFileChange() {
+  const user = adaptMessage(
+    createUserMessageResponse({
+      diffs: [
+        {
+          file: "src/example.ts",
+          before: "old",
+          after: "new",
+          additions: 1,
+          deletions: 1,
+        },
+      ],
+    }),
+  );
+  const assistant = adaptMessage(
+    createAssistantMessageResponse([
+      {
+        id: "tool-edit-1",
+        callID: "call-edit-1",
+        messageID: "assistant-1",
+        sessionID: "session-1",
+        type: "tool",
+        tool: "edit",
+        state: completedState({
+          status: "completed",
+          input: {
+            filePath: "src/example.ts",
+          },
+          metadata: {
+            additions: 0,
+            deletions: 0,
+          },
+        }),
+      },
+    ]),
+  );
+
+  const edit = getActivityByKind(assistant.assistant?.activities, "edit");
+  assert(edit, "Expected placeholder edit activity");
+  assertEqual(edit.additions, 0, "Placeholder additions");
+  assertEqual(edit.deletions, 0, "Placeholder deletions");
+
+  const context = getAssistantResponseSummaryContext([user, assistant], 1);
+  assertEqual(
+    context,
+    undefined,
+    "Zero-count placeholder edits should not trigger diff summaries",
+  );
+}
+
+function testDiffSummaryMovesToFinalAssistantMessage() {
+  const user = adaptMessage(
+    createUserMessageResponse({
+      diffs: [
+        {
+          file: "src/example.ts",
+          before: "old",
+          after: "new",
+          additions: 1,
+          deletions: 1,
+        },
+      ],
+    }),
+  );
+  const editAssistant = adaptMessage(
+    createAssistantMessageResponse([
+      {
+        id: "tool-edit-1",
+        callID: "call-edit-1",
+        messageID: "assistant-1",
+        sessionID: "session-1",
+        type: "tool",
+        tool: "edit",
+        state: completedState({
+          status: "completed",
+          input: {
+            filePath: "src/example.ts",
+            old_string: "old",
+            new_string: "new",
+          },
+          metadata: {
+            additions: 1,
+            deletions: 1,
+          },
+        }),
+      },
+    ]),
+  );
+  const readAssistant = adaptMessage(
+    createAssistantMessageResponse([
+      {
+        id: "tool-read-1",
+        callID: "call-read-1",
+        messageID: "assistant-1",
+        sessionID: "session-1",
+        type: "tool",
+        tool: "read",
+        state: completedState({
+          status: "completed",
+          input: {
+            path: "src/example.ts",
+          },
+        }),
+      },
+    ]),
+  );
+
+  const messages = [user, editAssistant, readAssistant];
+  const editContext = getAssistantResponseSummaryContext(messages, 1);
+  const readContext = getAssistantResponseSummaryContext(messages, 2);
+
+  assertEqual(
+    editContext,
+    undefined,
+    "Intermediate edit message should not receive diff summary",
+  );
+  assert(readContext, "Final assistant message should receive diff summary");
+  assertEqual(
+    readContext.summary.diffs.length,
+    1,
+    "Final assistant message should carry the end-of-response diff summary",
+  );
+}
+
 function run() {
   testOpenCodeEdit();
+  testOpenCodeWrite();
+  testOpenCodeReadSearchDoNotProduceDiffActivity();
   testCodexShell();
   testCodexSingleFileChange();
   testCodexMultiFileChange();
@@ -381,6 +696,10 @@ function run() {
   testStreamJsonTool();
   testStreamCodexEditText();
   testStreamFallback();
+  testDiffSummaryRequiresFileChangeActivity();
+  testTextOnlySummaryStillAttachesWithoutFileDiffs();
+  testZeroCountPlaceholderDoesNotCountAsFileChange();
+  testDiffSummaryMovesToFinalAssistantMessage();
   console.log("messages.test.ts passed");
 }
 

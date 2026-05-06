@@ -8,8 +8,8 @@ import {
 } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import InlineDiffViewer from "../InlineDiffViewer";
 import type { FileDiff, MessageSummary } from "@/src/lib/api/messages";
+import { toUnifiedDiffSmart } from "@/src/lib/diff/to-unified-diff";
 
 interface MessageSummaryDiffsProps {
   summary: MessageSummary;
@@ -115,7 +115,15 @@ const DiffFileRow = ({
   textColor: string;
 }) => {
   const directory = diff.file
-  const hasDiffContent = diff?.patch;
+  const unifiedDiff =
+    diff.patch ||
+    (diff.before || diff.after
+      ? toUnifiedDiffSmart({
+          fileName: diff.file,
+          oldContent: diff.before || "",
+          newContent: diff.after || "",
+        })
+      : null);
 
   return (
     <View>
@@ -134,8 +142,6 @@ const DiffFileRow = ({
             <Text
               variant="labelSmall"
               style={{ color: metaColor, marginTop: 2 }}
-              numberOfLines={1}
-              ellipsizeMode="middle"
             >
               {directory}
             </Text>
@@ -166,19 +172,12 @@ const DiffFileRow = ({
             overflow: "hidden",
           }}
         >
-          {hasDiffContent ? (
-            <RawDiffViewer diff={diff.patch || ""} />
-          ) : diff.before || diff.after ? (
-            <InlineDiffViewer
-              oldContent={diff.before || null}
-              newContent={diff.after || null}
-            />
+          {unifiedDiff ? (
+            <RawDiffViewer diff={unifiedDiff} />
           ) : (
             <View style={{ padding: 12 }}>
               <Text variant="bodySmall" style={{ color: metaColor }}>
-                {diff.additions === 0 && diff.deletions === 0
-                  ? directory
-                  : "No preview available"}
+                No preview available
               </Text>
             </View>
           )}

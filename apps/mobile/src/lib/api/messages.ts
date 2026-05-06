@@ -398,6 +398,76 @@ type NormalizedEditData = {
   path: string | null;
 };
 
+function getWriteDiffData(part: ToolPart): NormalizedEditData {
+  const metadata = getToolStateMetadata(part);
+  const metadataDiff = asRecord(metadata?.diff);
+  const input = getToolStateInput(part);
+  const patch =
+    getStringValue(metadataDiff, ["patch", "diff"]) ??
+    getStringValue(metadata, ["patch", "diff"]);
+  const countsFromDiff = getLineDiffCounts(patch);
+  const additions =
+    getNumberValue(metadata, ["additions", "added", "linesAdded"]) ??
+    getNumberValue(metadataDiff, ["additions", "added", "linesAdded"]) ??
+    countsFromDiff.additions;
+  const deletions =
+    getNumberValue(metadata, ["deletions", "removed", "linesRemoved"]) ??
+    getNumberValue(metadataDiff, ["deletions", "removed", "linesRemoved"]) ??
+    countsFromDiff.deletions;
+  const oldContent =
+    getStringValue(input, [
+      "oldContent",
+      "old_content",
+      "oldString",
+      "old_string",
+      "oldText",
+      "old",
+      "before",
+    ]) ??
+    getStringValue(metadata, [
+      "oldContent",
+      "old_content",
+      "oldString",
+      "old_string",
+      "oldText",
+      "old",
+      "before",
+    ]);
+  const newContent =
+    getStringValue(input, [
+      "content",
+      "text",
+      "newContent",
+      "new_content",
+      "newString",
+      "new_string",
+      "newText",
+      "new",
+      "after",
+    ]) ??
+    getStringValue(metadata, [
+      "content",
+      "text",
+      "newContent",
+      "new_content",
+      "newString",
+      "new_string",
+      "newText",
+      "new",
+      "after",
+    ]);
+
+  return {
+    additions,
+    deletions,
+    oldContent,
+    newContent,
+    patch,
+    items: undefined,
+    path: getToolPath(part),
+  };
+}
+
 function getNormalizedEditChangeKey(change: NormalizedEditChange): string {
   return JSON.stringify({
     path: change.path,
@@ -757,7 +827,8 @@ function formatExplorationSummary(parts: ToolPart[]): string {
 
 function getToolActivity(part: ToolPart): SessionAssistantActivity {
   if (part.tool === "write" || part.tool === "edit") {
-    const diffCounts = part.tool === "edit" ? getEditDiffCounts(part) : null;
+    const diffCounts =
+      part.tool === "edit" ? getEditDiffCounts(part) : getWriteDiffData(part);
     const metadata = getToolStateMetadata(part);
     const isCodexFileChange = getStringValue(metadata, ["codexType"]) === "fileChange";
     const pathDetails = getNormalizedPath(
@@ -903,6 +974,10 @@ function getAssistantBlocks(parts: Part[]): SessionAssistantBlock[] {
     }
 
     if (part.type === "reasoning") {
+      continue;
+    }
+
+    if (part.type !== "tool") {
       continue;
     }
 

@@ -8,6 +8,7 @@ import type { SessionAssistantBlock } from "@/src/lib/api/messages";
 interface AssistantBlockSequenceProps {
   blocks: SessionAssistantBlock[];
   metaText?: string | null;
+  showMetaText?: boolean;
   assistantBubble: string;
   textColor: string;
   metaColor: string;
@@ -19,6 +20,7 @@ export const AssistantBlockSequence: React.FC<AssistantBlockSequenceProps> =
     ({
       blocks,
       metaText,
+      showMetaText = true,
       assistantBubble,
       textColor,
       metaColor,
@@ -45,7 +47,7 @@ export const AssistantBlockSequence: React.FC<AssistantBlockSequenceProps> =
                     text={block.content}
                     baseStyle={{ color: textColor }}
                   />
-                  {metaText && isLastTextBlock ? (
+                  {showMetaText && metaText && isLastTextBlock ? (
                     <Text
                       variant="labelSmall"
                       style={{ color: metaColor, marginTop: 10 }}
@@ -68,7 +70,7 @@ export const AssistantBlockSequence: React.FC<AssistantBlockSequenceProps> =
             );
           })}
 
-          {metaText && !blocks.some((block) => block.type === "text") ? (
+          {showMetaText && metaText && !blocks.some((block) => block.type === "text") ? (
             <Text variant="labelSmall" style={{ color: metaColor }}>
               {metaText}
             </Text>

@@ -9,6 +9,28 @@ import {
 } from "@/src/lib/api/messages";
 import type { AssistantResponseSummaryContext } from "./getAssistantResponseSummary";
 
+function hasVisibleDiffData({
+  additions,
+  deletions,
+  patch,
+  oldContent,
+  newContent,
+}: {
+  additions?: number | null;
+  deletions?: number | null;
+  patch?: string | null;
+  oldContent?: string | null;
+  newContent?: string | null;
+}): boolean {
+  return Boolean(
+    patch ||
+      (oldContent !== null && oldContent !== undefined) ||
+      (newContent !== null && newContent !== undefined) ||
+      (typeof additions === "number" && additions > 0) ||
+      (typeof deletions === "number" && deletions > 0),
+  );
+}
+
 function getDerivedAssistantSummary(
   message: SessionMessage,
 ): MessageSummary | undefined {
@@ -25,14 +47,7 @@ function getDerivedAssistantSummary(
 
     if (activity.items && activity.items.length > 0) {
       for (const item of activity.items) {
-        const hasDiff =
-          item.patch ||
-          item.oldContent !== null ||
-          item.newContent !== null ||
-          item.additions !== null ||
-          item.deletions !== null;
-
-        if (!hasDiff) {
+        if (!hasVisibleDiffData(item)) {
           continue;
         }
 
@@ -48,14 +63,7 @@ function getDerivedAssistantSummary(
       continue;
     }
 
-    const hasDiff =
-      activity.patch ||
-      activity.oldContent !== null ||
-      activity.newContent !== null ||
-      activity.additions !== null ||
-      activity.deletions !== null;
-
-    if (!hasDiff) {
+    if (!hasVisibleDiffData(activity)) {
       continue;
     }
 
@@ -81,6 +89,8 @@ function getDerivedAssistantSummary(
 interface MessageRowProps {
   message: SessionMessage;
   responseSummary?: AssistantResponseSummaryContext;
+  showAssistantMeta?: boolean;
+  showResponseSummary?: boolean;
   borderColor: string;
   metaColor: string;
   userBubble: string;
@@ -93,6 +103,8 @@ export const MessageRow: React.FC<MessageRowProps> = React.memo(
   ({
     message,
     responseSummary,
+    showAssistantMeta = true,
+    showResponseSummary = true,
     borderColor,
     metaColor,
     userBubble,
@@ -101,8 +113,10 @@ export const MessageRow: React.FC<MessageRowProps> = React.memo(
     textColor,
   }) => {
     const summary =
-      responseSummary?.summary ?? getDerivedAssistantSummary(message);
-    const showResponseSummary =
+      showResponseSummary
+        ? responseSummary?.summary ?? getDerivedAssistantSummary(message)
+        : undefined;
+    const shouldShowResponseSummary =
       message.role === "assistant" &&
       !!summary &&
       (Boolean(summary.title) ||
@@ -113,6 +127,7 @@ export const MessageRow: React.FC<MessageRowProps> = React.memo(
       <View>
         <MessageBubble
           message={message}
+          showAssistantMeta={showAssistantMeta}
           borderColor={borderColor}
           metaColor={metaColor}
           userBubble={userBubble}
@@ -121,7 +136,7 @@ export const MessageRow: React.FC<MessageRowProps> = React.memo(
           textColor={textColor}
         />
 
-        {showResponseSummary && summary ? (
+        {shouldShowResponseSummary && summary ? (
           <MessageSummaryDiffs
             summary={summary}
             borderColor={borderColor}
