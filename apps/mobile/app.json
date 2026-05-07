@@ -23,6 +23,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "usesCleartextTraffic": true,
+      "googleServicesFile": "./google-services.json",
       "package": "com.derivedlabs.relaid",
       "permissions": [
         "android.permission.CAMERA",

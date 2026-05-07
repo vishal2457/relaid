@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build:apk": "cd apps/mobile && pnpm run build:apk",
+    "build:apk:eas": "cd apps/mobile && pnpm run build:apk:eas",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",

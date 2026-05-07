@@ -197,7 +197,11 @@ export function useSessionsForProviders(
   return {
     data,
     isLoading: results.some((result) => result.isLoading),
+    isRefetching: results.some((result) => result.isRefetching),
     error: results.find((result) => result.error)?.error ?? null,
+    refetch: async () => {
+      await Promise.all(results.map((result) => result.refetch()));
+    },
   };
 }
 

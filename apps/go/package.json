@@ -2,6 +2,6 @@
   "name": "go",
   "private": true,
   "scripts": {
-    "dev": "wails dev"
+    "dev": "RELAID_ENV=dev wails dev"
   }
 }

@@ -5,6 +5,7 @@ import {
   Dimensions,
   Easing,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   View,
@@ -73,12 +74,15 @@ export function SessionDrawer({
   const {
     data: sessions,
     isLoading: sessionsLoading,
+    isRefetching: sessionsRefetching,
     error: sessionsError,
+    refetch: refetchSessions,
   } = useSessionsForProviders(
     activeProject?.folder ?? "",
     availableAgentProviderIds,
   );
   const isSessionsLoading = providersLoading || sessionsLoading;
+  const isRefreshing = Boolean(activeProject) && sessionsRefetching;
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
   const metaColor = theme.dark ? "#B8C2D1" : "#526277";
@@ -310,6 +314,17 @@ export function SessionDrawer({
           style={styles.list}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={() => {
+                if (!activeProject) return;
+                void refetchSessions();
+              }}
+              tintColor={theme.colors.primary}
+              colors={[theme.colors.primary]}
+            />
+          }
         >
           {isSessionsLoading ? (
             <View style={styles.centered}>
