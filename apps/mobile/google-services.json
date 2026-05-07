@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1016366821179",
+    "project_id": "relaid-1f437",
+    "storage_bucket": "relaid-1f437.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1016366821179:android:3edbc8c38b10a162da111e",
+        "android_client_info": {
+          "package_name": "com.derivedlabs.relaid"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAie18Cd0_-0WxOUlJK6ge93NXbY8Wc24s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
