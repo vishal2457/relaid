@@ -6,7 +6,7 @@ import {
 } from "@/src/lib/pairing/auth";
 import { getCurrentAccessToken } from "@/src/lib/pairing/session";
 
-const DEFAULT_BASE_URL = "http://100.95.62.14:3001";
+const DEFAULT_BASE_URL = "https://relaid.derived.dev";
 
 export let chatServerApiUrl = DEFAULT_BASE_URL;
 

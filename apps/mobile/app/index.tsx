@@ -1572,6 +1572,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 16,
     paddingTop: 12,
+    paddingBottom: 16,
     gap: 12,
   },
   scrollToBottomButton: {

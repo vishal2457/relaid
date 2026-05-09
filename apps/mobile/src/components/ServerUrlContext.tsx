@@ -8,7 +8,7 @@ import React, {
 import * as SecureStore from "expo-secure-store";
 import { updateBaseUrl } from "@/src/lib/axios/base";
 
-const DEFAULT_SERVER_URL = "http://100.95.62.14:3001";
+const DEFAULT_SERVER_URL = "https://relaid.derived.dev";
 const SERVER_URL_KEY = "SERVER_BASE_URL";
 
 interface ServerUrlContextType {

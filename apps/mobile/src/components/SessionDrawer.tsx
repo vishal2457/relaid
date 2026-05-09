@@ -141,11 +141,6 @@ export function SessionDrawer({
     onClose();
   };
 
-  const handleNewSession = () => {
-    onSelectSession(null);
-    onClose();
-  };
-
   const handleClearPendingSession = () => {
     Alert.alert(
       "Clear Pending Session",
@@ -287,28 +282,6 @@ export function SessionDrawer({
             </Pressable>
           </View>
         </View>
-
-        <Pressable
-          onPress={handleNewSession}
-          style={[
-            styles.newSessionButton,
-            { backgroundColor: theme.colors.primary, borderColor },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Start new session"
-        >
-          <MaterialCommunityIcons
-            name="plus-circle-outline"
-            size={20}
-            color={theme.colors.onPrimary}
-          />
-          <Text
-            variant="labelLarge"
-            style={{ color: theme.colors.onPrimary, fontWeight: "600" }}
-          >
-            New Session
-          </Text>
-        </Pressable>
 
         <ScrollView
           style={styles.list}
@@ -658,17 +631,6 @@ const styles = StyleSheet.create({
   },
   projectName: {
     flex: 1,
-  },
-  newSessionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginHorizontal: 16,
-    marginTop: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
   },
   list: {
     flex: 1,

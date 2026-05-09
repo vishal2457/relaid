@@ -7,12 +7,12 @@ import {
 import { useAppTheme } from "@/src/components/ThemeContext";
 import ThemeSelector from "@/src/components/ThemeSelector";
 import {
-  checkGithubStatus,
+  // checkGithubStatus,
   clearGithubSession,
-  disconnectGithub,
-  loadStoredGithubSession,
-  startGithubOAuth,
-  type GithubSession,
+  // disconnectGithub,
+  // loadStoredGithubSession,
+  // startGithubOAuth,
+  // type GithubSession,
 } from "@/src/lib/api/github";
 import {
   getConnectedLocalServers,
@@ -53,11 +53,11 @@ export default function SettingsScreen() {
   >("idle");
   const [showPairingSheet, setShowPairingSheet] = useState(false);
   const [showRelaySheet, setShowRelaySheet] = useState(false);
-  const [githubSession, setGithubSession] = useState<GithubSession | null>(
-    null,
-  );
-  const [githubHydrated, setGithubHydrated] = useState(false);
-  const [githubConnecting, setGithubConnecting] = useState(false);
+  // const [githubSession, setGithubSession] = useState<GithubSession | null>(
+  //   null,
+  // );
+  // const [githubHydrated, setGithubHydrated] = useState(false);
+  // const [githubConnecting, setGithubConnecting] = useState(false);
   const [connectedServers, setConnectedServers] = useState<ConnectedLocalServer[]>(
     [],
   );
@@ -66,44 +66,44 @@ export default function SettingsScreen() {
     null,
   );
 
-  useEffect(() => {
-    let cancelled = false;
+  // useEffect(() => {
+  //   let cancelled = false;
 
-    const hydrateGithubSession = async () => {
-      setGithubHydrated(false);
+  //   const hydrateGithubSession = async () => {
+  //     setGithubHydrated(false);
 
-      const stored = await loadStoredGithubSession();
-      if (cancelled) return;
-      setGithubSession(stored);
+  //     const stored = await loadStoredGithubSession();
+  //     if (cancelled) return;
+  //     setGithubSession(stored);
 
-      if (!isPaired) {
-        setGithubHydrated(true);
-        return;
-      }
+  //     if (!isPaired) {
+  //       setGithubHydrated(true);
+  //       return;
+  //     }
 
-      try {
-        const status = await checkGithubStatus();
-        if (cancelled) return;
-        setGithubSession(
-          status.connected && status.username
-            ? { username: status.username }
-            : null,
-        );
-      } catch (error) {
-        console.error("Failed to load GitHub status", error);
-      } finally {
-        if (!cancelled) {
-          setGithubHydrated(true);
-        }
-      }
-    };
+  //     try {
+  //       const status = await checkGithubStatus();
+  //       if (cancelled) return;
+  //       setGithubSession(
+  //         status.connected && status.username
+  //           ? { username: status.username }
+  //           : null,
+  //       );
+  //     } catch (error) {
+  //       console.error("Failed to load GitHub status", error);
+  //     } finally {
+  //       if (!cancelled) {
+  //         setGithubHydrated(true);
+  //       }
+  //     }
+  //   };
 
-    void hydrateGithubSession();
+  //   void hydrateGithubSession();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [isPaired]);
+  //   return () => {
+  //     cancelled = true;
+  //   };
+  // }, [isPaired]);
 
   const loadConnectedServers = useCallback(async () => {
     if (!isPaired) {
@@ -175,32 +175,32 @@ export default function SettingsScreen() {
     router.replace("/pair" as any);
   }, [clearSession]);
 
-  const handleGithubConnect = useCallback(async () => {
-    if (!isPaired) return;
-    try {
-      setGithubConnecting(true);
-      const session = await startGithubOAuth();
-      if (session) {
-        setGithubSession(session);
-      }
-    } catch (err) {
-      console.error("GitHub OAuth failed", err);
-    } finally {
-      setGithubConnecting(false);
-    }
-  }, [isPaired]);
+  // const handleGithubConnect = useCallback(async () => {
+  //   if (!isPaired) return;
+  //   try {
+  //     setGithubConnecting(true);
+  //     const session = await startGithubOAuth();
+  //     if (session) {
+  //       setGithubSession(session);
+  //     }
+  //   } catch (err) {
+  //     console.error("GitHub OAuth failed", err);
+  //   } finally {
+  //     setGithubConnecting(false);
+  //   }
+  // }, [isPaired]);
 
-  const handleGithubDisconnect = useCallback(async () => {
-    try {
-      setGithubConnecting(true);
-      await disconnectGithub();
-      setGithubSession(null);
-    } catch (err) {
-      console.error("GitHub disconnect failed", err);
-    } finally {
-      setGithubConnecting(false);
-    }
-  }, []);
+  // const handleGithubDisconnect = useCallback(async () => {
+  //   try {
+  //     setGithubConnecting(true);
+  //     await disconnectGithub();
+  //     setGithubSession(null);
+  //   } catch (err) {
+  //     console.error("GitHub disconnect failed", err);
+  //   } finally {
+  //     setGithubConnecting(false);
+  //   }
+  // }, []);
 
   const borderColor = theme.dark ? "#2A3441" : "#D9E2EC";
 
@@ -261,7 +261,7 @@ export default function SettingsScreen() {
               </Card.Content>
             </Card>
 
-            <Card mode="outlined" style={{ borderColor, marginTop: 16 }}>
+            {/* <Card mode="outlined" style={{ borderColor, marginTop: 16 }}>
               <Card.Content>
                 <Text variant="titleMedium" style={styles.cardTitle}>
                   GitHub Integration
@@ -313,7 +313,7 @@ export default function SettingsScreen() {
                   )}
                 </View>
               </Card.Content>
-            </Card>
+            </Card> */}
 
             <View style={{ marginTop: 20 }}>
               <ThemeSelector
@@ -436,7 +436,7 @@ export default function SettingsScreen() {
           mode="outlined"
           value={urlInput}
           onChangeText={setUrlInput}
-          placeholder="http://100.95.62.14:3001"
+          placeholder="https://relaid.derived.dev"
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
