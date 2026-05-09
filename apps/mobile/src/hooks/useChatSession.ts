@@ -374,6 +374,14 @@ export function useChatSession(deps: HydrationDeps) {
     });
   }, [providers]);
 
+  React.useEffect(() => {
+    if (!hydrated || !activeModel || deps.activeSessionIdRef.current) {
+      return;
+    }
+
+    deps.setActiveSessionAgentProviderId?.(activeModel.agentProviderId);
+  }, [activeModel, hydrated, deps]);
+
   // Sorted/filtered lists
   const sortedModels = React.useMemo(() => {
     const models = flattenProvidersToModels(providers ?? []);

@@ -14,7 +14,7 @@ import {
 import { ErrorToast } from "@/src/components/ErrorToast";
 import { SessionDrawer } from "@/src/components/SessionDrawer";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Stack } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import React from "react";
 import {
   AppState,
@@ -106,10 +106,30 @@ type SessionPromptStartedEvent = {
 type PermissionRequestEvent = PermissionRequest;
 type QuestionRequestEvent = QuestionRequest;
 
+function getSingleSearchParam(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (Array.isArray(value)) {
+    return typeof value[0] === "string" && value[0] ? value[0] : undefined;
+  }
+
+  return typeof value === "string" && value ? value : undefined;
+}
+
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const flatListRef = React.useRef<FlatListType<SessionMessage>>(null);
+  const routeParams = useLocalSearchParams<{
+    projectId?: string | string[];
+    sessionId?: string | string[];
+    agentProviderId?: string | string[];
+  }>();
+  const notificationProjectId = getSingleSearchParam(routeParams.projectId);
+  const notificationSessionId = getSingleSearchParam(routeParams.sessionId);
+  const notificationAgentProviderId = getSingleSearchParam(
+    routeParams.agentProviderId,
+  );
 
   // --- Extracted hooks ---
   const keyboardHeight = useKeyboardHeight();
@@ -267,15 +287,14 @@ export default function ChatScreen() {
     }
 
     const defaultAgentProviderId =
-      availableAgentProviders[0]?.agentProviderId ?? null;
+      selectedModelAgentProviderId ??
+      availableAgentProviders[0]?.agentProviderId ??
+      null;
     if (!defaultAgentProviderId) {
       return;
     }
 
-    if (
-      activeSessionAgentProviderId &&
-      selectedAgentProvider?.agentProviderId === activeSessionAgentProviderId
-    ) {
+    if (activeSessionAgentProviderId === defaultAgentProviderId) {
       return;
     }
 
@@ -284,7 +303,7 @@ export default function ChatScreen() {
     activeSessionAgentProviderId,
     activeSessionId,
     availableAgentProviders,
-    selectedAgentProvider?.agentProviderId,
+    selectedModelAgentProviderId,
   ]);
 
   React.useEffect(() => {
@@ -321,6 +340,10 @@ export default function ChatScreen() {
     activeSessionId ?? "",
     activeLookupAgentProviderId,
   );
+  const { data: notificationSession } = useSession(
+    notificationSessionId ?? "",
+    notificationAgentProviderId,
+  );
 
   const activeSessionMessages = React.useMemo(() => {
     if (!activeSessionId) {
@@ -353,6 +376,44 @@ export default function ChatScreen() {
   );
 
   const hasScrolledToBottom = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!notificationProjectId || !notificationSessionId) {
+      return;
+    }
+
+    const availableProjects = session.projectsRef.current ?? session.projects ?? [];
+    const targetProjectId = notificationSession?.projectID ?? notificationProjectId;
+    const targetProject = availableProjects.find(
+      (project) => project.id === targetProjectId,
+    );
+
+    if (!targetProject) {
+      return;
+    }
+
+    if (session.activeProjectRef.current?.id !== targetProject.id) {
+      session.setActiveProject(targetProject);
+    }
+
+    const targetAgentProviderId =
+      notificationSession?.agentProviderId ?? notificationAgentProviderId;
+
+    activeSessionIdRef.current = notificationSessionId;
+    setActiveSessionId(notificationSessionId);
+    setActiveSessionAgentProviderId(targetAgentProviderId);
+    setOptimisticMessage(null);
+    hasScrolledToBottom.current = false;
+
+    router.replace("/");
+  }, [
+    notificationAgentProviderId,
+    notificationProjectId,
+    notificationSession,
+    notificationSessionId,
+    session.projects,
+    session.setActiveProject,
+  ]);
   React.useEffect(() => {
     if (messages && messages.length > 0 && !hasScrolledToBottom.current) {
       const timer = setTimeout(() => {
@@ -703,6 +764,7 @@ export default function ChatScreen() {
           {
             projectId: payload.projectId,
             sessionId: responseSessionId,
+            agentProviderId: activeAgentProviderIdRef.current,
           },
         );
       }

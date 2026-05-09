@@ -111,10 +111,6 @@ function RootLayoutInner() {
         <Stack>
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen
-            name="projects/[projectId]"
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
             name="file"
             options={{ headerShown: true, presentation: "card" }}
           />

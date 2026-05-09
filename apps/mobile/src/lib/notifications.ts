@@ -31,6 +31,7 @@ function getNavigationResponseKey(
 function getSessionRouteFromNotificationData(data: unknown): {
   projectId: string;
   sessionId: string;
+  agentProviderId?: string;
 } | null {
   if (!data || typeof data !== "object") {
     return null;
@@ -39,6 +40,7 @@ function getSessionRouteFromNotificationData(data: unknown): {
   const candidate = data as Record<string, unknown>;
   const projectId = candidate.projectId;
   const sessionId = candidate.sessionId;
+  const agentProviderId = candidate.agentProviderId;
 
   if (typeof projectId !== "string" || typeof sessionId !== "string") {
     return null;
@@ -49,7 +51,14 @@ function getSessionRouteFromNotificationData(data: unknown): {
     case "permission_request":
     case "question_request":
     case "request_completed":
-      return { projectId, sessionId };
+      return {
+        projectId,
+        sessionId,
+        agentProviderId:
+          typeof agentProviderId === "string" && agentProviderId
+            ? agentProviderId
+            : undefined,
+      };
     default:
       return null;
   }
@@ -78,10 +87,7 @@ function handleNotificationNavigation(
   }
 
   handledNavigationResponseKeys.add(responseKey);
-  router.push({
-    pathname: "/projects/[projectId]/sessions/[sessionId]",
-    params: route,
-  });
+  router.push({ pathname: "/", params: route } as any);
   return true;
 }
 
@@ -252,6 +258,7 @@ export async function showNewMessageNotification(
   params: {
     projectId: string;
     sessionId: string;
+    agentProviderId?: string;
   },
 ): Promise<void> {
   if (!isNotificationsEnabled) {
@@ -271,6 +278,7 @@ export async function showNewMessageNotification(
           type: "new_message",
           projectId: params.projectId,
           sessionId: params.sessionId,
+          agentProviderId: params.agentProviderId,
         },
         ...(Platform.OS === "android"
           ? { channelId: DEFAULT_ANDROID_NOTIFICATION_CHANNEL_ID }
