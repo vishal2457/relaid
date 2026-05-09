@@ -115,6 +115,7 @@ export function useChatSession(deps: HydrationDeps) {
   );
   const [activeAgent, setActiveAgent] = React.useState<Agent | null>(null);
   const [hydrated, setHydrated] = React.useState(false);
+  const [modelHydrated, setModelHydrated] = React.useState(false);
   const [modelSearchQuery, setModelSearchQuery] = React.useState("");
   const [agentSearchQuery, setAgentSearchQuery] = React.useState("");
   const [branchSearchQuery, setBranchSearchQuery] = React.useState("");
@@ -246,14 +247,14 @@ export function useChatSession(deps: HydrationDeps) {
 
   // Persist active model
   React.useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !modelHydrated) return;
     if (activeModel) {
       AsyncStorage.setItem(
         LAST_SELECTED_MODEL,
         JSON.stringify(activeModel),
       ).catch(() => {});
     }
-  }, [activeModel, hydrated]);
+  }, [activeModel, hydrated, modelHydrated]);
 
   // Restore agent from storage on project/agents change
   React.useEffect(() => {
@@ -329,9 +330,15 @@ export function useChatSession(deps: HydrationDeps) {
   React.useEffect(() => {
     if (!hydrated || !providers) return;
 
-    (async () => {
+    let cancelled = false;
+
+    void (async () => {
       try {
         const savedModelJson = await AsyncStorage.getItem(LAST_SELECTED_MODEL);
+        if (cancelled || !deps.isMountedRef.current) {
+          return;
+        }
+
         if (savedModelJson) {
           const savedModel = JSON.parse(savedModelJson) as ActiveModel;
           const models = flattenProvidersToModels(providers);
@@ -347,9 +354,18 @@ export function useChatSession(deps: HydrationDeps) {
             setActiveModel(modelExists);
           }
         }
-      } catch {}
+      } catch {
+      } finally {
+        if (!cancelled && deps.isMountedRef.current) {
+          setModelHydrated(true);
+        }
+      }
     })();
-  }, [hydrated, providers]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, providers, deps.isMountedRef]);
 
   React.useEffect(() => {
     const models = flattenProvidersToModels(providers ?? []);
@@ -380,7 +396,12 @@ export function useChatSession(deps: HydrationDeps) {
     }
 
     deps.setActiveSessionAgentProviderId?.(activeModel.agentProviderId);
-  }, [activeModel, hydrated, deps]);
+  }, [
+    activeModel,
+    hydrated,
+    deps.activeSessionIdRef,
+    deps.setActiveSessionAgentProviderId,
+  ]);
 
   // Sorted/filtered lists
   const sortedModels = React.useMemo(() => {
