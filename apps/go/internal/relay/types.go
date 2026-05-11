@@ -171,10 +171,11 @@ type ProjectFileContentResponse struct {
 }
 
 type ProjectFileSearchRequest struct {
-	RequestID string `json:"requestId"`
-	ProjectID string `json:"projectId"`
-	Query     string `json:"query,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	ProjectID       string `json:"projectId"`
+	Query           string `json:"query,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
 }
 
 type ProjectFileSearchResponse struct {

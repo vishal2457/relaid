@@ -30,8 +30,10 @@ const defaultProviderTimeout = 20 * time.Second
 type Provider struct {
 	id           agent.ProviderID
 	capabilities agent.CapabilitySet
+	projects     *projectService
 	sessions     *sessionService
 	providers    *providerService
+	agents       *agentService
 	apps         *appService
 }
 
@@ -51,10 +53,11 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			SessionsRun:    true,
 			SessionsStream: true,
 			ProvidersList:  true,
-			AgentsList:     false,
+			AgentsList:     true,
 			SkillsList:     false,
 			AppsList:       true,
 		},
+		projects: &projectService{client: client},
 		sessions: &sessionService{
 			cfg:    cfg,
 			logger: logger,
@@ -62,6 +65,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			active: &activeRunStore{runs: map[string]context.CancelFunc{}},
 		},
 		providers: &providerService{client: client},
+		agents:    &agentService{client: client},
 		apps:      &appService{client: client},
 	}
 
@@ -70,16 +74,87 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 
 func (p *Provider) ID() agent.ProviderID                           { return p.id }
 func (p *Provider) Capabilities() agent.CapabilitySet              { return p.capabilities }
-func (p *Provider) Projects() agent.ProjectService                 { return nil }
+func (p *Provider) Projects() agent.ProjectService                 { return p.projects }
 func (p *Provider) Sessions() agent.SessionService                 { return p.sessions }
 func (p *Provider) Providers() agent.ProviderService               { return p.providers }
-func (p *Provider) Agents() agent.AgentService                     { return nil }
+func (p *Provider) Agents() agent.AgentService                     { return p.agents }
 func (p *Provider) Skills() agent.SkillsService                    { return nil }
 func (p *Provider) Apps() agent.AppService                         { return p.apps }
 func (p *Provider) SetInteractionHandler(h acp.InteractionHandler) { p.sessions.client.handler = h }
 func (p *Provider) Shutdown(context.Context) error {
 	p.sessions.client.closeShared()
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// projectService
+// ---------------------------------------------------------------------------
+
+type projectService struct {
+	client *appServerClient
+}
+
+func (s *projectService) List(context.Context) ([]agent.Project, error) {
+	return nil, fmt.Errorf("not implemented: Codex project listing is not wired")
+}
+
+func (s *projectService) Get(context.Context, string) (*agent.Project, error) {
+	return nil, fmt.Errorf("not implemented: Codex project lookup is not wired")
+}
+
+func (s *projectService) ResolveIDByDirectory(_ context.Context, directory string) (string, error) {
+	if strings.TrimSpace(directory) == "" {
+		return "", fmt.Errorf("directory is required")
+	}
+	return directory, nil
+}
+
+func (s *projectService) FileSearch(ctx context.Context, projectID string, query string, limit int) ([]agent.FileMatch, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
+
+	root := strings.TrimSpace(projectID)
+	if root == "" {
+		return nil, fmt.Errorf("project root is required")
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []agent.FileMatch{}, nil
+	}
+
+	conn, err := s.client.sharedConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := conn.fuzzyFileSearch(ctx, fuzzyFileSearchParams{
+		Query: query,
+		Roots: []string{root},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	matches := make([]agent.FileMatch, 0, len(result.Files))
+	for _, file := range result.Files {
+		path := strings.TrimSpace(file.Path)
+		if path == "" {
+			continue
+		}
+		fileType := "file"
+		if file.MatchType == "directory" {
+			fileType = "directory"
+		}
+		matches = append(matches, agent.FileMatch{
+			Name: firstNonEmpty(strings.TrimSpace(file.FileName), filepath.Base(path)),
+			Path: path,
+			Type: fileType,
+		})
+		if limit > 0 && len(matches) >= limit {
+			break
+		}
+	}
+	return matches, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +193,60 @@ func (s *providerService) List(ctx context.Context) ([]agent.Provider, error) {
 	})
 
 	return []agent.Provider{{ID: "openai", Name: "OpenAI", Models: result}}, nil
+}
+
+// ---------------------------------------------------------------------------
+// agentService
+// ---------------------------------------------------------------------------
+
+type agentService struct {
+	client *appServerClient
+}
+
+func (s *agentService) List(ctx context.Context, _ string) ([]agent.AgentConfig, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
+
+	conn, err := s.client.sharedConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	modes, err := conn.collaborationModeList(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]agent.AgentConfig, 0, len(modes.Data))
+	for _, item := range modes.Data {
+		modeID := normalizeCollaborationMode(item.Mode)
+		if modeID == "" {
+			continue
+		}
+		result = append(result, agent.AgentConfig{
+			Name:        firstNonEmpty(strings.TrimSpace(item.Name), collaborationModeDisplayName(modeID)),
+			Description: collaborationModeDescription(item),
+			Mode:        "primary",
+			BuiltIn:     true,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		left := strings.ToLower(result[i].Name)
+		right := strings.ToLower(result[j].Name)
+		if left == right {
+			return result[i].Description < result[j].Description
+		}
+		if left == "default" {
+			return true
+		}
+		if right == "default" {
+			return false
+		}
+		return left < right
+	})
+
+	return result, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -468,10 +597,11 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 	}
 
 	turnResult, err := conn.turnStart(runCtx, turnStartParams{
-		ThreadID: threadID,
-		Input:    buildUserInputs(prompt, input.Items),
-		Cwd:      emptyToNil(input.WorkingDir),
-		Model:    modelToNil(input.Model),
+		ThreadID:          threadID,
+		Input:             buildUserInputs(prompt, input.Items),
+		Cwd:               emptyToNil(input.WorkingDir),
+		Model:             modelToNil(input.Model),
+		CollaborationMode: buildCollaborationModeSelection(input.Agent, input.SystemPrompt),
 	})
 	if err != nil {
 		return nil, err
@@ -522,6 +652,11 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn, input agent.RunInput) (string, error) {
 	if input.SessionID == "" {
 		// No existing session — start a brand new thread.
+		collaborationMode := buildCollaborationModeSelection(input.Agent, input.SystemPrompt)
+		developerInstructions := emptyToNil(input.SystemPrompt)
+		if collaborationMode != nil {
+			developerInstructions = nil
+		}
 		result, err := conn.threadStart(ctx, threadStartParams{
 			Model:                  modelToNil(input.Model),
 			ModelProvider:          modelProviderToNil(input.Model),
@@ -529,7 +664,8 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 			ApprovalPolicy:         "on-request",
 			ApprovalsReviewer:      "user",
 			Sandbox:                "workspace-write",
-			DeveloperInstructions:  emptyToNil(input.SystemPrompt),
+			DeveloperInstructions:  developerInstructions,
+			CollaborationMode:      collaborationMode,
 			PersistExtendedHistory: true,
 		})
 		if err != nil {
@@ -547,6 +683,7 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 		ApprovalPolicy:         "on-request",
 		ApprovalsReviewer:      "user",
 		Sandbox:                "workspace-write",
+		CollaborationMode:      buildCollaborationModeSelection(input.Agent, input.SystemPrompt),
 		PersistExtendedHistory: true,
 		ExcludeTurns:           true,
 	})
@@ -560,6 +697,11 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 	// fresh thread and let the caller's session record update naturally.
 	if isNoRolloutFound(err) {
 		s.logger.Printf("codex: no rollout for %s, starting fresh thread", input.SessionID)
+		collaborationMode := buildCollaborationModeSelection(input.Agent, input.SystemPrompt)
+		developerInstructions := emptyToNil(input.SystemPrompt)
+		if collaborationMode != nil {
+			developerInstructions = nil
+		}
 		fresh, startErr := conn.threadStart(ctx, threadStartParams{
 			Model:                  modelToNil(input.Model),
 			ModelProvider:          modelProviderToNil(input.Model),
@@ -567,7 +709,8 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 			ApprovalPolicy:         "on-request",
 			ApprovalsReviewer:      "user",
 			Sandbox:                "workspace-write",
-			DeveloperInstructions:  emptyToNil(input.SystemPrompt),
+			DeveloperInstructions:  developerInstructions,
+			CollaborationMode:      collaborationMode,
 			PersistExtendedHistory: true,
 		})
 		if startErr != nil {
@@ -578,6 +721,11 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 
 	// Any other resume error — also fall back to a new thread.
 	s.logger.Printf("codex: resume failed for %s (%v), starting replacement thread", input.SessionID, err)
+	collaborationMode := buildCollaborationModeSelection(input.Agent, input.SystemPrompt)
+	developerInstructions := emptyToNil(input.SystemPrompt)
+	if collaborationMode != nil {
+		developerInstructions = nil
+	}
 	fresh, startErr := conn.threadStart(ctx, threadStartParams{
 		Model:                  modelToNil(input.Model),
 		ModelProvider:          modelProviderToNil(input.Model),
@@ -585,7 +733,8 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 		ApprovalPolicy:         "on-request",
 		ApprovalsReviewer:      "user",
 		Sandbox:                "workspace-write",
-		DeveloperInstructions:  emptyToNil(input.SystemPrompt),
+		DeveloperInstructions:  developerInstructions,
+		CollaborationMode:      collaborationMode,
 		PersistExtendedHistory: true,
 	})
 	if startErr != nil {
@@ -844,6 +993,16 @@ func (c *appServerConn) modelList(ctx context.Context) (*modelListResponse, erro
 func (c *appServerConn) appList(ctx context.Context, p appListParams) (*appListResponse, error) {
 	var r appListResponse
 	return &r, c.call(ctx, "app/list", p, &r)
+}
+
+func (c *appServerConn) collaborationModeList(ctx context.Context) (*collaborationModeListResponse, error) {
+	var r collaborationModeListResponse
+	return &r, c.call(ctx, "collaborationMode/list", map[string]any{}, &r)
+}
+
+func (c *appServerConn) fuzzyFileSearch(ctx context.Context, p fuzzyFileSearchParams) (*fuzzyFileSearchResponse, error) {
+	var r fuzzyFileSearchResponse
+	return &r, c.call(ctx, "fuzzyFileSearch", p, &r)
 }
 
 // Low-level JSON-RPC -----------------------------------------------------------
@@ -1548,6 +1707,67 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func buildCollaborationModeSelection(agentName, developerInstructions string) *collaborationModeSelection {
+	mode := normalizeCollaborationMode(agentName)
+	if mode == "" {
+		return nil
+	}
+
+	settings := map[string]any{
+		"developer_instructions": nil,
+	}
+	if instructions := strings.TrimSpace(developerInstructions); instructions != "" {
+		settings["developer_instructions"] = instructions
+	}
+
+	return &collaborationModeSelection{
+		Mode:     mode,
+		Settings: settings,
+	}
+}
+
+func normalizeCollaborationMode(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return ""
+	}
+
+	replacer := strings.NewReplacer(" ", "_", "-", "_")
+	normalized = replacer.Replace(normalized)
+
+	switch normalized {
+	case "plan", "default":
+		return normalized
+	}
+
+	return normalized
+}
+
+func collaborationModeDisplayName(mode string) string {
+	switch normalizeCollaborationMode(mode) {
+	case "plan":
+		return "Plan"
+	case "default":
+		return "Default"
+	default:
+		return strings.TrimSpace(mode)
+	}
+}
+
+func collaborationModeDescription(mode codexCollaborationMode) string {
+	parts := make([]string, 0, 2)
+	if effort := stringPtrValue(mode.ReasoningEffort, ""); effort != "" {
+		parts = append(parts, fmt.Sprintf("Reasoning: %s", effort))
+	}
+	if model := stringPtrValue(mode.Model, ""); model != "" {
+		parts = append(parts, fmt.Sprintf("Model: %s", model))
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("Codex collaboration mode: %s", normalizeCollaborationMode(mode.Mode))
+	}
+	return strings.Join(parts, " | ")
+}
+
 func codexItemLabel(raw json.RawMessage) string {
 	var env struct {
 		Item struct {
@@ -1705,27 +1925,29 @@ type initializeResponse struct {
 }
 
 type threadStartParams struct {
-	Model                  *string `json:"model,omitempty"`
-	ModelProvider          *string `json:"modelProvider,omitempty"`
-	Cwd                    *string `json:"cwd,omitempty"`
-	ApprovalPolicy         string  `json:"approvalPolicy,omitempty"`
-	ApprovalsReviewer      string  `json:"approvalsReviewer,omitempty"`
-	Sandbox                string  `json:"sandbox,omitempty"`
-	DeveloperInstructions  *string `json:"developerInstructions,omitempty"`
-	ExperimentalRawEvents  bool    `json:"experimentalRawEvents"`
-	PersistExtendedHistory bool    `json:"persistExtendedHistory"`
+	Model                  *string                     `json:"model,omitempty"`
+	ModelProvider          *string                     `json:"modelProvider,omitempty"`
+	Cwd                    *string                     `json:"cwd,omitempty"`
+	ApprovalPolicy         string                      `json:"approvalPolicy,omitempty"`
+	ApprovalsReviewer      string                      `json:"approvalsReviewer,omitempty"`
+	Sandbox                string                      `json:"sandbox,omitempty"`
+	DeveloperInstructions  *string                     `json:"developerInstructions,omitempty"`
+	CollaborationMode      *collaborationModeSelection `json:"collaborationMode,omitempty"`
+	ExperimentalRawEvents  bool                        `json:"experimentalRawEvents"`
+	PersistExtendedHistory bool                        `json:"persistExtendedHistory"`
 }
 
 type threadResumeParams struct {
-	ThreadID               string  `json:"threadId"`
-	Model                  *string `json:"model,omitempty"`
-	ModelProvider          *string `json:"modelProvider,omitempty"`
-	Cwd                    *string `json:"cwd,omitempty"`
-	ApprovalPolicy         string  `json:"approvalPolicy,omitempty"`
-	ApprovalsReviewer      string  `json:"approvalsReviewer,omitempty"`
-	Sandbox                string  `json:"sandbox,omitempty"`
-	ExcludeTurns           bool    `json:"excludeTurns,omitempty"`
-	PersistExtendedHistory bool    `json:"persistExtendedHistory"`
+	ThreadID               string                      `json:"threadId"`
+	Model                  *string                     `json:"model,omitempty"`
+	ModelProvider          *string                     `json:"modelProvider,omitempty"`
+	Cwd                    *string                     `json:"cwd,omitempty"`
+	ApprovalPolicy         string                      `json:"approvalPolicy,omitempty"`
+	ApprovalsReviewer      string                      `json:"approvalsReviewer,omitempty"`
+	Sandbox                string                      `json:"sandbox,omitempty"`
+	CollaborationMode      *collaborationModeSelection `json:"collaborationMode,omitempty"`
+	ExcludeTurns           bool                        `json:"excludeTurns,omitempty"`
+	PersistExtendedHistory bool                        `json:"persistExtendedHistory"`
 }
 
 type threadListParams struct {
@@ -1742,11 +1964,17 @@ type appListParams struct {
 	ForceRefetch bool    `json:"forceRefetch"`
 }
 
+type fuzzyFileSearchParams struct {
+	Query string   `json:"query"`
+	Roots []string `json:"roots"`
+}
+
 type turnStartParams struct {
-	ThreadID string      `json:"threadId"`
-	Input    []userInput `json:"input"`
-	Cwd      *string     `json:"cwd,omitempty"`
-	Model    *string     `json:"model,omitempty"`
+	ThreadID          string                      `json:"threadId"`
+	Input             []userInput                 `json:"input"`
+	Cwd               *string                     `json:"cwd,omitempty"`
+	Model             *string                     `json:"model,omitempty"`
+	CollaborationMode *collaborationModeSelection `json:"collaborationMode,omitempty"`
 }
 
 type userInput struct {
@@ -1775,9 +2003,24 @@ type modelListResponse struct {
 	NextCursor *string      `json:"nextCursor"`
 }
 
+type collaborationModeListResponse struct {
+	Data []codexCollaborationMode `json:"data"`
+}
+
 type appListResponse struct {
 	Data       []codexApp `json:"data"`
 	NextCursor *string    `json:"nextCursor"`
+}
+
+type fuzzyFileSearchResponse struct {
+	Files []fuzzyFileSearchResult `json:"files"`
+}
+
+type fuzzyFileSearchResult struct {
+	Root      string `json:"root"`
+	Path      string `json:"path"`
+	MatchType string `json:"match_type"`
+	FileName  string `json:"file_name"`
 }
 
 type codexModel struct {
@@ -1785,6 +2028,18 @@ type codexModel struct {
 	Model       string `json:"model"`
 	DisplayName string `json:"displayName"`
 	Hidden      bool   `json:"hidden"`
+}
+
+type codexCollaborationMode struct {
+	Name            string  `json:"name"`
+	Mode            string  `json:"mode"`
+	Model           *string `json:"model"`
+	ReasoningEffort *string `json:"reasoning_effort"`
+}
+
+type collaborationModeSelection struct {
+	Mode     string         `json:"mode"`
+	Settings map[string]any `json:"settings,omitempty"`
 }
 
 type codexApp struct {

@@ -129,7 +129,7 @@ type AppsListResponse = {
 };
 
 function shouldSkipSessionPreflight(agentProviderId?: string): boolean {
-  return agentProviderId === "codex";
+  return agentProviderId === "codex" || agentProviderId === "claude";
 }
 
 type AgentsListResponse = {
@@ -315,6 +315,7 @@ async function handleLocalServerConnection(
             : "Response ready";
           void sendPushNotification(userId, title, body, {
             type: "request_completed",
+            agentProviderId: responsePayload.agentProviderId,
             sessionId: responsePayload.sessionId,
             projectId: responsePayload.projectId,
             success: responsePayload.success,
@@ -327,6 +328,7 @@ async function handleLocalServerConnection(
             : "The request failed with an error";
           void sendPushNotification(userId, title, body, {
             type: "request_completed",
+            agentProviderId: responsePayload.agentProviderId,
             sessionId: responsePayload.sessionId,
             projectId: responsePayload.projectId,
             success: responsePayload.success,
@@ -435,6 +437,7 @@ async function handleLocalServerConnection(
     void sendPushNotification(userId, "Question Required", body, {
       type: "question_request",
       requestId: payload.requestId,
+      agentProviderId: payload.agentProviderId,
       projectId: payload.projectId,
       sessionId: payload.sessionId,
       jobId: payload.jobId,
@@ -593,6 +596,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
         ) {
           socket.emit("session_prompt_response", {
             requestId: data.requestId,
+            agentProviderId: data.agentProviderId,
             projectId: data.projectId,
             sessionId: data.sessionId,
             success: false,
@@ -620,6 +624,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
         if (!targetServerId) {
           socket.emit("session_prompt_response", {
             requestId: data.requestId,
+            agentProviderId: data.agentProviderId,
             projectId: data.projectId,
             sessionId: data.sessionId,
             success: false,
@@ -647,6 +652,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
           "session_prompt_response",
           data.requestId,
           {
+            agentProviderId: data.agentProviderId,
             projectId: data.projectId,
             sessionId: data.sessionId,
             success: false,
@@ -1226,6 +1232,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
     "agents_list_request",
     async (data: {
       requestId: string;
+      agentProviderId?: string;
       projectId?: string;
       directory?: string;
     }) => {
@@ -1235,6 +1242,7 @@ function handleMobileConnection(socket: Socket, userId: string): void {
           "agents_list_request",
           "agents_list_response",
           {
+            agentProviderId: data.agentProviderId,
             projectId: data.projectId,
             directory: data.directory,
           },

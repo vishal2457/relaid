@@ -13,8 +13,119 @@ import { useGitFileStatus } from "@/src/lib/api/git";
 import { getActiveSessionStream } from "@/src/lib/active-session-stream";
 
 const LAST_SELECTED_PROJECT_ID = "LAST_SELECTED_PROJECT_ID";
-const LAST_SELECTED_MODEL = "LAST_SELECTED_MODEL";
 const LAST_SELECTED_AGENT_BY_PROJECT = "LAST_SELECTED_AGENT_BY_PROJECT";
+const LAST_SELECTED_AGENT_PROVIDER_ID = "LAST_SELECTED_AGENT_PROVIDER_ID";
+const LAST_SELECTED_MODELS_BY_AGENT_PROVIDER =
+  "LAST_SELECTED_MODELS_BY_AGENT_PROVIDER";
+const LEGACY_LAST_SELECTED_MODEL = "LAST_SELECTED_MODEL";
+
+type StoredModelPreference = {
+  id?: string;
+  agentProviderId: string;
+  providerId: string;
+  modelId: string;
+};
+
+function toStoredModelPreference(model: ActiveModel): StoredModelPreference {
+  return {
+    id: model.id,
+    agentProviderId: model.agentProviderId,
+    providerId: model.providerId,
+    modelId: model.modelId,
+  };
+}
+
+function parseStoredModelPreferences(
+  raw: string | null,
+): Record<string, StoredModelPreference> {
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const preferences: Record<string, StoredModelPreference> = {};
+
+    for (const [agentProviderId, value] of Object.entries(parsed)) {
+      if (!value || typeof value !== "object") {
+        continue;
+      }
+
+      const candidate = value as Partial<StoredModelPreference>;
+      const resolvedAgentProviderId =
+        candidate.agentProviderId ?? agentProviderId;
+
+      if (
+        typeof resolvedAgentProviderId !== "string" ||
+        !resolvedAgentProviderId ||
+        typeof candidate.providerId !== "string" ||
+        !candidate.providerId ||
+        typeof candidate.modelId !== "string" ||
+        !candidate.modelId
+      ) {
+        continue;
+      }
+
+      preferences[resolvedAgentProviderId] = {
+        id: typeof candidate.id === "string" ? candidate.id : undefined,
+        agentProviderId: resolvedAgentProviderId,
+        providerId: candidate.providerId,
+        modelId: candidate.modelId,
+      };
+    }
+
+    return preferences;
+  } catch {
+    return {};
+  }
+}
+
+function findMatchingModel(
+  models: ActiveModel[],
+  preference?: StoredModelPreference | null,
+): ActiveModel | null {
+  if (!preference) {
+    return null;
+  }
+
+  return (
+    models.find(
+      (model) =>
+        (preference.id && model.id === preference.id) ||
+        (model.agentProviderId === preference.agentProviderId &&
+          model.providerId === preference.providerId &&
+          model.modelId === preference.modelId),
+    ) ?? null
+  );
+}
+
+function resolveModelForAgentProvider(
+  models: ActiveModel[],
+  agentProviderId: string,
+  preferences: Record<string, StoredModelPreference>,
+  current: ActiveModel | null = null,
+): ActiveModel | null {
+  const providerModels = models.filter(
+    (model) => model.agentProviderId === agentProviderId,
+  );
+
+  if (providerModels.length === 0) {
+    return null;
+  }
+
+  if (
+    current &&
+    current.agentProviderId === agentProviderId &&
+    providerModels.some((model) => model.id === current.id)
+  ) {
+    return current;
+  }
+
+  return (
+    findMatchingModel(providerModels, preferences[agentProviderId]) ??
+    providerModels[0]
+  );
+}
 
 function normalizeSearchValue(value: string): string {
   return value.toLowerCase().trim();
@@ -115,7 +226,12 @@ export function useChatSession(deps: HydrationDeps) {
   );
   const [activeAgent, setActiveAgent] = React.useState<Agent | null>(null);
   const [hydrated, setHydrated] = React.useState(false);
-  const [modelHydrated, setModelHydrated] = React.useState(false);
+  const [selectionHydrated, setSelectionHydrated] = React.useState(false);
+  const [selectedAgentProviderId, setSelectedAgentProviderId] = React.useState<
+    string | undefined
+  >(undefined);
+  const [selectedModelsByProvider, setSelectedModelsByProvider] =
+    React.useState<Record<string, StoredModelPreference>>({});
   const [modelSearchQuery, setModelSearchQuery] = React.useState("");
   const [agentSearchQuery, setAgentSearchQuery] = React.useState("");
   const [branchSearchQuery, setBranchSearchQuery] = React.useState("");
@@ -134,8 +250,13 @@ export function useChatSession(deps: HydrationDeps) {
     refetch: refetchProjects,
   } = useProjects();
   const { data: providers, isLoading: providersLoading } = useProviders();
+  const allModels = React.useMemo(
+    () => flattenProvidersToModels(providers ?? []),
+    [providers],
+  );
   const { data: agents = [], isLoading: agentsLoading } = useAgents(
     activeProject?.id ?? "",
+    selectedAgentProviderId,
     Boolean(activeProject),
   );
   const { data: gitFileStatus } = useGitFileStatus(
@@ -245,17 +366,6 @@ export function useChatSession(deps: HydrationDeps) {
     }
   }, [activeProject, hydrated]);
 
-  // Persist active model
-  React.useEffect(() => {
-    if (!hydrated || !modelHydrated) return;
-    if (activeModel) {
-      AsyncStorage.setItem(
-        LAST_SELECTED_MODEL,
-        JSON.stringify(activeModel),
-      ).catch(() => {});
-    }
-  }, [activeModel, hydrated, modelHydrated]);
-
   // Restore agent from storage on project/agents change
   React.useEffect(() => {
     if (!hydrated || !activeProject) {
@@ -326,38 +436,75 @@ export function useChatSession(deps: HydrationDeps) {
       .catch(() => {});
   }, [activeAgent, activeProject, hydrated]);
 
-  // Restore model from storage
   React.useEffect(() => {
-    if (!hydrated || !providers) return;
+    if (!hydrated || selectionHydrated || !providers) return;
 
     let cancelled = false;
 
     void (async () => {
       try {
-        const savedModelJson = await AsyncStorage.getItem(LAST_SELECTED_MODEL);
+        const [savedAgentProviderId, savedModelsJson, legacyModelJson] =
+          await Promise.all([
+            AsyncStorage.getItem(LAST_SELECTED_AGENT_PROVIDER_ID),
+            AsyncStorage.getItem(LAST_SELECTED_MODELS_BY_AGENT_PROVIDER),
+            AsyncStorage.getItem(LEGACY_LAST_SELECTED_MODEL),
+          ]);
         if (cancelled || !deps.isMountedRef.current) {
           return;
         }
 
-        if (savedModelJson) {
-          const savedModel = JSON.parse(savedModelJson) as ActiveModel;
-          const models = flattenProvidersToModels(providers);
-          const modelExists = models.find(
-            (model) =>
-              model.id === savedModel.id ||
-              (model.agentProviderId ===
-                (savedModel.agentProviderId ?? "opencode") &&
-                model.providerId === savedModel.providerId &&
-                model.modelId === (savedModel.modelId ?? savedModel.id)),
-          );
-          if (modelExists) {
-            setActiveModel(modelExists);
-          }
+        const nextSelectedModelsByProvider =
+          parseStoredModelPreferences(savedModelsJson);
+
+        if (legacyModelJson) {
+          try {
+            const legacyModel = JSON.parse(legacyModelJson) as ActiveModel;
+            if (
+              legacyModel &&
+              typeof legacyModel.agentProviderId === "string" &&
+              legacyModel.agentProviderId &&
+              typeof legacyModel.providerId === "string" &&
+              legacyModel.providerId &&
+              typeof legacyModel.modelId === "string" &&
+              legacyModel.modelId &&
+              !nextSelectedModelsByProvider[legacyModel.agentProviderId]
+            ) {
+              nextSelectedModelsByProvider[legacyModel.agentProviderId] =
+                toStoredModelPreference(legacyModel);
+            }
+          } catch {}
         }
+
+        const availableAgentProviderIds = new Set(
+          allModels.map((model) => model.agentProviderId),
+        );
+        const resolvedAgentProviderId =
+          [
+            savedAgentProviderId,
+            ...Object.keys(nextSelectedModelsByProvider),
+            allModels[0]?.agentProviderId,
+          ].find(
+            (candidate): candidate is string =>
+              typeof candidate === "string" &&
+              candidate.length > 0 &&
+              availableAgentProviderIds.has(candidate),
+          ) ?? undefined;
+
+        setSelectedModelsByProvider(nextSelectedModelsByProvider);
+        setSelectedAgentProviderId(resolvedAgentProviderId);
+        setActiveModel(
+          resolvedAgentProviderId
+            ? resolveModelForAgentProvider(
+                allModels,
+                resolvedAgentProviderId,
+                nextSelectedModelsByProvider,
+              )
+            : null,
+        );
       } catch {
       } finally {
         if (!cancelled && deps.isMountedRef.current) {
-          setModelHydrated(true);
+          setSelectionHydrated(true);
         }
       }
     })();
@@ -365,51 +512,137 @@ export function useChatSession(deps: HydrationDeps) {
     return () => {
       cancelled = true;
     };
-  }, [hydrated, providers, deps.isMountedRef]);
+  }, [allModels, hydrated, providers, selectionHydrated, deps.isMountedRef]);
 
   React.useEffect(() => {
-    const models = flattenProvidersToModels(providers ?? []);
-
-    if (models.length === 0) {
-      setActiveModel(null);
+    if (!selectionHydrated) {
       return;
     }
 
-    setActiveModel((current) => {
+    if (allModels.length === 0) {
+      setActiveModel(null);
+      setSelectedAgentProviderId(undefined);
+      return;
+    }
+
+    setSelectedAgentProviderId((current) => {
       if (
         current &&
-        models.some(
-          (model) =>
-            model.id === current.id && model.providerId === current.providerId,
-        )
+        allModels.some((model) => model.agentProviderId === current)
       ) {
         return current;
       }
 
-      return models[0];
+      return allModels[0]?.agentProviderId;
     });
-  }, [providers]);
+  }, [allModels, selectionHydrated]);
 
   React.useEffect(() => {
-    if (!hydrated || !activeModel || deps.activeSessionIdRef.current) {
+    if (!selectionHydrated || !selectedAgentProviderId) {
       return;
     }
 
-    deps.setActiveSessionAgentProviderId?.(activeModel.agentProviderId);
+    setActiveModel((current) =>
+      resolveModelForAgentProvider(
+        allModels,
+        selectedAgentProviderId,
+        selectedModelsByProvider,
+        current,
+      ),
+    );
   }, [
-    activeModel,
-    hydrated,
-    deps.activeSessionIdRef,
-    deps.setActiveSessionAgentProviderId,
+    allModels,
+    selectedAgentProviderId,
+    selectedModelsByProvider,
+    selectionHydrated,
   ]);
+
+  React.useEffect(() => {
+    if (!selectionHydrated || !activeModel) {
+      return;
+    }
+
+    setSelectedModelsByProvider((current) => {
+      const nextPreference = toStoredModelPreference(activeModel);
+      const existing = current[activeModel.agentProviderId];
+
+      if (
+        existing?.id === nextPreference.id &&
+        existing.providerId === nextPreference.providerId &&
+        existing.modelId === nextPreference.modelId
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [activeModel.agentProviderId]: nextPreference,
+      };
+    });
+  }, [activeModel, selectionHydrated]);
+
+  React.useEffect(() => {
+    if (!hydrated || !selectionHydrated) {
+      return;
+    }
+
+    if (selectedAgentProviderId) {
+      AsyncStorage.setItem(
+        LAST_SELECTED_AGENT_PROVIDER_ID,
+        selectedAgentProviderId,
+      ).catch(() => {});
+      return;
+    }
+
+    AsyncStorage.removeItem(LAST_SELECTED_AGENT_PROVIDER_ID).catch(() => {});
+  }, [hydrated, selectedAgentProviderId, selectionHydrated]);
+
+  React.useEffect(() => {
+    if (!hydrated || !selectionHydrated) {
+      return;
+    }
+
+    AsyncStorage.setItem(
+      LAST_SELECTED_MODELS_BY_AGENT_PROVIDER,
+      JSON.stringify(selectedModelsByProvider),
+    ).catch(() => {});
+  }, [hydrated, selectedModelsByProvider, selectionHydrated]);
+
+  const ensureModelForAgentProvider = React.useCallback(
+    (agentProviderId: string) => {
+      setActiveModel((current) =>
+        resolveModelForAgentProvider(
+          allModels,
+          agentProviderId,
+          selectedModelsByProvider,
+          current,
+        ),
+      );
+    },
+    [allModels, selectedModelsByProvider],
+  );
+
+  const handleSelectAgentProvider = React.useCallback(
+    (agentProviderId: string) => {
+      setSelectedAgentProviderId(agentProviderId);
+      setActiveModel((current) =>
+        resolveModelForAgentProvider(
+          allModels,
+          agentProviderId,
+          selectedModelsByProvider,
+          current,
+        ),
+      );
+    },
+    [allModels, selectedModelsByProvider],
+  );
 
   // Sorted/filtered lists
   const sortedModels = React.useMemo(() => {
-    const models = flattenProvidersToModels(providers ?? []);
     const normalizedQuery = normalizeSearchValue(modelSearchQuery);
 
     const filtered = normalizedQuery
-      ? models
+      ? allModels
           .map((model) => ({
             model,
             score: getModelSearchScore(model, normalizedQuery),
@@ -422,7 +655,7 @@ export function useChatSession(deps: HydrationDeps) {
             return a.model.name.localeCompare(b.model.name);
           })
           .map((entry) => entry.model)
-      : models;
+      : allModels;
 
     if (!activeModel) {
       return filtered;
@@ -435,7 +668,7 @@ export function useChatSession(deps: HydrationDeps) {
       return 0;
     });
     return sorted;
-  }, [providers, activeModel, modelSearchQuery]);
+  }, [allModels, activeModel, modelSearchQuery]);
 
   const sortedModelGroups = React.useMemo(
     () => groupModelsByRuntime(sortedModels),
@@ -527,6 +760,7 @@ export function useChatSession(deps: HydrationDeps) {
   );
 
   const handleSelectModel = React.useCallback((item: ActiveModel) => {
+    setSelectedAgentProviderId(item.agentProviderId);
     setActiveModel(item);
     setShowProviderSheet(false);
     setModelSearchQuery("");
@@ -543,9 +777,8 @@ export function useChatSession(deps: HydrationDeps) {
     activeProject,
     setActiveProject,
     activeModel,
-    setActiveModel,
+    selectedAgentProviderId,
     activeAgent,
-    setActiveAgent,
     hydrated,
     // Refs
     activeProjectRef,
@@ -586,10 +819,12 @@ export function useChatSession(deps: HydrationDeps) {
     handleOpenProjectSheet,
     handleCloseProviderSheet,
     handleOpenProviderSheet,
+    handleSelectAgentProvider,
     handleCloseAgentSheet,
     handleOpenAgentSheet,
     handleCloseBranchSheet,
     handleOpenBranchSheet,
+    ensureModelForAgentProvider,
     handleSelectModel,
     handleSelectAgent,
   };

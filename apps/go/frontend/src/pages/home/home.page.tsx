@@ -1,7 +1,11 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
+  Download,
   Eye,
   EyeOff,
+  FolderOpen,
+  FolderPlus,
   Link2,
   RefreshCw,
   Settings,
@@ -10,9 +14,14 @@ import {
   WifiOff,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
-import { Link } from "react-router-dom";
 import { Button } from "../../shared/components/ui/button";
 import { Input } from "../../shared/components/ui/input";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "../../shared/components/ui/accordion";
 import {
   Dialog,
   DialogContent,
@@ -28,10 +37,28 @@ import {
   useRelayHooks,
   useConnectedClients,
   useDesktopStatus,
+  useNodeBridgeActions,
 } from "../../shared/api/features/relay.api";
-import { ROUTES_PATH } from "../../routes/routes";
+
+type Workspace = {
+  id: string;
+  name: string;
+  description?: string;
+  directory: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const getApp = () => {
+  const app = (window as any).go?.main?.App;
+  if (!app) {
+    throw new Error("Wails App not initialized");
+  }
+  return app;
+};
 
 export const HomePage = () => {
+  const queryClient = useQueryClient();
   const [relayUrl, setRelayUrl] = useState("");
   const [showConfigDialog, setShowConfigDialog] = useState(false);
   const [showQrDialog, setShowQrDialog] = useState(false);
@@ -59,6 +86,50 @@ export const HomePage = () => {
     isLoading: isDesktopStatusLoading,
     error: desktopStatusError,
   } = useDesktopStatus();
+  const {
+    downloadNode,
+    isDownloading,
+  } = useNodeBridgeActions();
+
+  const nodeStatus = desktopStatus?.node;
+  const bridgeStatus = desktopStatus?.bridge;
+  const visibleNodeError =
+    nodeStatus?.error && nodeStatus.error !== "signal: killed"
+      ? nodeStatus.error
+      : null;
+  const visibleBridgeError =
+    bridgeStatus?.error && bridgeStatus.error !== "signal: killed"
+      ? bridgeStatus.error
+      : null;
+  const visibleDesktopStatusError =
+    desktopStatusError && desktopStatusError !== "signal: killed"
+      ? desktopStatusError
+      : null;
+  const defaultSection = isConnected ? "clients" : "relay";
+
+  const workspaceQuery = useQuery<Workspace[]>({
+    queryKey: ["desktop-workspaces"],
+    queryFn: async () => {
+      const app = getApp();
+      return (await app.ListWorkspaces()) ?? [];
+    },
+  });
+
+  const createWorkspace = useMutation({
+    mutationFn: async () => {
+      const app = getApp();
+      const directory = await app.SelectWorkspaceDirectory();
+      if (!directory) {
+        return null;
+      }
+      return await app.CreateWorkspace(directory);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["desktop-workspaces"] });
+    },
+  });
+
+  const workspaces = workspaceQuery.data ?? [];
 
   const statusColor = isConnected
     ? "text-green-500"
@@ -93,6 +164,21 @@ export const HomePage = () => {
       : "text-muted-foreground";
   const CodexStatusIcon = codexConnected ? Wifi : WifiOff;
   const codexStatusLabel = codexConnected ? "Connected" : "Disconnected";
+  const claudeAvailable = desktopStatus?.claude.available ?? false;
+  const claudeConnected = desktopStatus?.claude.connected ?? false;
+  const claudeStatusColor = claudeConnected
+    ? "text-green-500"
+    : claudeAvailable
+      ? "text-yellow-500"
+      : "text-muted-foreground";
+  const cursorConnected = false;
+  const ClaudeStatusIcon = claudeConnected ? Wifi : WifiOff;
+  const CursorStatusIcon = cursorConnected ? Wifi : WifiOff;
+
+  const handleDownloadNode = async () => {
+    await downloadNode("");
+    await refreshDesktopStatus();
+  };
 
   const openConfigDialog = () => {
     setRelayUrl(storedUrl);
@@ -117,71 +203,142 @@ export const HomePage = () => {
 
   return (
     <div className="container mx-auto max-w-lg py-8">
-      <div className="space-y-6">
-        <section className="rounded-lg border p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-            Relay
-          </h2>
+      <Accordion
+        type="single"
+        collapsible
+        defaultValue={defaultSection}
+        className="space-y-4"
+      >
+        {isConnected ? (
+          <AccordionItem value="clients" className="rounded-lg border px-5">
+            <AccordionTrigger className="py-5 hover:no-underline">
+              <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                <Smartphone className="h-4 w-4" />
+                Clients
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className={`flex items-center gap-2 text-sm ${statusColor}`}>
+                  <StatusIcon className="h-4 w-4" />
+                  {statusLabel}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCreatePairing}
+                        disabled={!storedUrl || isCreating}
+                      >
+                        <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                        Pair
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Pair a new client</TooltipContent>
+                  </Tooltip>
 
-          <div className="flex items-center justify-between">
-            <div className={`flex items-center gap-2 text-sm ${statusColor}`}>
-              <StatusIcon className="h-4 w-4" />
-              {statusLabel}
-            </div>
-
-            <div className="inline-flex rounded-md shadow-sm" role="group">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-r-none border-r-0"
-                    onClick={pingRelay}
-                    disabled={!storedUrl || isPinging}
-                  >
-                    <RefreshCw
-                      className={`h-3.5 w-3.5 ${isPinging ? "animate-spin" : ""}`}
-                    />
+                  <Button variant="ghost" size="sm" onClick={refreshClients}>
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                    Refresh
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent>Ping</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-none"
-                    onClick={openConfigDialog}
-                  >
-                    <Settings className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Configure</TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-        </section>
+                </div>
+              </div>
 
-        <section className="rounded-lg border p-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              {clients.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No clients connected
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {clients.map((client) => (
+                    <li
+                      key={client.connectionId}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      <span>Mobile Client</span>
+                      <span className="text-muted-foreground font-mono text-xs">
+                        {client.connectionId}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </AccordionContent>
+          </AccordionItem>
+        ) : null}
+
+        <AccordionItem value="relay" className="rounded-lg border px-5">
+          <AccordionTrigger className="py-5 hover:no-underline">
+            <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              Relay Server
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="pb-5">
+            <div className="flex items-center justify-between">
+              <div className={`flex items-center gap-2 text-sm ${statusColor}`}>
+                <StatusIcon className="h-4 w-4" />
+                {statusLabel}
+              </div>
+
+              <div className="inline-flex rounded-md shadow-sm" role="group">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-r-none border-r-0"
+                      onClick={pingRelay}
+                      disabled={!storedUrl || isPinging}
+                    >
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${isPinging ? "animate-spin" : ""}`}
+                      />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Ping</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-none"
+                      onClick={openConfigDialog}
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Configure</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="providers" className="rounded-lg border px-5">
+          <AccordionTrigger className="py-5 hover:no-underline">
+            <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               Provider Status
-            </h2>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="pb-5">
+            <div className="flex items-center justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshDesktopStatus}
+                disabled={isDesktopStatusLoading}
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${isDesktopStatusLoading ? "animate-spin" : ""}`}
+                />
+              </Button>
+            </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={refreshDesktopStatus}
-              disabled={isDesktopStatusLoading}
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${isDesktopStatusLoading ? "animate-spin" : ""}`}
-              />
-            </Button>
-          </div>
-
-          <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-3">
             <div className="flex items-center justify-between rounded-md border px-3 py-2">
               <span className="text-sm text-foreground">OpenCode</span>
               <div className={`flex items-center gap-2 text-sm ${opencodeStatusColor}`}>
@@ -197,70 +354,108 @@ export const HomePage = () => {
                 <span>{codexStatusLabel}</span>
               </div>
             </div>
-          </div>
-          <p className="mt-3 text-xs leading-5 text-muted-foreground">
-            Start OpenCode on this desktop first, then press refresh here. Once
-            it shows connected, pair the mobile app from the Relay section above
-            and the model picker in mobile will populate automatically.
-          </p>
-          {desktopStatusError ? (
-            <p className="mt-2 text-xs text-red-500">{desktopStatusError}</p>
-          ) : null}
-        </section>
 
-        {isConnected && (
-          <section className="rounded-lg border p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                <Smartphone className="h-4 w-4" />
-                Clients
-              </h2>
-              <div className="flex items-center gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleCreatePairing}
-                      disabled={!storedUrl || isCreating}
-                    >
-                      <Link2 className="mr-1.5 h-3.5 w-3.5" />
-                      Pair
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Pair a new client</TooltipContent>
-                </Tooltip>
-
-                <Button variant="ghost" size="sm" onClick={refreshClients}>
-                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  Refresh
-                </Button>
+            <div className="flex items-center justify-between rounded-md border px-3 py-2">
+              <span className="text-sm text-foreground">Claude Code</span>
+              <div className={`flex items-center gap-2 text-sm ${claudeStatusColor}`}>
+                <ClaudeStatusIcon className="h-4 w-4" />
+                <span>{claudeConnected ? "Connected" : "Disconnected"}</span>
               </div>
             </div>
 
-            {clients.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No clients connected
-              </p>
-            ) : (
-              <ul className="space-y-1.5">
-                {clients.map((client) => (
-                  <li
-                    key={client.connectionId}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    <span>Mobile Client</span>
-                    <span className="text-muted-foreground font-mono text-xs">
-                      {client.connectionId}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
-      </div>
+            <div className="flex items-center justify-between rounded-md border px-3 py-2">
+              <span className="text-sm text-foreground">Cursor SDK</span>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <CursorStatusIcon className="h-4 w-4" />
+                <span>{cursorConnected ? "Connected" : "Disconnected"}</span>
+              </div>
+            </div>
+          </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {!nodeStatus?.compatible && !bridgeStatus?.running ? (
+                <Button size="sm" onClick={handleDownloadNode} disabled={isDownloading}>
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  {isDownloading ? "Setting up..." : "Setup Claude/Cursor Runtime"}
+                </Button>
+              ) : null}
+            </div>
+            {visibleNodeError && !nodeStatus?.compatible ? (
+              <p className="mt-2 text-xs text-yellow-500">{visibleNodeError}</p>
+            ) : null}
+            {visibleBridgeError ? (
+              <p className="mt-2 text-xs text-red-500">{visibleBridgeError}</p>
+            ) : null}
+            {visibleDesktopStatusError ? (
+              <p className="mt-2 text-xs text-red-500">{visibleDesktopStatusError}</p>
+            ) : null}
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="workspaces" className="rounded-lg border px-5">
+          <AccordionTrigger className="py-5 hover:no-underline">
+            <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              Workspaces
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="pb-5">
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => workspaceQuery.refetch()}
+                disabled={workspaceQuery.isFetching}
+                size="sm"
+              >
+                <RefreshCw
+                  className={`mr-2 h-4 w-4 ${workspaceQuery.isFetching ? "animate-spin" : ""}`}
+                />
+                Refresh
+              </Button>
+              <Button
+                onClick={() => createWorkspace.mutate()}
+                disabled={createWorkspace.isPending}
+                size="sm"
+              >
+                <FolderPlus className="mr-2 h-4 w-4" />
+                Add Workspace
+              </Button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {workspaces.length === 0 && !workspaceQuery.isLoading ? (
+                <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  No workspaces yet. Add a local folder to start managing it here.
+                </div>
+              ) : null}
+
+              {workspaces.map((workspace) => (
+                <div
+                  key={workspace.id}
+                  className="rounded-xl border bg-card/60 p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <FolderOpen className="h-4 w-4 text-muted-foreground" />
+                        <h2 className="truncate text-base font-medium">
+                          {workspace.name}
+                        </h2>
+                      </div>
+                      <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
+                        {workspace.directory}
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground">
+                      <div>
+                        Updated {new Date(workspace.updatedAt).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
 
       <Dialog open={showConfigDialog} onOpenChange={setShowConfigDialog}>
         <DialogContent className="sm:max-w-md">

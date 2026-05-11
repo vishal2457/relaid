@@ -203,6 +203,8 @@ func runtimeProviderName(provider agent.AgentProvider) string {
 		return "opencode"
 	case agent.ProviderCodex:
 		return "codex"
+	case agent.ProviderClaude:
+		return "claude"
 	default:
 		return string(provider.ID())
 	}
@@ -411,14 +413,37 @@ func (h *Handler) handleProjectFileSearch(args []json.RawMessage) {
 		return
 	}
 
-	provider, err := h.getProvider()
+	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emitError(req.RequestID, "PROVIDER_ERROR", err.Error())
 		return
 	}
 
-	_, opencodeProjectID, err := h.resolveOpencodeProjectID(req.ProjectID)
-	if err != nil {
+	searchProjectID := req.ProjectID
+	if provider.ID() == agent.ProviderOpencode {
+		_, opencodeProjectID, err := h.resolveOpencodeProjectID(req.ProjectID)
+		if err != nil {
+			h.emit(EventProjectFileSearchResponse, ProjectFileSearchResponse{
+				RequestID: req.RequestID,
+				Results:   []ProjectFileMatch{},
+			})
+			return
+		}
+		searchProjectID = opencodeProjectID
+	} else {
+		worktree, err := h.resolveWorktree(req.ProjectID)
+		if err != nil {
+			h.emit(EventProjectFileSearchResponse, ProjectFileSearchResponse{
+				RequestID: req.RequestID,
+				Results:   []ProjectFileMatch{},
+			})
+			return
+		}
+		searchProjectID = worktree
+	}
+
+	projectService := provider.Projects()
+	if projectService == nil {
 		h.emit(EventProjectFileSearchResponse, ProjectFileSearchResponse{
 			RequestID: req.RequestID,
 			Results:   []ProjectFileMatch{},
@@ -426,7 +451,7 @@ func (h *Handler) handleProjectFileSearch(args []json.RawMessage) {
 		return
 	}
 
-	matches, err := provider.Projects().FileSearch(context.Background(), opencodeProjectID, req.Query, req.Limit)
+	matches, err := projectService.FileSearch(context.Background(), searchProjectID, req.Query, req.Limit)
 	if err != nil {
 		h.emit(EventProjectFileSearchResponse, ProjectFileSearchResponse{
 			RequestID: req.RequestID,

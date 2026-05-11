@@ -287,7 +287,7 @@
     }
 
     body {
-        @apply overflow-hidden bg-background text-foreground;
+        @apply overflow-y-auto overflow-x-hidden bg-background text-foreground;
     }
 
     .draglayer {

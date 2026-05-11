@@ -124,7 +124,12 @@ func fileSearch(registry RegistryProvider, workspaces *workspace.Service) echo.H
 			return err
 		}
 
-		provider, err := registry.Get(agent.ProviderOpencode)
+		providerID := agent.ProviderID(c.QueryParam("agentProviderId"))
+		if providerID == "" {
+			providerID = agent.ProviderOpencode
+		}
+
+		provider, err := registry.Get(providerID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusNotFound, "Provider not found")
 		}
@@ -141,12 +146,21 @@ func fileSearch(registry RegistryProvider, workspaces *workspace.Service) echo.H
 			}
 		}
 
-		projectID, err := workspaces.EnsureOpencodeProjectID(c.Request().Context(), provider, workspaceItem)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		searchProjectID := workspaceItem.Directory
+		if provider.ID() == agent.ProviderOpencode {
+			projectID, err := workspaces.EnsureOpencodeProjectID(c.Request().Context(), provider, workspaceItem)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			}
+			searchProjectID = projectID
 		}
 
-		matches, err := provider.Projects().FileSearch(c.Request().Context(), projectID, query, limit)
+		projectService := provider.Projects()
+		if projectService == nil {
+			return echo.NewHTTPError(http.StatusNotImplemented, "Provider file search is not available")
+		}
+
+		matches, err := projectService.FileSearch(c.Request().Context(), searchProjectID, query, limit)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}

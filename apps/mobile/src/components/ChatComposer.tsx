@@ -209,7 +209,8 @@ export function ChatComposer({
     fileSuggestions && fileSuggestions.length > 0,
   );
   const hasAppSuggestions = Boolean(appSuggestions && appSuggestions.length > 0);
-  const showMentionLoading = fileSuggestionsLoading || appSuggestionsLoading;
+  const showMentionLoading =
+    fileSuggestionsLoading || (appSuggestionsLoading && !hasFileSuggestions);
 
   return (
     <View
@@ -345,6 +346,10 @@ export function ChatComposer({
                     </Pressable>
                   ))}
                 </>
+              ) : appSuggestionsLoading && !hasFileSuggestions ? (
+                <View style={styles.mentionEmptyState}>
+                  <ActivityIndicator size="small" />
+                </View>
               ) : null}
             </ScrollView>
           ) : !mentionQuery.trim() ? (
@@ -706,7 +711,8 @@ const styles = StyleSheet.create({
   mentionSectionLabel: {
     fontWeight: "700",
     letterSpacing: 0.6,
-    marginBottom: 6,
+    marginVertical: 6,
+    marginLeft: 12,
     textTransform: "uppercase",
   },
   mentionPanel: {

@@ -10,7 +10,9 @@ import (
 	"sync"
 
 	"relaid/internal/agent"
+	"relaid/internal/bridge"
 	"relaid/internal/config"
+	claudeprovider "relaid/internal/providers/claude"
 	codexprovider "relaid/internal/providers/codex"
 	opencodeprovider "relaid/internal/providers/opencode"
 	agentsroute "relaid/internal/routes/agents"
@@ -33,7 +35,7 @@ type Server struct {
 	mu         sync.RWMutex
 }
 
-func New(cfg config.Config, workspaces *workspace.Service) *Server {
+func New(cfg config.Config, workspaces *workspace.Service, bridgeMgr *bridge.Manager) *Server {
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -53,6 +55,7 @@ func New(cfg config.Config, workspaces *workspace.Service) *Server {
 		registry: agent.NewRegistry(
 			opencodeprovider.New(cfg, log.Default()),
 			codexprovider.New(cfg, log.Default()),
+			claudeprovider.New(cfg, bridgeMgr, workspaces, log.Default()),
 		),
 		workspaces: workspaces,
 		echo:       e,

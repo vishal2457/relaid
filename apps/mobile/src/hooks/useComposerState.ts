@@ -91,18 +91,20 @@ export function useComposerState(
     useProjectFileSearch(
       activeProjectId ?? "",
       deferredMentionQuery,
+      activeAgentProviderId,
       Boolean(activeProjectId && activeMention && deferredMentionQuery.trim()),
     );
-  const isCodexMentionContext = activeAgentProviderId === "codex";
+  const isAppMentionContext =
+    activeAgentProviderId === "codex" || activeAgentProviderId === "claude";
   const { data: availableApps, isLoading: appSuggestionsLoading } =
     useProviderApps(
-      "codex",
+      activeAgentProviderId === "claude" ? "claude" : "codex",
       activeSessionId ?? undefined,
       activeProjectId,
-      Boolean(activeMention && isCodexMentionContext),
+      Boolean(activeMention && isAppMentionContext),
     );
   const appSuggestions = React.useMemo(() => {
-    if (!isCodexMentionContext) {
+    if (!isAppMentionContext) {
       return [];
     }
 
@@ -139,7 +141,7 @@ export function useComposerState(
       .sort((left, right) => right.score - left.score)
       .map((entry) => entry.app)
       .slice(0, 12);
-  }, [availableApps, deferredMentionQuery, isCodexMentionContext]);
+  }, [availableApps, deferredMentionQuery, isAppMentionContext]);
 
   const activeSlash = React.useMemo(() => {
     if (!inputText.startsWith("/")) return null;

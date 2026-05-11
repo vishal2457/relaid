@@ -48,7 +48,7 @@ type SessionAbortRequest = {
 const router: Router = Router();
 
 function shouldSkipSessionPreflight(agentProviderId?: string): boolean {
-  return agentProviderId === "codex";
+  return agentProviderId === "codex" || agentProviderId === "claude";
 }
 
 function handleRouteError(
@@ -102,6 +102,7 @@ router.post(
       ) {
         broadcastToUser(userId, "session_prompt_response", {
           requestId,
+          agentProviderId,
           projectId,
           sessionId,
           success: false,
@@ -133,6 +134,7 @@ router.post(
       if (!targetServerId) {
         broadcastToUser(userId, "session_prompt_response", {
           requestId,
+          agentProviderId,
           projectId,
           sessionId,
           success: false,
@@ -173,6 +175,7 @@ router.post(
         const errMsg = error instanceof Error ? error.message : String(error);
         broadcastToUser(userId, "session_prompt_response", {
           requestId,
+          agentProviderId,
           projectId,
           sessionId,
           success: false,

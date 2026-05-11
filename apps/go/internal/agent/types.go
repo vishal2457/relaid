@@ -12,6 +12,7 @@ type ProviderID string
 
 const ProviderOpencode ProviderID = "opencode"
 const ProviderCodex ProviderID = "codex"
+const ProviderClaude ProviderID = "claude"
 
 type CapabilitySet struct {
 	ProjectsList   bool `json:"projectsList"`

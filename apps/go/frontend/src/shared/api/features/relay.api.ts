@@ -8,6 +8,14 @@ const getApp = () => {
   return app;
 };
 
+const getAppSafely = () => {
+  try {
+    return getApp();
+  } catch {
+    return null;
+  }
+};
+
 export interface MobileClient {
   connectionId: string;
 }
@@ -32,6 +40,30 @@ export interface DesktopStatus {
     baseUrl: string;
     healthy: boolean;
   };
+  node: {
+    found: boolean;
+    compatible: boolean;
+    source: "system" | "managed" | "none";
+    version: string;
+    binaryPath: string;
+    installPath: string;
+    state:
+      | "not_found"
+      | "incompatible"
+      | "ready"
+      | "downloading"
+      | "installing"
+      | "failed";
+    error?: string;
+  };
+  bridge: {
+    installed: boolean;
+    running: boolean;
+    state: "stopped" | "starting" | "running" | "failed";
+    pid?: number;
+    entrypoint: string;
+    error?: string;
+  };
   opencode: {
     available: boolean;
     connected: boolean;
@@ -42,6 +74,15 @@ export interface DesktopStatus {
     errors?: string[];
   };
   codex: {
+    available: boolean;
+    connected: boolean;
+    statusMessage?: string;
+    providers: DesktopProviderStatus[];
+    agents: DesktopAgentStatus[];
+    availableTools: string[];
+    errors?: string[];
+  };
+  claude: {
     available: boolean;
     connected: boolean;
     statusMessage?: string;
@@ -209,5 +250,59 @@ export const useDesktopStatus = () => {
     isLoading,
     error,
     refresh: fetchStatus,
+  };
+};
+
+export const useNodeBridgeActions = () => {
+  const [isDownloading, setIsDownloading] = useState<boolean>(false);
+  const [isStarting, setIsStarting] = useState<boolean>(false);
+  const [isStopping, setIsStopping] = useState<boolean>(false);
+
+  const downloadNode = useCallback(async (version = "") => {
+    const App = getAppSafely();
+    if (!App) {
+      throw new Error("Wails App not initialized");
+    }
+    setIsDownloading(true);
+    try {
+      return await App.DownloadNodeRuntime(version);
+    } finally {
+      setIsDownloading(false);
+    }
+  }, []);
+
+  const startBridge = useCallback(async () => {
+    const App = getAppSafely();
+    if (!App) {
+      throw new Error("Wails App not initialized");
+    }
+    setIsStarting(true);
+    try {
+      return await App.StartBridge();
+    } finally {
+      setIsStarting(false);
+    }
+  }, []);
+
+  const stopBridge = useCallback(async () => {
+    const App = getAppSafely();
+    if (!App) {
+      throw new Error("Wails App not initialized");
+    }
+    setIsStopping(true);
+    try {
+      return await App.StopBridge();
+    } finally {
+      setIsStopping(false);
+    }
+  }, []);
+
+  return {
+    downloadNode,
+    startBridge,
+    stopBridge,
+    isDownloading,
+    isStarting,
+    isStopping,
   };
 };

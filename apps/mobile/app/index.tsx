@@ -208,6 +208,14 @@ export default function ChatScreen() {
     setOptimisticMessage: () => setOptimisticMessage(null),
     resetStreamingContent,
   });
+  const {
+    activeProjectRef: sessionActiveProjectRef,
+    projects: sessionProjects,
+    projectsRef: sessionProjectsRef,
+    setActiveProject,
+    refetchProjects,
+    ensureModelForAgentProvider,
+  } = session;
 
   const [, setConnectionState] =
     React.useState<ConnectionState>("disconnected");
@@ -216,11 +224,13 @@ export default function ChatScreen() {
   const appStateRef = React.useRef<AppStateStatus>(AppState.currentState);
 
   const createSessionMutation = useCreateSession();
-  const selectedModelAgentProviderId = session.activeModel?.agentProviderId;
-  const activeModelAgentProviderId = session.activeModel?.agentProviderId;
-  const setActiveModel = session.setActiveModel;
+  // Draft selections drive new sessions; active sessions temporarily lock the provider.
+  const draftAgentProviderId =
+    session.selectedAgentProviderId ?? session.activeModel?.agentProviderId;
   const activeLookupAgentProviderId =
-    activeSessionAgentProviderId ?? selectedModelAgentProviderId;
+    activeSessionId
+      ? activeSessionAgentProviderId ?? draftAgentProviderId
+      : draftAgentProviderId;
   const composer = useComposerState(
     session.activeProject?.id,
     activeLookupAgentProviderId,
@@ -234,44 +244,26 @@ export default function ChatScreen() {
     () => groupModelsByRuntime(allModels),
     [allModels],
   );
-  const lockedAgentProviderId = activeSessionId
-    ? activeLookupAgentProviderId
-    : activeSessionAgentProviderId;
   const selectedAgentProvider = React.useMemo(() => {
-    if (!lockedAgentProviderId) {
+    if (!activeLookupAgentProviderId) {
       return availableAgentProviders[0] ?? null;
     }
 
     return (
       availableAgentProviders.find(
-        (provider) => provider.agentProviderId === lockedAgentProviderId,
+        (provider) => provider.agentProviderId === activeLookupAgentProviderId,
       ) ?? null
     );
-  }, [availableAgentProviders, lockedAgentProviderId]);
+  }, [activeLookupAgentProviderId, availableAgentProviders]);
   const visibleModelGroups = React.useMemo(() => {
-    if (!lockedAgentProviderId) {
+    if (!activeLookupAgentProviderId) {
       return session.sortedModelGroups;
     }
 
     return session.sortedModelGroups.filter(
-      (group) => group.agentProviderId === lockedAgentProviderId,
+      (group) => group.agentProviderId === activeLookupAgentProviderId,
     );
-  }, [lockedAgentProviderId, session.sortedModelGroups]);
-  const ensureModelForAgentProvider = React.useCallback(
-    (agentProviderId: string) => {
-      if (activeModelAgentProviderId === agentProviderId) {
-        return;
-      }
-
-      const fallbackModel = allModels.find(
-        (model) => model.agentProviderId === agentProviderId,
-      );
-      if (fallbackModel) {
-        setActiveModel(fallbackModel);
-      }
-    },
-    [activeModelAgentProviderId, allModels, setActiveModel],
-  );
+  }, [activeLookupAgentProviderId, session.sortedModelGroups]);
 
   React.useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -282,37 +274,12 @@ export default function ChatScreen() {
   }, [activeLookupAgentProviderId]);
 
   React.useEffect(() => {
-    if (activeSessionId) {
+    if (!activeLookupAgentProviderId) {
       return;
     }
 
-    const defaultAgentProviderId =
-      selectedModelAgentProviderId ??
-      availableAgentProviders[0]?.agentProviderId ??
-      null;
-    if (!defaultAgentProviderId) {
-      return;
-    }
-
-    if (activeSessionAgentProviderId === defaultAgentProviderId) {
-      return;
-    }
-
-    setActiveSessionAgentProviderId(defaultAgentProviderId);
-  }, [
-    activeSessionAgentProviderId,
-    activeSessionId,
-    availableAgentProviders,
-    selectedModelAgentProviderId,
-  ]);
-
-  React.useEffect(() => {
-    if (!lockedAgentProviderId) {
-      return;
-    }
-
-    ensureModelForAgentProvider(lockedAgentProviderId);
-  }, [ensureModelForAgentProvider, lockedAgentProviderId]);
+    ensureModelForAgentProvider(activeLookupAgentProviderId);
+  }, [activeLookupAgentProviderId, ensureModelForAgentProvider]);
 
   React.useEffect(() => {
     pendingRequestIdsRef.current = pendingRequestIds;
@@ -382,7 +349,7 @@ export default function ChatScreen() {
       return;
     }
 
-    const availableProjects = session.projectsRef.current ?? session.projects ?? [];
+    const availableProjects = sessionProjectsRef.current ?? sessionProjects ?? [];
     const targetProjectId = notificationSession?.projectID ?? notificationProjectId;
     const targetProject = availableProjects.find(
       (project) => project.id === targetProjectId,
@@ -392,8 +359,8 @@ export default function ChatScreen() {
       return;
     }
 
-    if (session.activeProjectRef.current?.id !== targetProject.id) {
-      session.setActiveProject(targetProject);
+    if (sessionActiveProjectRef.current?.id !== targetProject.id) {
+      setActiveProject(targetProject);
     }
 
     const targetAgentProviderId =
@@ -411,8 +378,10 @@ export default function ChatScreen() {
     notificationProjectId,
     notificationSession,
     notificationSessionId,
-    session.projects,
-    session.setActiveProject,
+    sessionActiveProjectRef,
+    sessionProjects,
+    sessionProjectsRef,
+    setActiveProject,
   ]);
   React.useEffect(() => {
     if (messages && messages.length > 0 && !hasScrolledToBottom.current) {
@@ -504,7 +473,7 @@ export default function ChatScreen() {
 
     setIsRefreshing(true);
     try {
-      const refreshTasks: Promise<unknown>[] = [session.refetchProjects()];
+      const refreshTasks: Promise<unknown>[] = [refetchProjects()];
 
       if (activeSessionIdRef.current) {
         refreshTasks.push(refetch(), refetchActiveSession());
@@ -514,7 +483,7 @@ export default function ChatScreen() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, refetch, refetchActiveSession, session.refetchProjects]);
+  }, [isRefreshing, refetch, refetchActiveSession, refetchProjects]);
 
   const handleToggleMenu = React.useCallback(() => {
     setMenuExpanded((prev) => !prev);
@@ -962,7 +931,7 @@ export default function ChatScreen() {
     let sessionId = activeSessionId;
     const isCreatingSession = !sessionId;
     const requestAgentProviderId =
-      activeSessionAgentProviderId ?? session.activeModel?.agentProviderId;
+      activeLookupAgentProviderId ?? session.activeModel?.agentProviderId;
 
     setOptimisticMessage({
       id: optimisticMessageId,
@@ -1054,7 +1023,7 @@ export default function ChatScreen() {
     }
   }, [
     session.activeProject,
-    activeSessionAgentProviderId,
+    activeLookupAgentProviderId,
     activeSessionId,
     isSessionSending,
     pendingRequestIds,
@@ -1490,6 +1459,7 @@ export default function ChatScreen() {
             clearPendingStreamState();
             session.setActiveProject(item);
             setActiveSessionId(null);
+            setActiveSessionAgentProviderId(undefined);
             setOptimisticMessage(null);
             hasScrolledToBottom.current = false;
           }
@@ -1514,8 +1484,7 @@ export default function ChatScreen() {
         activeAgentProviderId={selectedAgentProvider?.agentProviderId}
         onClose={handleCloseAgentProviderSheet}
         onSelectProvider={(provider) => {
-          setActiveSessionAgentProviderId(provider.agentProviderId);
-          ensureModelForAgentProvider(provider.agentProviderId);
+          session.handleSelectAgentProvider(provider.agentProviderId);
           setShowAgentProviderSheet(false);
         }}
       />
@@ -1558,12 +1527,13 @@ export default function ChatScreen() {
             activeSessionIdRef.current = null;
             clearPendingStreamState();
             setActiveSessionId(null);
+            setActiveSessionAgentProviderId(undefined);
             setOptimisticMessage(null);
             hasScrolledToBottom.current = false;
           } else {
             clearRequestRecoveryTimeout();
             setActiveSessionAgentProviderId(
-              sessionAgentProviderId ?? selectedModelAgentProviderId,
+              sessionAgentProviderId ?? draftAgentProviderId,
             );
             setActiveSessionId(sessionId);
             activeSessionIdRef.current = sessionId;

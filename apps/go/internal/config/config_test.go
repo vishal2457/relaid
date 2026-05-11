@@ -68,3 +68,23 @@ func TestLoadKeepsExplicitCodexBin(t *testing.T) {
 		t.Fatalf("expected explicit codex bin, got %q", cfg.CodexBin)
 	}
 }
+
+func TestLoadPrefersAnthropicAPIKeyForClaude(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
+	t.Setenv("CLAUDE_API_KEY", "claude-key")
+
+	cfg := Load()
+	if cfg.ClaudeAPIKey != "anthropic-key" {
+		t.Fatalf("expected anthropic api key, got %q", cfg.ClaudeAPIKey)
+	}
+}
+
+func TestLoadUsesClaudeAPIKeyFallback(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_API_KEY", "claude-key")
+
+	cfg := Load()
+	if cfg.ClaudeAPIKey != "claude-key" {
+		t.Fatalf("expected claude api key fallback, got %q", cfg.ClaudeAPIKey)
+	}
+}

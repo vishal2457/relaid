@@ -3,6 +3,7 @@ import type { StreamChunkType } from "@/src/lib/opencode-types";
 
 export type SessionPromptResponseEvent = {
   requestId: string;
+  agentProviderId?: string;
   projectId: string;
   sessionId: string;
   success: boolean;

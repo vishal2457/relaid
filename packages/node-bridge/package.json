@@ -1,0 +1,17 @@
+{
+  "name": "@relaid/node-bridge",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=../../apps/go/internal/bridge/bootstrap/dist/index.mjs",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@relaid/claude-provider": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "esbuild": "^0.25.12"
+  }
+}

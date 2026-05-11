@@ -18,6 +18,14 @@ export function DownloadAndInstallUpdate(arg1, arg2) {
   return window['go']['main']['App']['DownloadAndInstallUpdate'](arg1, arg2);
 }
 
+export function DownloadNodeRuntime(arg1) {
+  return window['go']['main']['App']['DownloadNodeRuntime'](arg1);
+}
+
+export function GetBridgeStatus() {
+  return window['go']['main']['App']['GetBridgeStatus']();
+}
+
 export function GetConnectedClients() {
   return window['go']['main']['App']['GetConnectedClients']();
 }
@@ -36,6 +44,10 @@ export function GetDeviceCredentials() {
 
 export function GetFullVersionInfo() {
   return window['go']['main']['App']['GetFullVersionInfo']();
+}
+
+export function GetNodeRuntimeStatus() {
+  return window['go']['main']['App']['GetNodeRuntimeStatus']();
 }
 
 export function GetServerBaseURL() {
@@ -64,6 +76,14 @@ export function PingRelay() {
 
 export function SelectWorkspaceDirectory() {
   return window['go']['main']['App']['SelectWorkspaceDirectory']();
+}
+
+export function StartBridge() {
+  return window['go']['main']['App']['StartBridge']();
+}
+
+export function StopBridge() {
+  return window['go']['main']['App']['StopBridge']();
 }
 
 export function StoreRelayURL(arg1) {

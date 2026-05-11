@@ -7,17 +7,22 @@ export type Agent = OpenCodeAgent;
 export const agentsKeys = {
   all: ["agents"] as const,
   lists: () => [...agentsKeys.all, "list"] as const,
-  list: (projectId: string) => [...agentsKeys.lists(), projectId] as const,
+  list: (projectId: string, agentProviderId?: string) =>
+    [...agentsKeys.lists(), projectId, agentProviderId ?? "opencode"] as const,
 };
 
-export function useAgents(projectId: string, enabled = true) {
+export function useAgents(
+  projectId: string,
+  agentProviderId?: string,
+  enabled = true,
+) {
   return useQuery<Agent[]>({
-    queryKey: agentsKeys.list(projectId),
+    queryKey: agentsKeys.list(projectId, agentProviderId),
     enabled: Boolean(projectId) && enabled,
     queryFn: async () => {
       const response = await baseApi.get<{ agents: Agent[] }>("/agents", {
         suppressErrorToast: true,
-        params: { projectId },
+        params: { projectId, agentProviderId },
       });
       const agents = response.data.agents ?? [];
       const primaryAgents = agents.filter((agent) => agent.mode === "primary");

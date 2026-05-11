@@ -25,6 +25,8 @@ type Config struct {
 	OpencodeMaxPromptLength int
 	CodexBin                string
 	CodexCwd                string
+	ClaudeCwd               string
+	ClaudeAPIKey            string
 	DBPath                  string
 	MissingConfig           []string
 }
@@ -44,6 +46,8 @@ func Load() Config {
 		OpencodeMaxPromptLength: getIntEnv("OPENCODE_MAX_PROMPT_LENGTH", 8000),
 		CodexBin:                resolveExecutable("CODEX_BIN", "codex", defaultCodexBinPaths()),
 		CodexCwd:                getWorkingDir(),
+		ClaudeCwd:               getWorkingDir(),
+		ClaudeAPIKey:            firstNonEmptyEnv("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"),
 		DBPath:                  getEnv("RELAID_DB_PATH", defaultDBPath()),
 	}
 
@@ -55,6 +59,10 @@ func Load() Config {
 		cfg.CodexCwd = value
 	}
 
+	if value := os.Getenv("CLAUDE_CWD"); value != "" {
+		cfg.ClaudeCwd = value
+	}
+
 	return cfg
 }
 
@@ -63,6 +71,15 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value, ok := os.LookupEnv(key); ok && value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func resolveExecutable(envKey, fallback string, candidates []string) string {

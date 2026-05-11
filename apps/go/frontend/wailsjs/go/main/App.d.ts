@@ -3,6 +3,8 @@
 import {services} from '../models';
 import {relay} from '../models';
 import {main} from '../models';
+import {nodejs} from '../models';
+import {bridge} from '../models';
 
 export function CheckForUpdates():Promise<services.UpdateResponse>;
 
@@ -11,6 +13,10 @@ export function CreatePairingSession():Promise<relay.PairingSessionResponse>;
 export function CreateWorkspace(arg1:string):Promise<main.WorkspacePayload>;
 
 export function DownloadAndInstallUpdate(arg1:string,arg2:string):Promise<void>;
+
+export function DownloadNodeRuntime(arg1:string):Promise<nodejs.Status>;
+
+export function GetBridgeStatus():Promise<bridge.Status>;
 
 export function GetConnectedClients():Promise<Array<relay.MobileClient>>;
 
@@ -21,6 +27,8 @@ export function GetDesktopStatus():Promise<main.DesktopStatusPayload>;
 export function GetDeviceCredentials():Promise<relay.DeviceCredentials>;
 
 export function GetFullVersionInfo():Promise<Record<string, string>>;
+
+export function GetNodeRuntimeStatus():Promise<nodejs.Status>;
 
 export function GetServerBaseURL():Promise<string>;
 
@@ -35,5 +43,9 @@ export function ListWorkspaces():Promise<Array<main.WorkspacePayload>>;
 export function PingRelay():Promise<boolean>;
 
 export function SelectWorkspaceDirectory():Promise<string>;
+
+export function StartBridge():Promise<bridge.Status>;
+
+export function StopBridge():Promise<bridge.Status>;
 
 export function StoreRelayURL(arg1:string):Promise<void>;

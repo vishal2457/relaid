@@ -2,6 +2,6 @@
   "name": "go",
   "private": true,
   "scripts": {
-    "dev": "RELAID_ENV=dev wails dev"
+    "dev": "pnpm --dir ../.. --filter @relaid/node-bridge build && RELAID_ENV=dev wails dev"
   }
 }

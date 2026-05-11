@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -13,8 +14,11 @@ import (
 	"time"
 
 	"relaid/internal/agent"
+	"relaid/internal/bridge"
 	"relaid/internal/config"
 	"relaid/internal/db"
+	"relaid/internal/nodejs"
+	claudeprovider "relaid/internal/providers/claude"
 	codexprovider "relaid/internal/providers/codex"
 	opencodeprovider "relaid/internal/providers/opencode"
 	"relaid/internal/relay"
@@ -38,6 +42,8 @@ type App struct {
 	db         *db.Database
 	workspaces *workspace.Service
 	keychain   *secrets.Keychain
+	node       *nodejs.Manager
+	bridge     *bridge.Manager
 	handler    *relay.Handler
 	client     *relay.Client
 	relayURL   string
@@ -46,8 +52,11 @@ type App struct {
 
 type DesktopStatusPayload struct {
 	Server   DesktopServerStatus   `json:"server"`
+	Node     nodejs.Status         `json:"node"`
+	Bridge   bridge.Status         `json:"bridge"`
 	Opencode DesktopOpencodeStatus `json:"opencode"`
 	Codex    DesktopCodexStatus    `json:"codex"`
+	Claude   DesktopClaudeStatus   `json:"claude"`
 }
 
 type DesktopServerStatus struct {
@@ -75,6 +84,16 @@ type DesktopCodexStatus struct {
 	Errors         []string          `json:"errors,omitempty"`
 }
 
+type DesktopClaudeStatus struct {
+	Available      bool              `json:"available"`
+	Connected      bool              `json:"connected"`
+	StatusMessage  string            `json:"statusMessage,omitempty"`
+	Providers      []DesktopProvider `json:"providers"`
+	Agents         []DesktopAgent    `json:"agents"`
+	AvailableTools []string          `json:"availableTools"`
+	Errors         []string          `json:"errors,omitempty"`
+}
+
 type DesktopProvider struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
@@ -91,13 +110,19 @@ type DesktopAgent struct {
 }
 
 func NewApp() *App {
+	nodeManager := nodejs.NewManager(log.Default())
 	return &App{
 		keychain: secrets.New(),
+		node:     nodeManager,
+		bridge:   bridge.NewManager(nodeManager, log.Default()),
 	}
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if a.node != nil {
+		a.node.SetAppContext(ctx)
+	}
 
 	log.Println("Starting desktop")
 
@@ -111,7 +136,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.db = database
 	a.workspaces = workspace.NewService(database.Queries())
-	a.server = server.New(cfg, a.workspaces)
+	a.server = server.New(cfg, a.workspaces, a.bridge)
 
 	if provider, err := a.server.Registry().Get(agent.ProviderOpencode); err == nil {
 		if err := a.workspaces.SyncOpencodeProjects(ctx, provider); err != nil {
@@ -130,6 +155,22 @@ func (a *App) startup(ctx context.Context) {
 	if err := a.server.Start(); err != nil {
 		log.Printf("embedded server stopped: %v", err)
 		wruntime.LogErrorf(ctx, "embedded server stopped: %v", err)
+	}
+
+	if a.bridge != nil && a.node != nil {
+		go func() {
+			startCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			nodeStatus := a.node.Status(startCtx)
+			if !nodeStatus.Compatible {
+				return
+			}
+
+			if _, err := a.bridge.Start(startCtx); err != nil {
+				log.Printf("bridge: startup skipped: %v", err)
+			}
+		}()
 	}
 
 	a.startRelayClient()
@@ -167,6 +208,12 @@ func (a *App) shutdown(ctx context.Context) {
 
 	if client != nil {
 		client.Close()
+	}
+
+	if a.bridge != nil {
+		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, _ = a.bridge.Stop(shutdownCtx)
+		cancel()
 	}
 
 	if a.server == nil {
@@ -345,12 +392,19 @@ func (a *App) GetDesktopStatus() DesktopStatusPayload {
 			BaseURL: a.GetServerBaseURL(),
 			Healthy: a.server != nil,
 		},
+		Node:   a.GetNodeRuntimeStatus(),
+		Bridge: a.GetBridgeStatus(),
 		Opencode: DesktopOpencodeStatus{
 			Providers:      []DesktopProvider{},
 			Agents:         []DesktopAgent{},
 			AvailableTools: []string{},
 		},
 		Codex: DesktopCodexStatus{
+			Providers:      []DesktopProvider{},
+			Agents:         []DesktopAgent{},
+			AvailableTools: []string{},
+		},
+		Claude: DesktopClaudeStatus{
 			Providers:      []DesktopProvider{},
 			Agents:         []DesktopAgent{},
 			AvailableTools: []string{},
@@ -362,6 +416,8 @@ func (a *App) GetDesktopStatus() DesktopStatusPayload {
 		payload.Opencode.Errors = []string{"desktop server is unavailable"}
 		payload.Codex.StatusMessage = "Desktop server is unavailable"
 		payload.Codex.Errors = []string{"desktop server is unavailable"}
+		payload.Claude.StatusMessage = "Desktop server is unavailable"
+		payload.Claude.Errors = []string{"desktop server is unavailable"}
 		return payload
 	}
 
@@ -405,26 +461,55 @@ func (a *App) GetDesktopStatus() DesktopStatusPayload {
 	if err != nil {
 		payload.Codex.StatusMessage = "Codex provider is not registered"
 		payload.Codex.Errors = []string{err.Error()}
-		return payload
+	} else {
+		payload.Codex.Available = isCodexAvailable(a.server)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		providers, providerErr := codexProvider.Providers().List(ctx)
+		if providerErr != nil {
+			payload.Codex.StatusMessage = "Codex is unavailable"
+			payload.Codex.Errors = []string{providerErr.Error()}
+		} else {
+			payload.Codex.Connected = true
+			payload.Codex.StatusMessage = "Codex connected"
+			payload.Codex.Providers = serializeDesktopProviders(providers)
+			if !payload.Codex.Available {
+				payload.Codex.Available = true
+			}
+		}
 	}
 
-	payload.Codex.Available = isCodexAvailable(a.server)
+	claudeProvider, err := a.server.Registry().Get(agent.ProviderClaude)
+	if err != nil {
+		payload.Claude.StatusMessage = "Claude provider is not registered"
+		payload.Claude.Errors = []string{err.Error()}
+	} else {
+		payload.Claude.Available = isClaudeAvailable(a.server)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+		claudeCtx, claudeCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer claudeCancel()
 
-	providers, providerErr := codexProvider.Providers().List(ctx)
-	if providerErr != nil {
-		payload.Codex.StatusMessage = "Codex is unavailable"
-		payload.Codex.Errors = []string{providerErr.Error()}
-		return payload
-	}
-
-	payload.Codex.Connected = true
-	payload.Codex.StatusMessage = "Codex connected"
-	payload.Codex.Providers = serializeDesktopProviders(providers)
-	if !payload.Codex.Available {
-		payload.Codex.Available = true
+		claudeAgents, claudeAgentErr := claudeProvider.Agents().List(claudeCtx, "")
+		if claudeAgentErr != nil {
+			payload.Claude.StatusMessage = "Claude is unavailable"
+			payload.Claude.Errors = []string{claudeAgentErr.Error()}
+		} else {
+			claudeProviders, claudeProviderErr := claudeProvider.Providers().List(claudeCtx)
+			if claudeProviderErr != nil {
+				payload.Claude.StatusMessage = "Claude is unavailable"
+				payload.Claude.Errors = []string{claudeProviderErr.Error()}
+			} else {
+				payload.Claude.Connected = true
+				payload.Claude.StatusMessage = "Claude connected"
+				payload.Claude.Providers = serializeDesktopProviders(claudeProviders)
+				payload.Claude.Agents, payload.Claude.AvailableTools = serializeDesktopAgents(claudeAgents)
+				if !payload.Claude.Available {
+					payload.Claude.Available = true
+				}
+			}
+		}
 	}
 
 	return payload
@@ -465,6 +550,15 @@ func isCodexAvailable(s *server.Server) bool {
 	cfg := config.Load()
 	_, err := exec.LookPath(cfg.CodexBin)
 	return err == nil
+}
+
+func isClaudeAvailable(s *server.Server) bool {
+	if s == nil {
+		return false
+	}
+
+	cfg := config.Load()
+	return cfg.ClaudeAPIKey != "" && cfg.ClaudeCwd != ""
 }
 
 func serializeDesktopProviders(providers []agent.Provider) []DesktopProvider {
@@ -576,6 +670,11 @@ func (a *App) configureRelayClient(relayURL string, creds relay.DeviceCredential
 	if p, err := a.server.Registry().Get(agent.ProviderCodex); err == nil {
 		if codex, ok := p.(*codexprovider.Provider); ok {
 			codex.SetInteractionHandler(relay.NewRelayPermissionBridge(handler, string(agent.ProviderCodex)))
+		}
+	}
+	if p, err := a.server.Registry().Get(agent.ProviderClaude); err == nil {
+		if claude, ok := p.(*claudeprovider.Provider); ok {
+			claude.SetInteractionHandler(relay.NewRelayPermissionBridge(handler, string(agent.ProviderClaude)))
 		}
 	}
 
@@ -691,4 +790,67 @@ func (a *App) DownloadAndInstallUpdate(downloadURL string, fileName string) erro
 
 func (a *App) InstallFromBinaryData(binaryData []byte, fileName string) error {
 	return services.InstallFromBinaryData(a.ctx, binaryData, fileName)
+}
+
+func (a *App) GetNodeRuntimeStatus() nodejs.Status {
+	if a.node == nil {
+		return nodejs.Status{
+			Source: nodejs.SourceNone,
+			State:  nodejs.StateFailed,
+			Error:  "node runtime manager is unavailable",
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return a.node.Status(ctx)
+}
+
+func (a *App) DownloadNodeRuntime(version string) (nodejs.Status, error) {
+	if a.node == nil {
+		status := nodejs.Status{
+			Source: nodejs.SourceNone,
+			State:  nodejs.StateFailed,
+			Error:  "node runtime manager is unavailable",
+		}
+		return status, errors.New(status.Error)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	return a.node.DownloadAndInstall(ctx, version)
+}
+
+func (a *App) GetBridgeStatus() bridge.Status {
+	if a.bridge == nil {
+		return bridge.Status{
+			State: bridge.StateFailed,
+			Error: "bridge manager is unavailable",
+		}
+	}
+	return a.bridge.Status()
+}
+
+func (a *App) StartBridge() (bridge.Status, error) {
+	if a.bridge == nil {
+		status := bridge.Status{
+			State: bridge.StateFailed,
+			Error: "bridge manager is unavailable",
+		}
+		return status, errors.New(status.Error)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return a.bridge.Start(ctx)
+}
+
+func (a *App) StopBridge() (bridge.Status, error) {
+	if a.bridge == nil {
+		status := bridge.Status{
+			State: bridge.StateFailed,
+			Error: "bridge manager is unavailable",
+		}
+		return status, errors.New(status.Error)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return a.bridge.Stop(ctx)
 }

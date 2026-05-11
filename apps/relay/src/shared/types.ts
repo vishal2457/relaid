@@ -104,6 +104,7 @@ export type SessionPromptStartedEvent = z.infer<
 
 export const SessionPromptResponseEventSchema = z.object({
   requestId: z.string(),
+  agentProviderId: z.string().optional(),
   projectId: z.string(),
   sessionId: z.string(),
   sessionTitle: z.string().optional(),
@@ -240,6 +241,7 @@ export type ProjectFileMatch = z.infer<typeof ProjectFileMatchSchema>;
 
 export const ProjectFileSearchRequestSchema = z.object({
   projectId: z.string(),
+  agentProviderId: z.string().optional(),
   query: z.string().optional(),
   limit: z.number().optional(),
 });

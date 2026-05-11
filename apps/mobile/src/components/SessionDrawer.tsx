@@ -103,6 +103,8 @@ export function SessionDrawer({
           ? "OpenCode"
           : providerId === "codex"
             ? "Codex"
+            : providerId === "claude"
+              ? "Claude"
             : providerId.charAt(0).toUpperCase() + providerId.slice(1);
 
       if (existing) {

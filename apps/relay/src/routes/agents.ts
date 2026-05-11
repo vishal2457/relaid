@@ -55,6 +55,10 @@ router.get("/", async (req: Request, res: Response) => {
       typeof req.query.projectId === "string" ? req.query.projectId : "";
     const directory =
       typeof req.query.directory === "string" ? req.query.directory : "";
+    const agentProviderId =
+      typeof req.query.agentProviderId === "string"
+        ? req.query.agentProviderId
+        : undefined;
 
     if (!projectId && !directory) {
       res.status(400).json({ error: "projectId or directory is required" });
@@ -79,7 +83,7 @@ router.get("/", async (req: Request, res: Response) => {
         userId,
         "agents_list_request",
         "agents_list_response",
-        { projectId },
+        { projectId, agentProviderId },
         projectResult.serverId,
       );
 
@@ -91,7 +95,7 @@ router.get("/", async (req: Request, res: Response) => {
       userId,
       "agents_list_request",
       "agents_list_response",
-      { directory },
+      { directory, agentProviderId },
     );
 
     res.json({ agents: result.response.agents ?? [] });

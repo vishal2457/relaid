@@ -40,6 +40,19 @@ type ProjectDeleteResponse = {
 
 const router: Router = Router();
 
+function getAgentProviderId(req: Request): string | undefined {
+  if (typeof req.query.agentProviderId === "string") {
+    return req.query.agentProviderId;
+  }
+  if (
+    req.body &&
+    typeof (req.body as Record<string, unknown>).agentProviderId === "string"
+  ) {
+    return (req.body as Record<string, string>).agentProviderId;
+  }
+  return undefined;
+}
+
 function handleRouteError(
   res: Response,
   defaultMessage: string,
@@ -128,6 +141,7 @@ router.get("/:id/directory", async (req: Request, res: Response) => {
 router.get("/:id/file-search", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const agentProviderId = getAgentProviderId(req);
     const rawQuery =
       typeof req.query.q === "string"
         ? req.query.q
@@ -145,6 +159,7 @@ router.get("/:id/file-search", async (req: Request, res: Response) => {
       "project_file_search_response",
       {
         projectId: req.params.id,
+        agentProviderId,
         query: rawQuery,
         limit: Number.isFinite(rawLimit) ? rawLimit : undefined,
       },

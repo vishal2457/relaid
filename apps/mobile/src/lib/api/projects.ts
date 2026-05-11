@@ -67,8 +67,8 @@ export const projectsKeys = {
   directory: (id: string, path = "") =>
     [...projectsKeys.directories(), id, path] as const,
   searches: () => [...projectsKeys.all, "search"] as const,
-  search: (id: string, query: string) =>
-    [...projectsKeys.searches(), id, query] as const,
+  search: (id: string, query: string, agentProviderId = "opencode") =>
+    [...projectsKeys.searches(), id, query, agentProviderId] as const,
 };
 
 export function useProjects() {
@@ -121,16 +121,17 @@ export function useProjectDirectory(
 export function useProjectFileSearch(
   projectId: string,
   query: string,
+  agentProviderId?: string,
   enabled = true,
 ) {
   return useQuery<ProjectFileMatch[]>({
-    queryKey: projectsKeys.search(projectId, query),
+    queryKey: projectsKeys.search(projectId, query, agentProviderId),
     enabled: Boolean(projectId) && enabled,
     queryFn: async () => {
       const response = await baseApi.get<{ results: ProjectFileMatch[] }>(
         `/projects/${projectId}/file-search`,
         {
-          params: { q: query, limit: 30 },
+          params: { q: query, limit: 30, agentProviderId },
         },
       );
       return response.data.results ?? [];
