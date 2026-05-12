@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Checkbox,
   Text,
+  Snackbar,
   useTheme,
   type MD3Theme,
 } from "react-native-paper";
@@ -23,6 +24,7 @@ import {
   useGitStageFiles,
   useGitUnstageFiles,
   useGitCommit,
+  useGitPush,
   type GitFileStatus,
 } from "@/src/lib/api/git";
 import { SelectionSheet } from "@/src/components/SelectionSheet";
@@ -226,6 +228,7 @@ export default function GitPage() {
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [showCommitSheet, setShowCommitSheet] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch, isRefetching } = useGitFileStatus(
     projectId ?? "",
@@ -249,6 +252,12 @@ export default function GitPage() {
     setShowCommitSheet(false);
     setCommitMessage("");
   });
+  const pushMutation = useGitPush(projectId ?? "", () => {
+    setSyncMessage("Changes synced to remote");
+  });
+
+  const hasSelection = selectedFiles.size > 0;
+  const canSyncChanges = Boolean(projectId && branch && branch !== "HEAD");
 
   const toggleFile = useCallback(
     (path: string, section: Section) => {
@@ -317,6 +326,18 @@ export default function GitPage() {
     if (!commitMessage.trim()) return;
     const files = Array.from(selectedFiles);
     commitMutation.mutate({ message: commitMessage.trim(), files });
+  };
+
+  const handlePush = () => {
+    if (!canSyncChanges) {
+      return;
+    }
+
+    pushMutation.mutate({
+      remote: "origin",
+      branch,
+      setUpstream: true,
+    });
   };
 
   const headerContent = (
@@ -481,71 +502,118 @@ export default function GitPage() {
         />
       )}
 
-      {projectId && !isLoading && !error && selectedFiles.size > 0 && (
+      {projectId && !isLoading && !error && (
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={[
             styles.bottomActionBar,
             {
-              borderTopColor: borderColor,
               backgroundColor: surfaceColor,
               paddingBottom: insets.bottom + 8,
+              borderColor,
             },
           ]}
         >
+          {hasSelection ? (
+            <View style={styles.bottomActionRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.bottomActionBtn,
+                  {
+                    backgroundColor:
+                      activeSection === "changes" ? "#2563EB" : "#D97706",
+                    opacity:
+                      pressed || stageFiles.isPending || unstageFiles.isPending
+                        ? 0.7
+                        : 1,
+                  },
+                ]}
+                onPress={
+                  activeSection === "changes" ? handleStage : handleUnstage
+                }
+                disabled={stageFiles.isPending || unstageFiles.isPending}
+              >
+                {(activeSection === "changes" && stageFiles.isPending) ||
+                (activeSection === "staged" && unstageFiles.isPending) ? (
+                  <ActivityIndicator size={14} color="#fff" />
+                ) : (
+                  <MaterialCommunityIcons
+                    name={activeSection === "changes" ? "plus" : "minus"}
+                    size={14}
+                    color="#fff"
+                  />
+                )}
+                <Text variant="labelSmall" style={styles.bottomActionText}>
+                  {activeSection === "changes" && stageFiles.isPending
+                    ? "Staging..."
+                    : activeSection === "staged" && unstageFiles.isPending
+                      ? "Unstaging..."
+                      : activeSection === "changes"
+                        ? `Stage ${selectedFiles.size}`
+                        : `Unstage ${selectedFiles.size}`}
+                </Text>
+              </Pressable>
+
+              {activeSection === "staged" ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.bottomActionBtn,
+                    styles.bottomActionBtnPrimary,
+                    {
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                  onPress={handleOpenCommitSheet}
+                >
+                  <MaterialCommunityIcons
+                    name="source-commit"
+                    size={16}
+                    color="#fff"
+                  />
+                  <Text variant="labelSmall" style={styles.bottomActionText}>
+                    Commit {selectedFiles.size}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+
           <Pressable
             style={({ pressed }) => [
-              styles.bottomActionBtn,
+              styles.syncButton,
               {
-                backgroundColor:
-                  activeSection === "changes" ? "#2563EB" : "#D97706",
-                opacity:
-                  pressed || stageFiles.isPending || unstageFiles.isPending
-                    ? 0.7
-                    : 1,
+                backgroundColor: canSyncChanges ? "#0F172A" : borderColor,
+                opacity: pressed || pushMutation.isPending ? 0.7 : 1,
               },
             ]}
-            onPress={activeSection === "changes" ? handleStage : handleUnstage}
-            disabled={stageFiles.isPending || unstageFiles.isPending}
+            onPress={handlePush}
+            disabled={!canSyncChanges || pushMutation.isPending}
           >
-            {(activeSection === "changes" && stageFiles.isPending) ||
-            (activeSection === "staged" && unstageFiles.isPending) ? (
-              <ActivityIndicator size={14} color="#fff" />
+            {pushMutation.isPending ? (
+              <ActivityIndicator size={16} color="#fff" />
             ) : (
               <MaterialCommunityIcons
-                name={activeSection === "changes" ? "plus" : "minus"}
-                size={14}
-                color="#fff"
+                name="cloud-upload-outline"
+                size={16}
+                color={canSyncChanges ? "#fff" : metaColor}
               />
             )}
-            <Text variant="labelSmall" style={styles.bottomActionText}>
-              {activeSection === "changes" && stageFiles.isPending
-                ? "Staging..."
-                : activeSection === "staged" && unstageFiles.isPending
-                  ? "Unstaging..."
-                  : activeSection === "changes"
-                    ? `Stage ${selectedFiles.size}`
-                    : `Unstage ${selectedFiles.size}`}
+            <Text
+              variant="labelMedium"
+              style={[
+                styles.syncButtonText,
+                { color: canSyncChanges ? "#fff" : metaColor },
+              ]}
+            >
+              {pushMutation.isPending ? "Syncing..." : "Sync Changes"}
             </Text>
           </Pressable>
 
-          {activeSection === "staged" && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.commitButton,
-                {
-                  opacity: pressed ? 0.7 : 1,
-                  backgroundColor: "#2563EB",
-                },
-              ]}
-              onPress={handleOpenCommitSheet}
-            >
-              <MaterialCommunityIcons name="source-commit" size={16} color="#fff" />
-              <Text variant="labelSmall" style={styles.commitButtonText}>
-                Commit {selectedFiles.size} file{selectedFiles.size > 1 ? "s" : ""}
-              </Text>
-            </Pressable>
-          )}
+          {!canSyncChanges ? (
+            <Text variant="bodySmall" style={[styles.syncHint, { color: metaColor }]}>
+              Sync is available when the project is on a named branch.
+            </Text>
+          ) : null}
         </KeyboardAvoidingView>
       )}
 
@@ -609,6 +677,14 @@ export default function GitPage() {
           </Pressable>
         </View>
       </SelectionSheet>
+
+      <Snackbar
+        visible={Boolean(syncMessage)}
+        onDismiss={() => setSyncMessage(null)}
+        duration={2500}
+      >
+        {syncMessage}
+      </Snackbar>
     </View>
   );
 }
@@ -676,7 +752,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listContent: {
-    paddingBottom: 80,
+    paddingBottom: 168,
   },
   section: {
     borderBottomWidth: 1,
@@ -729,36 +805,54 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomActionBar: {
+    marginHorizontal: 16,
+    marginBottom: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderTopWidth: 1,
+    borderWidth: 1,
+    borderRadius: 24,
+    gap: 10,
+    shadowColor: "#020617",
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  bottomActionRow: {
+    flexDirection: "row",
     gap: 10,
   },
   bottomActionBtn: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
+    minHeight: 48,
+    borderRadius: 18,
+  },
+  bottomActionBtnPrimary: {
+    backgroundColor: "#2563EB",
   },
   bottomActionText: {
     color: "#fff",
     fontWeight: "600",
   },
-  commitButton: {
+  syncButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
+    minHeight: 48,
+    borderRadius: 18,
   },
-  commitButtonText: {
-    color: "#fff",
-    fontWeight: "600",
+  syncButtonText: {
+    fontWeight: "700",
+  },
+  syncHint: {
+    textAlign: "center",
   },
   commitSheetContent: {
     paddingBottom: 16,
