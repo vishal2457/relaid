@@ -35,7 +35,6 @@ import {
 } from "react-native-safe-area-context";
 
 import { FileDrawer } from "@/src/components/FileDrawer";
-import { GitDrawer } from "@/src/components/GitDrawer";
 import { HeaderActionMenu } from "@/src/components/HeaderActionMenu";
 import {
   clearActiveSessionStream,
@@ -176,7 +175,6 @@ export default function ChatScreen() {
   }, []);
 
   const [showDrawer, setShowDrawer] = React.useState(false);
-  const [showGitDrawer, setShowGitDrawer] = React.useState(false);
   const [showFileDrawer, setShowFileDrawer] = React.useState(false);
   const [showAgentProviderSheet, setShowAgentProviderSheet] =
     React.useState(false);
@@ -1185,14 +1183,6 @@ export default function ChatScreen() {
   // Phase 4: Stable callbacks for drawers
   const handleOpenDrawer = React.useCallback(() => setShowDrawer(true), []);
   const handleCloseDrawer = React.useCallback(() => setShowDrawer(false), []);
-  const handleOpenGitDrawer = React.useCallback(
-    () => setShowGitDrawer(true),
-    [],
-  );
-  const handleCloseGitDrawer = React.useCallback(
-    () => setShowGitDrawer(false),
-    [],
-  );
   const handleOpenFileDrawer = React.useCallback(
     () => setShowFileDrawer(true),
     [],
@@ -1201,6 +1191,16 @@ export default function ChatScreen() {
     () => setShowFileDrawer(false),
     [],
   );
+  const handleOpenGitPage = React.useCallback(() => {
+    if (session.activeProject) {
+      router.push({
+        pathname: "/git",
+        params: { projectId: session.activeProject.id },
+      });
+    } else {
+      router.push("/git");
+    }
+  }, [session.activeProject]);
   const handleCloseAgentProviderSheet = React.useCallback(
     () => setShowAgentProviderSheet(false),
     [],
@@ -1248,7 +1248,7 @@ export default function ChatScreen() {
           borderColor={colors.borderColor}
           onToggleMenu={handleToggleMenu}
           onRefreshPress={handleRefreshPress}
-          onOpenGitDrawer={handleOpenGitDrawer}
+          onOpenGitPage={handleOpenGitPage}
           onOpenFileDrawer={handleOpenFileDrawer}
           onNewSession={handleNewSession}
         />
@@ -1541,15 +1541,6 @@ export default function ChatScreen() {
             hasScrolledToBottom.current = false;
           }
         }}
-      />
-
-      <GitDrawer
-        visible={showGitDrawer}
-        onClose={handleCloseGitDrawer}
-        activeProject={session.activeProject}
-        borderColor={colors.borderColor}
-        metaColor={colors.metaColor}
-        backgroundColor={colors.sheetBg}
       />
 
       <FileDrawer

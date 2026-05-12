@@ -597,11 +597,10 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 	}
 
 	turnResult, err := conn.turnStart(runCtx, turnStartParams{
-		ThreadID:          threadID,
-		Input:             buildUserInputs(prompt, input.Items),
-		Cwd:               emptyToNil(input.WorkingDir),
-		Model:             modelToNil(input.Model),
-		CollaborationMode: buildCollaborationModeSelection(input.Agent, input.SystemPrompt),
+		ThreadID: threadID,
+		Input:    buildUserInputs(prompt, input.Items),
+		Cwd:      emptyToNil(input.WorkingDir),
+		Model:    modelToNil(input.Model),
 	})
 	if err != nil {
 		return nil, err
@@ -1970,11 +1969,10 @@ type fuzzyFileSearchParams struct {
 }
 
 type turnStartParams struct {
-	ThreadID          string                      `json:"threadId"`
-	Input             []userInput                 `json:"input"`
-	Cwd               *string                     `json:"cwd,omitempty"`
-	Model             *string                     `json:"model,omitempty"`
-	CollaborationMode *collaborationModeSelection `json:"collaborationMode,omitempty"`
+	ThreadID string      `json:"threadId"`
+	Input    []userInput `json:"input"`
+	Cwd      *string     `json:"cwd,omitempty"`
+	Model    *string     `json:"model,omitempty"`
 }
 
 type userInput struct {

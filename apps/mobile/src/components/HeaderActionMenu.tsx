@@ -9,7 +9,7 @@ type HeaderActionMenuProps = {
   borderColor: string;
   onToggleMenu: () => void;
   onRefreshPress: () => void;
-  onOpenGitDrawer: () => void;
+  onOpenGitPage: () => void;
   onOpenFileDrawer: () => void;
   onNewSession: () => void;
 };
@@ -22,7 +22,7 @@ export function HeaderActionMenu({
   borderColor,
   onToggleMenu,
   onRefreshPress,
-  onOpenGitDrawer,
+  onOpenGitPage,
   onOpenFileDrawer,
   onNewSession,
 }: HeaderActionMenuProps) {
@@ -125,8 +125,8 @@ export function HeaderActionMenu({
           <View style={[styles.buttonGroupDivider, { backgroundColor: borderColor }]} />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Open Git drawer"
-            onPress={onOpenGitDrawer}
+            accessibilityLabel="Open Git page"
+            onPress={onOpenGitPage}
             style={[styles.actionButton, { backgroundColor: buttonBackgroundColor }]}
           >
             <MaterialCommunityIcons

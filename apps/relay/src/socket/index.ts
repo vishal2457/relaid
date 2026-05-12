@@ -370,6 +370,7 @@ async function handleLocalServerConnection(
   pipeResponse("git_unstage_files_response");
   pipeResponse("git_file_diff_response");
   pipeResponse("git_discard_file_response");
+  pipeResponse("git_commit_response");
   pipeResponse("message_queue_list_response");
   pipeResponse("message_queue_add_response");
   pipeResponse("message_queue_remove_response");

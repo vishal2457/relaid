@@ -160,6 +160,36 @@ export function useFileContent(
   });
 }
 
+export function useGitCommit(projectId: string, onSuccessCallback?: () => void) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      message,
+      files,
+    }: {
+      message: string;
+      files: string[];
+    }) => {
+      const response = await baseApi.post<{
+        success: boolean;
+        hash?: string;
+        error?: string;
+      }>(`/git/${projectId}/commit`, { message, files });
+      if (!response.data.success) {
+        throw new Error(response.data.error ?? "Failed to commit");
+      }
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: gitKeys.fileStatus(projectId),
+      });
+      onSuccessCallback?.();
+    },
+  });
+}
+
 export function useGitDiscardFile(projectId: string) {
   const queryClient = useQueryClient();
 

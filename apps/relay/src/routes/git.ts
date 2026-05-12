@@ -293,4 +293,48 @@ router.get("/:projectId/file-content", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/:projectId/commit", async (req: Request, res: Response) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    const { projectId } = req.params;
+    const serverId = req.headers["x-server-id"] as string | undefined;
+    const { message, files } = req.body as { message: string; files?: string[] };
+
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    if (!message || typeof message !== "string" || !message.trim()) {
+      res.status(400).json({ error: "commit message is required" });
+      return;
+    }
+
+    const result = await requestConnectedServer<{
+      success: boolean;
+      hash?: string;
+      error?: string;
+    }>(
+      userId,
+      "git_commit_request",
+      "git_commit_response",
+      { projectId, message: message.trim(), files: files ?? [] },
+      serverId,
+    );
+
+    res.json({
+      success: result.response.success,
+      hash: result.response.hash,
+      error: result.response.error,
+    });
+  } catch (error) {
+    handleRouteError(res, "Failed to commit", error);
+  }
+});
+
 export { router as gitRouter };

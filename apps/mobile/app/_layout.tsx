@@ -120,6 +120,10 @@ function RootLayoutInner() {
           />
           <Stack.Screen name="auth" options={{ headerShown: false }} />
           <Stack.Screen name="pair" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="git"
+            options={{ headerShown: false, presentation: "card" }}
+          />
         </Stack>
       ) : (
         <Stack>

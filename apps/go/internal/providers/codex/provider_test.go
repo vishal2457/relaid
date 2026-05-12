@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/json"
 	"os"
 	"reflect"
 	"strings"
@@ -56,6 +57,29 @@ func TestBuildCollaborationModeSelectionIncludesCustomInstructions(t *testing.T)
 func TestBuildCollaborationModeSelectionReturnsNilForEmptyAgent(t *testing.T) {
 	if got := buildCollaborationModeSelection("", ""); got != nil {
 		t.Fatalf("expected nil selection for empty agent, got %+v", got)
+	}
+}
+
+func TestTurnStartParamsDoNotSerializeCollaborationMode(t *testing.T) {
+	model := "gpt-5.4"
+	payload, err := json.Marshal(turnStartParams{
+		ThreadID: "thread-123",
+		Input: []userInput{{
+			Type: "text",
+			Text: "hello",
+		}},
+		Model: &model,
+	})
+	if err != nil {
+		t.Fatalf("marshal turnStartParams: %v", err)
+	}
+
+	jsonText := string(payload)
+	if !strings.Contains(jsonText, `"model":"gpt-5.4"`) {
+		t.Fatalf("expected model in payload, got %s", jsonText)
+	}
+	if strings.Contains(jsonText, "collaborationMode") {
+		t.Fatalf("expected collaborationMode to be omitted, got %s", jsonText)
 	}
 }
 
