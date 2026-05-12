@@ -99,8 +99,11 @@ func addFiles(registry RegistryProvider) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}
 		return httpresponse.Success(c, map[string]any{
-			"success": true,
-		}, result.Data)
+			"success":  true,
+			"staged":   result.Data.Status.Staged,
+			"unstaged": result.Data.Status.Unstaged,
+			"branch":   result.Data.Status.Branch,
+		}, "Files staged successfully")
 	}
 }
 
@@ -122,8 +125,11 @@ func unstageFiles(registry RegistryProvider) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}
 		return httpresponse.Success(c, map[string]any{
-			"success": true,
-		}, result.Data)
+			"success":  true,
+			"staged":   result.Data.Status.Staged,
+			"unstaged": result.Data.Status.Unstaged,
+			"branch":   result.Data.Status.Branch,
+		}, "Files unstaged successfully")
 	}
 }
 
@@ -186,8 +192,11 @@ func addAllFiles(registry RegistryProvider) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}
 		return httpresponse.Success(c, map[string]any{
-			"success": true,
-		}, result.Data)
+			"success":  true,
+			"staged":   result.Data.Status.Staged,
+			"unstaged": result.Data.Status.Unstaged,
+			"branch":   result.Data.Status.Branch,
+		}, "All changes staged successfully")
 	}
 }
 
@@ -316,7 +325,7 @@ func commit(registry RegistryProvider) echo.HandlerFunc {
 			return err
 		}
 		var body struct {
-			Message string `json:"message"`
+			Message string   `json:"message"`
 			Files   []string `json:"files"`
 		}
 		if err := c.Bind(&body); err != nil {
@@ -328,7 +337,10 @@ func commit(registry RegistryProvider) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}
 		return httpresponse.Success(c, map[string]any{
-			"hash": result.Data,
+			"hash":     result.Data.Hash,
+			"staged":   result.Data.Status.Staged,
+			"unstaged": result.Data.Status.Unstaged,
+			"branch":   result.Data.Status.Branch,
 		}, "Commit created successfully")
 	}
 }
@@ -357,7 +369,10 @@ func push(registry RegistryProvider) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}
 		return httpresponse.Success(c, map[string]any{
-			"output": result.Data,
+			"output":   result.Data.Output,
+			"staged":   result.Data.Status.Staged,
+			"unstaged": result.Data.Status.Unstaged,
+			"branch":   result.Data.Status.Branch,
 		}, "Push completed successfully")
 	}
 }
@@ -385,7 +400,10 @@ func pull(registry RegistryProvider) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}
 		return httpresponse.Success(c, map[string]any{
-			"output": result.Data,
+			"output":   result.Data.Output,
+			"staged":   result.Data.Status.Staged,
+			"unstaged": result.Data.Status.Unstaged,
+			"branch":   result.Data.Status.Branch,
 		}, "Pull completed successfully")
 	}
 }
@@ -412,7 +430,10 @@ func fetch(registry RegistryProvider) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}
 		return httpresponse.Success(c, map[string]any{
-			"output": result.Data,
+			"output":   result.Data.Output,
+			"staged":   result.Data.Status.Staged,
+			"unstaged": result.Data.Status.Unstaged,
+			"branch":   result.Data.Status.Branch,
 		}, "Fetch completed successfully")
 	}
 }

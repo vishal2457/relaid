@@ -522,8 +522,12 @@ type GitStageFilesRequest struct {
 }
 
 type GitStageFilesResponse struct {
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
+	RequestID string    `json:"requestId"`
+	Success   bool      `json:"success"`
+	Staged    []GitFile `json:"staged,omitempty"`
+	Unstaged  []GitFile `json:"unstaged,omitempty"`
+	Branch    string    `json:"branch,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type GitUnstageFilesRequest struct {
@@ -533,8 +537,12 @@ type GitUnstageFilesRequest struct {
 }
 
 type GitUnstageFilesResponse struct {
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
+	RequestID string    `json:"requestId"`
+	Success   bool      `json:"success"`
+	Staged    []GitFile `json:"staged,omitempty"`
+	Unstaged  []GitFile `json:"unstaged,omitempty"`
+	Branch    string    `json:"branch,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type GitFileDiffRequest struct {
@@ -668,10 +676,13 @@ type GitCommitRequest struct {
 }
 
 type GitCommitResponse struct {
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
-	Hash      string `json:"hash,omitempty"`
-	Error     string `json:"error,omitempty"`
+	RequestID string    `json:"requestId"`
+	Success   bool      `json:"success"`
+	Hash      string    `json:"hash,omitempty"`
+	Staged    []GitFile `json:"staged,omitempty"`
+	Unstaged  []GitFile `json:"unstaged,omitempty"`
+	Branch    string    `json:"branch,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type GitPushRequest struct {
@@ -683,10 +694,13 @@ type GitPushRequest struct {
 }
 
 type GitPushResponse struct {
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
-	Output    string `json:"output,omitempty"`
-	Error     string `json:"error,omitempty"`
+	RequestID string    `json:"requestId"`
+	Success   bool      `json:"success"`
+	Output    string    `json:"output,omitempty"`
+	Staged    []GitFile `json:"staged,omitempty"`
+	Unstaged  []GitFile `json:"unstaged,omitempty"`
+	Branch    string    `json:"branch,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type GitPullRequest struct {
@@ -697,10 +711,13 @@ type GitPullRequest struct {
 }
 
 type GitPullResponse struct {
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
-	Output    string `json:"output,omitempty"`
-	Error     string `json:"error,omitempty"`
+	RequestID string    `json:"requestId"`
+	Success   bool      `json:"success"`
+	Output    string    `json:"output,omitempty"`
+	Staged    []GitFile `json:"staged,omitempty"`
+	Unstaged  []GitFile `json:"unstaged,omitempty"`
+	Branch    string    `json:"branch,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type GitFetchRequest struct {
@@ -710,10 +727,13 @@ type GitFetchRequest struct {
 }
 
 type GitFetchResponse struct {
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
-	Output    string `json:"output,omitempty"`
-	Error     string `json:"error,omitempty"`
+	RequestID string    `json:"requestId"`
+	Success   bool      `json:"success"`
+	Output    string    `json:"output,omitempty"`
+	Staged    []GitFile `json:"staged,omitempty"`
+	Unstaged  []GitFile `json:"unstaged,omitempty"`
+	Branch    string    `json:"branch,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type GitGetRemotesRequest struct {
@@ -903,10 +923,12 @@ type GitAddAllRequest struct {
 }
 
 type GitAddAllResponse struct {
-	RequestID string `json:"requestId"`
-	Success   bool   `json:"success"`
-	Output    string `json:"output,omitempty"`
-	Error     string `json:"error,omitempty"`
+	RequestID string    `json:"requestId"`
+	Success   bool      `json:"success"`
+	Staged    []GitFile `json:"staged,omitempty"`
+	Unstaged  []GitFile `json:"unstaged,omitempty"`
+	Branch    string    `json:"branch,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type PermissionRequestPayload struct {

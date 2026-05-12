@@ -12,6 +12,14 @@ export type GitFileStatusResponse = {
   branch: string;
 };
 
+type GitMutationStatusResponse = {
+  success: boolean;
+  staged?: GitFileStatus[];
+  unstaged?: GitFileStatus[];
+  branch?: string;
+  error?: string;
+};
+
 export type DiffLine = {
   type: "add" | "remove" | "context";
   content: string;
@@ -68,7 +76,7 @@ export function useGitStageFiles(
 
   return useMutation({
     mutationFn: async (files: string[]) => {
-      const response = await baseApi.post<{ success: boolean; error?: string }>(
+      const response = await baseApi.post<GitMutationStatusResponse>(
         `/git/${projectId}/stage`,
         { files },
       );
@@ -77,10 +85,15 @@ export function useGitStageFiles(
       }
       return response.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: gitKeys.fileStatus(projectId),
-      });
+    onSuccess: (data) => {
+      queryClient.setQueryData<GitFileStatusResponse>(
+        gitKeys.fileStatus(projectId),
+        {
+          staged: data.staged ?? [],
+          unstaged: data.unstaged ?? [],
+          branch: data.branch ?? "HEAD",
+        },
+      );
       onSuccessCallback?.();
     },
   });
@@ -94,7 +107,7 @@ export function useGitUnstageFiles(
 
   return useMutation({
     mutationFn: async (files: string[]) => {
-      const response = await baseApi.post<{ success: boolean; error?: string }>(
+      const response = await baseApi.post<GitMutationStatusResponse>(
         `/git/${projectId}/unstage`,
         { files },
       );
@@ -103,10 +116,15 @@ export function useGitUnstageFiles(
       }
       return response.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: gitKeys.fileStatus(projectId),
-      });
+    onSuccess: (data) => {
+      queryClient.setQueryData<GitFileStatusResponse>(
+        gitKeys.fileStatus(projectId),
+        {
+          staged: data.staged ?? [],
+          unstaged: data.unstaged ?? [],
+          branch: data.branch ?? "HEAD",
+        },
+      );
       onSuccessCallback?.();
     },
   });
@@ -171,20 +189,25 @@ export function useGitCommit(projectId: string, onSuccessCallback?: () => void) 
       message: string;
       files: string[];
     }) => {
-      const response = await baseApi.post<{
-        success: boolean;
-        hash?: string;
-        error?: string;
-      }>(`/git/${projectId}/commit`, { message, files });
+      const response = await baseApi.post<
+        GitMutationStatusResponse & {
+          hash?: string;
+        }
+      >(`/git/${projectId}/commit`, { message, files });
       if (!response.data.success) {
         throw new Error(response.data.error ?? "Failed to commit");
       }
       return response.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: gitKeys.fileStatus(projectId),
-      });
+    onSuccess: (data) => {
+      queryClient.setQueryData<GitFileStatusResponse>(
+        gitKeys.fileStatus(projectId),
+        {
+          staged: data.staged ?? [],
+          unstaged: data.unstaged ?? [],
+          branch: data.branch ?? "HEAD",
+        },
+      );
       onSuccessCallback?.();
     },
   });

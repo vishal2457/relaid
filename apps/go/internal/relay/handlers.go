@@ -35,6 +35,17 @@ type QuestionReply struct {
 	Answers [][]string
 }
 
+func toRelayGitFiles(files []gitservice.FileWithStatus) []GitFile {
+	result := make([]GitFile, 0, len(files))
+	for _, file := range files {
+		result = append(result, GitFile{
+			Path:   file.Path,
+			Status: file.Status,
+		})
+	}
+	return result
+}
+
 func NewHandler(client *Client, registry *agent.Registry, workspaces *workspace.Service, logger *log.Logger) *Handler {
 	return &Handler{
 		client:             client,
@@ -1133,19 +1144,10 @@ func (h *Handler) handleGitStagedFiles(args []json.RawMessage) {
 	svc := gitservice.NewService(worktree)
 	result := svc.GetFileStatusLists()
 
-	staged := make([]GitFile, 0, len(result.Data.Staged))
-	for _, f := range result.Data.Staged {
-		staged = append(staged, GitFile{Path: f.Path, Status: f.Status})
-	}
-	unstaged := make([]GitFile, 0, len(result.Data.Unstaged))
-	for _, f := range result.Data.Unstaged {
-		unstaged = append(unstaged, GitFile{Path: f.Path, Status: f.Status})
-	}
-
 	h.emit(EventGitStagedFilesResponse, GitStagedFilesResponse{
 		RequestID: req.RequestID,
-		Staged:    staged,
-		Unstaged:  unstaged,
+		Staged:    toRelayGitFiles(result.Data.Staged),
+		Unstaged:  toRelayGitFiles(result.Data.Unstaged),
 		Branch:    result.Data.Branch,
 	})
 }
@@ -1175,6 +1177,10 @@ func (h *Handler) handleGitStageFiles(args []json.RawMessage) {
 	h.emit(EventGitStageFilesResponse, GitStageFilesResponse{
 		RequestID: req.RequestID,
 		Success:   result.Success,
+		Staged:    toRelayGitFiles(result.Data.Status.Staged),
+		Unstaged:  toRelayGitFiles(result.Data.Status.Unstaged),
+		Branch:    result.Data.Status.Branch,
+		Error:     result.Error,
 	})
 }
 
@@ -1203,6 +1209,10 @@ func (h *Handler) handleGitUnstageFiles(args []json.RawMessage) {
 	h.emit(EventGitUnstageFilesResponse, GitUnstageFilesResponse{
 		RequestID: req.RequestID,
 		Success:   result.Success,
+		Staged:    toRelayGitFiles(result.Data.Status.Staged),
+		Unstaged:  toRelayGitFiles(result.Data.Status.Unstaged),
+		Branch:    result.Data.Status.Branch,
+		Error:     result.Error,
 	})
 }
 
@@ -1493,7 +1503,10 @@ func (h *Handler) handleGitCommit(args []json.RawMessage) {
 	h.emit(EventGitCommitResponse, GitCommitResponse{
 		RequestID: req.RequestID,
 		Success:   result.Success,
-		Hash:      result.Data,
+		Hash:      result.Data.Hash,
+		Staged:    toRelayGitFiles(result.Data.Status.Staged),
+		Unstaged:  toRelayGitFiles(result.Data.Status.Unstaged),
+		Branch:    result.Data.Status.Branch,
 		Error:     result.Error,
 	})
 }
@@ -1524,7 +1537,10 @@ func (h *Handler) handleGitPush(args []json.RawMessage) {
 	h.emit(EventGitPushResponse, GitPushResponse{
 		RequestID: req.RequestID,
 		Success:   result.Success,
-		Output:    result.Data,
+		Output:    result.Data.Output,
+		Staged:    toRelayGitFiles(result.Data.Status.Staged),
+		Unstaged:  toRelayGitFiles(result.Data.Status.Unstaged),
+		Branch:    result.Data.Status.Branch,
 		Error:     result.Error,
 	})
 }
@@ -1555,7 +1571,10 @@ func (h *Handler) handleGitPull(args []json.RawMessage) {
 	h.emit(EventGitPullResponse, GitPullResponse{
 		RequestID: req.RequestID,
 		Success:   result.Success,
-		Output:    result.Data,
+		Output:    result.Data.Output,
+		Staged:    toRelayGitFiles(result.Data.Status.Staged),
+		Unstaged:  toRelayGitFiles(result.Data.Status.Unstaged),
+		Branch:    result.Data.Status.Branch,
 		Error:     result.Error,
 	})
 }
@@ -1586,7 +1605,10 @@ func (h *Handler) handleGitFetch(args []json.RawMessage) {
 	h.emit(EventGitFetchResponse, GitFetchResponse{
 		RequestID: req.RequestID,
 		Success:   result.Success,
-		Output:    result.Data,
+		Output:    result.Data.Output,
+		Staged:    toRelayGitFiles(result.Data.Status.Staged),
+		Unstaged:  toRelayGitFiles(result.Data.Status.Unstaged),
+		Branch:    result.Data.Status.Branch,
 		Error:     result.Error,
 	})
 }
@@ -1998,7 +2020,9 @@ func (h *Handler) handleGitAddAll(args []json.RawMessage) {
 	h.emit(EventGitAddAllResponse, GitAddAllResponse{
 		RequestID: req.RequestID,
 		Success:   result.Success,
-		Output:    result.Data,
+		Staged:    toRelayGitFiles(result.Data.Status.Staged),
+		Unstaged:  toRelayGitFiles(result.Data.Status.Unstaged),
+		Branch:    result.Data.Status.Branch,
 		Error:     result.Error,
 	})
 }

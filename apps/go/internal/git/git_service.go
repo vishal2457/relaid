@@ -11,7 +11,6 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/transport"
 )
 
 type Result[T any] struct {
@@ -37,6 +36,21 @@ type StatusLists struct {
 	Staged   []FileWithStatus `json:"staged"`
 	Unstaged []FileWithStatus `json:"unstaged"`
 	Branch   string           `json:"branch"`
+}
+
+type StatusResultData struct {
+	Status StatusLists `json:"status"`
+}
+
+type CommitResultData struct {
+	Hash   string      `json:"hash"`
+	Status StatusLists `json:"status"`
+}
+
+type OutputStatusResultData struct {
+	Output  string      `json:"output"`
+	Status  StatusLists `json:"status"`
+	Changed bool        `json:"changed"`
 }
 
 type BranchInfo struct {
@@ -70,6 +84,15 @@ func NewService(cwd string) *Service {
 
 func (s *Service) handleError(operation string, err error) {
 	log.Printf("git.%s failed: %v (cwd=%s)", operation, err, s.cwd)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // =====================
@@ -200,103 +223,62 @@ func (s *Service) DeleteBranch(name string, force bool) Result[string] {
 // =====================
 
 func (s *Service) GetFileStatusLists() Result[StatusLists] {
-	// Get current branch using go-git (this is fast and reliable)
-	repo, err := git.PlainOpen(s.cwd)
+	out, err := runGitWithTimeout(s.cwd, statusGitTimeout, "status", "--porcelain=v1", "-b")
 	if err != nil {
 		s.handleError("getFileStatusLists", err)
 		return fail[StatusLists](err.Error())
 	}
-
-	head, _ := repo.Head()
-	branchName := "HEAD"
-	if head != nil {
-		branchName = head.Name().Short()
-	}
-
-	// Get the working tree
-	worktree, err := repo.Worktree()
-	if err != nil {
-		panic(err)
-	}
-
-	// Get status — this returns a map of filepath -> FileStatus
-	status, err := worktree.Status()
-	if err != nil {
-		panic(err)
-	}
-
-	if status.IsClean() {
-		fmt.Println("Nothing to commit, working tree clean")
-		return ok(StatusLists{
-			Staged:   []FileWithStatus{},
-			Unstaged: []FileWithStatus{},
-			Branch:   branchName,
-		})
-	}
-
-	var staged []FileWithStatus
-	for path, s := range status {
-		if s.Staging != git.Unmodified && s.Staging != git.Untracked {
-			staged = append(staged, FileWithStatus{
-				Path:   path,
-				Status: string(s.Staging),
-			})
-		}
-	}
-
-	var unstaged []FileWithStatus
-	for path, s := range status {
-		if s.Worktree != git.Unmodified {
-			unstaged = append(unstaged, FileWithStatus{
-				Path:   path,
-				Status: string(s.Worktree),
-			})
-		}
-	}
-
-	return ok(StatusLists{
-		Staged:   staged,
-		Unstaged: unstaged,
-		Branch:   branchName,
-	})
+	return ok(parsePorcelainStatus(out))
 }
 
-func (s *Service) AddFiles(files []string) Result[string] {
+func (s *Service) AddFiles(files []string) Result[StatusResultData] {
 	if len(files) == 0 {
-		return fail[string]("No files specified")
+		return fail[StatusResultData]("No files specified")
 	}
 	args := append([]string{"add", "--"}, files...)
-	_, err := runGit(s.cwd, args...)
+	_, err := runGitWithTimeout(s.cwd, mutateGitTimeout, args...)
 	if err != nil {
 		s.handleError("addFiles", err)
-		return fail[string](err.Error())
+		return fail[StatusResultData](err.Error())
+	}
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fail[StatusResultData](statusResult.Error)
 	}
 	log.Printf("Staged %d file(s) (cwd=%s)", len(files), s.cwd)
-	return ok(fmt.Sprintf("Staged %d file(s)", len(files)))
+	return ok(StatusResultData{Status: statusResult.Data})
 }
 
-func (s *Service) AddAll() Result[string] {
-	_, err := runGit(s.cwd, "add", "-A")
+func (s *Service) AddAll() Result[StatusResultData] {
+	_, err := runGitWithTimeout(s.cwd, mutateGitTimeout, "add", "-A")
 	if err != nil {
 		s.handleError("addAll", err)
-		return fail[string](err.Error())
+		return fail[StatusResultData](err.Error())
+	}
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fail[StatusResultData](statusResult.Error)
 	}
 	log.Printf("Staged all changes (cwd=%s)", s.cwd)
-	return ok("Staged all changes")
+	return ok(StatusResultData{Status: statusResult.Data})
 }
 
-func (s *Service) UnstageFiles(files []string) Result[string] {
+func (s *Service) UnstageFiles(files []string) Result[StatusResultData] {
 	if len(files) == 0 {
-		return fail[string]("No files specified")
+		return fail[StatusResultData]("No files specified")
 	}
-	args := append([]string{"reset", "HEAD", "--"}, files...)
-	_, err := runGit(s.cwd, args...)
+	args := append([]string{"restore", "--staged", "--"}, files...)
+	_, err := runGitWithTimeout(s.cwd, mutateGitTimeout, args...)
 	if err != nil {
 		s.handleError("unstageFiles", err)
-		return fail[string](err.Error())
+		return fail[StatusResultData](err.Error())
+	}
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fail[StatusResultData](statusResult.Error)
 	}
 	log.Printf("Unstaged %d file(s) (cwd=%s)", len(files), s.cwd)
-	return ok(fmt.Sprintf("Unstaged %d file(s)", len(files)))
+	return ok(StatusResultData{Status: statusResult.Data})
 }
 
 func (s *Service) DiscardChanges(files []string) Result[string] {
@@ -381,108 +363,120 @@ func (s *Service) GetFileContent(filePath string) Result[string] {
 // Commit
 // =====================
 
-func (s *Service) Commit(message string, files []string) Result[string] {
+func (s *Service) Commit(message string, files []string) Result[CommitResultData] {
 	message = strings.TrimSpace(message)
 	if message == "" {
-		return fail[string]("Commit message is required")
+		return fail[CommitResultData]("Commit message is required")
 	}
 
-	args := []string{"commit", "-m", message}
+	args := []string{"commit", "--quiet", "-m", message}
 	if len(files) > 0 {
 		args = append(args, "--")
 		args = append(args, files...)
 	}
 
-	if _, err := runGit(s.cwd, args...); err != nil {
+	if _, err := runGitWithTimeout(s.cwd, mutateGitTimeout, args...); err != nil {
 		s.handleError("commit", err)
-		return fail[string](err.Error())
+		return fail[CommitResultData](err.Error())
 	}
 
-	hash, err := runGit(s.cwd, "rev-parse", "HEAD")
+	hash, err := runGitWithTimeout(s.cwd, mutateGitTimeout, "rev-parse", "HEAD")
 	if err != nil {
 		s.handleError("commit", err)
-		return fail[string](err.Error())
+		return fail[CommitResultData](err.Error())
+	}
+
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fail[CommitResultData](statusResult.Error)
 	}
 
 	log.Printf("Created commit %s (cwd=%s)", hash, s.cwd)
-	return ok(hash)
+	return ok(CommitResultData{
+		Hash:   hash,
+		Status: statusResult.Data,
+	})
 }
 
 // =====================
 // Push / Pull / Fetch
 // =====================
 
-func (s *Service) Push(remote string, branch string, setUpstream bool) Result[string] {
-	repo, err := git.PlainOpen(s.cwd)
-	if err != nil {
-		s.handleError("push", err)
-		return fail[string](err.Error())
-	}
-
-	refName := plumbing.ReferenceName("refs/heads/" + branch)
-	opts := &git.PushOptions{
-		RemoteName: remote,
-		RefSpecs:   []config.RefSpec{config.RefSpec(refName + ":" + refName)},
-	}
+func (s *Service) Push(remote string, branch string, setUpstream bool) Result[OutputStatusResultData] {
+	args := []string{"push"}
 	if setUpstream {
-		opts.RefSpecs = []config.RefSpec{config.RefSpec(refName + ":" + refName)}
+		args = append(args, "--set-upstream")
 	}
-
-	err = repo.Push(opts)
-	if err != nil {
-		if err == transport.ErrEmptyRemoteRepository {
-			return ok("Push complete (empty remote)")
-		}
-		s.handleError("push", err)
-		return fail[string](err.Error())
-	}
-	log.Printf("Pushed to %s/%s (cwd=%s)", remote, branch, s.cwd)
-	return ok("Pushed successfully")
-}
-
-func (s *Service) Pull(remote string, branch string) Result[string] {
-	repo, err := git.PlainOpen(s.cwd)
-	if err != nil {
-		s.handleError("pull", err)
-		return fail[string](err.Error())
-	}
-	w, err := repo.Worktree()
-	if err != nil {
-		s.handleError("pull", err)
-		return fail[string](err.Error())
-	}
-
-	opts := &git.PullOptions{
-		RemoteName: remote,
+	if remote != "" {
+		args = append(args, remote)
 	}
 	if branch != "" {
-		opts.ReferenceName = plumbing.ReferenceName("refs/heads/" + branch)
+		args = append(args, branch)
 	}
-
-	err = w.Pull(opts)
-	if err != nil && err != git.NoErrAlreadyUpToDate {
-		s.handleError("pull", err)
-		return fail[string](err.Error())
+	result, err := runGitDetailed(s.cwd, networkGitTimeout, args...)
+	if err != nil {
+		s.handleError("push", err)
+		return fail[OutputStatusResultData](err.Error())
 	}
-	log.Printf("Pulled from %s/%s (cwd=%s)", remote, branch, s.cwd)
-	return ok("Pull complete")
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fail[OutputStatusResultData](statusResult.Error)
+	}
+	log.Printf("Pushed to %s/%s (cwd=%s)", remote, branch, s.cwd)
+	return ok(OutputStatusResultData{
+		Output:  firstNonEmpty(result.Stdout, result.Stderr, "Pushed successfully"),
+		Status:  statusResult.Data,
+		Changed: true,
+	})
 }
 
-func (s *Service) Fetch(remote string) Result[string] {
-	repo, err := git.PlainOpen(s.cwd)
+func (s *Service) Pull(remote string, branch string) Result[OutputStatusResultData] {
+	args := []string{"pull"}
+	if remote != "" {
+		args = append(args, remote)
+	}
+	if branch != "" {
+		args = append(args, branch)
+	}
+	result, err := runGitDetailed(s.cwd, networkGitTimeout, args...)
+	if err != nil {
+		s.handleError("pull", err)
+		return fail[OutputStatusResultData](err.Error())
+	}
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fail[OutputStatusResultData](statusResult.Error)
+	}
+	output := firstNonEmpty(result.Stdout, result.Stderr, "Pull complete")
+	log.Printf("Pulled from %s/%s (cwd=%s)", remote, branch, s.cwd)
+	return ok(OutputStatusResultData{
+		Output:  output,
+		Status:  statusResult.Data,
+		Changed: !strings.Contains(output, "Already up to date."),
+	})
+}
+
+func (s *Service) Fetch(remote string) Result[OutputStatusResultData] {
+	args := []string{"fetch"}
+	if remote != "" {
+		args = append(args, remote)
+	}
+	result, err := runGitDetailed(s.cwd, networkGitTimeout, args...)
 	if err != nil {
 		s.handleError("fetch", err)
-		return fail[string](err.Error())
+		return fail[OutputStatusResultData](err.Error())
 	}
-	err = repo.Fetch(&git.FetchOptions{
-		RemoteName: remote,
-	})
-	if err != nil && err != git.NoErrAlreadyUpToDate {
-		s.handleError("fetch", err)
-		return fail[string](err.Error())
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fail[OutputStatusResultData](statusResult.Error)
 	}
+	output := firstNonEmpty(result.Stdout, result.Stderr, fmt.Sprintf("Fetched from %s", remote))
 	log.Printf("Fetched from %s (cwd=%s)", remote, s.cwd)
-	return ok(fmt.Sprintf("Fetched from %s", remote))
+	return ok(OutputStatusResultData{
+		Output:  output,
+		Status:  statusResult.Data,
+		Changed: !strings.Contains(output, "up to date"),
+	})
 }
 
 // =====================

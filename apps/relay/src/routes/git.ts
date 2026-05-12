@@ -20,6 +20,9 @@ type GitStagedFilesResponse = {
 
 type GitStageFilesResponse = {
   success: boolean;
+  staged?: GitFileStatus[];
+  unstaged?: GitFileStatus[];
+  branch?: string;
   error?: string;
 };
 
@@ -125,6 +128,9 @@ router.post("/:projectId/stage", async (req: Request, res: Response) => {
 
     res.json({
       success: result.response.success,
+      staged: result.response.staged || [],
+      unstaged: result.response.unstaged || [],
+      branch: result.response.branch || "HEAD",
       error: result.response.error,
     });
   } catch (error) {
@@ -164,6 +170,9 @@ router.post("/:projectId/unstage", async (req: Request, res: Response) => {
 
     res.json({
       success: result.response.success,
+      staged: result.response.staged || [],
+      unstaged: result.response.unstaged || [],
+      branch: result.response.branch || "HEAD",
       error: result.response.error,
     });
   } catch (error) {
@@ -318,6 +327,9 @@ router.post("/:projectId/commit", async (req: Request, res: Response) => {
     const result = await requestConnectedServer<{
       success: boolean;
       hash?: string;
+      staged?: GitFileStatus[];
+      unstaged?: GitFileStatus[];
+      branch?: string;
       error?: string;
     }>(
       userId,
@@ -330,6 +342,9 @@ router.post("/:projectId/commit", async (req: Request, res: Response) => {
     res.json({
       success: result.response.success,
       hash: result.response.hash,
+      staged: result.response.staged || [],
+      unstaged: result.response.unstaged || [],
+      branch: result.response.branch || "HEAD",
       error: result.response.error,
     });
   } catch (error) {
