@@ -26,6 +26,15 @@ type GitStageFilesResponse = {
   error?: string;
 };
 
+type GitPushResponse = {
+  success: boolean;
+  output?: string;
+  staged?: GitFileStatus[];
+  unstaged?: GitFileStatus[];
+  branch?: string;
+  error?: string;
+};
+
 type DiffLine = {
   type: "add" | "remove" | "context";
   content: string;
@@ -349,6 +358,57 @@ router.post("/:projectId/commit", async (req: Request, res: Response) => {
     });
   } catch (error) {
     handleRouteError(res, "Failed to commit", error);
+  }
+});
+
+router.post("/:projectId/push", async (req: Request, res: Response) => {
+  try {
+    const userId = req.headers["x-user-id"] as string;
+    const { projectId } = req.params;
+    const serverId = req.headers["x-server-id"] as string | undefined;
+    const {
+      remote,
+      branch,
+      setUpstream,
+    } = req.body as {
+      remote?: string;
+      branch?: string;
+      setUpstream?: boolean;
+    };
+
+    if (!userId) {
+      res.status(401).json({ error: "x-user-id header is required" });
+      return;
+    }
+
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    const result = await requestConnectedServer<GitPushResponse>(
+      userId,
+      "git_push_request",
+      "git_push_response",
+      {
+        projectId,
+        remote: remote?.trim() || "origin",
+        branch: branch?.trim(),
+        setUpstream: Boolean(setUpstream),
+      },
+      serverId,
+    );
+
+    res.json({
+      success: result.response.success,
+      output: result.response.output,
+      staged: result.response.staged || [],
+      unstaged: result.response.unstaged || [],
+      branch: result.response.branch || "HEAD",
+      error: result.response.error,
+    });
+  } catch (error) {
+    handleRouteError(res, "Failed to push changes", error);
   }
 });
 

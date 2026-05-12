@@ -20,6 +20,10 @@ type GitMutationStatusResponse = {
   error?: string;
 };
 
+type GitPushMutationResponse = GitMutationStatusResponse & {
+  output?: string;
+};
+
 export type DiffLine = {
   type: "add" | "remove" | "context";
   content: string;
@@ -196,6 +200,42 @@ export function useGitCommit(projectId: string, onSuccessCallback?: () => void) 
       >(`/git/${projectId}/commit`, { message, files });
       if (!response.data.success) {
         throw new Error(response.data.error ?? "Failed to commit");
+      }
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData<GitFileStatusResponse>(
+        gitKeys.fileStatus(projectId),
+        {
+          staged: data.staged ?? [],
+          unstaged: data.unstaged ?? [],
+          branch: data.branch ?? "HEAD",
+        },
+      );
+      onSuccessCallback?.();
+    },
+  });
+}
+
+export function useGitPush(projectId: string, onSuccessCallback?: () => void) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      remote = "origin",
+      branch,
+      setUpstream = false,
+    }: {
+      remote?: string;
+      branch?: string;
+      setUpstream?: boolean;
+    }) => {
+      const response = await baseApi.post<GitPushMutationResponse>(
+        `/git/${projectId}/push`,
+        { remote, branch, setUpstream },
+      );
+      if (!response.data.success) {
+        throw new Error(response.data.error ?? "Failed to push changes");
       }
       return response.data;
     },
