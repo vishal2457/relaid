@@ -253,6 +253,7 @@ export default function ChatScreen() {
       ) ?? null
     );
   }, [activeLookupAgentProviderId, availableAgentProviders]);
+  const isCodexAgentProvider = selectedAgentProvider?.agentProviderId === "codex";
   const visibleModelGroups = React.useMemo(() => {
     if (!activeLookupAgentProviderId) {
       return session.sortedModelGroups;
@@ -1388,7 +1389,10 @@ export default function ChatScreen() {
         )}
         <ChatComposer
           activeProject={Boolean(session.activeProject)}
-          activeAgentName={session.activeAgent?.name ?? "Default agent"}
+          activeAgentName={
+            session.activeAgent?.name ??
+            (isCodexAgentProvider ? "Default mode" : "Default agent")
+          }
           activeAgentProviderName={
             selectedAgentProvider?.agentProviderName ?? "No provider"
           }
@@ -1494,6 +1498,21 @@ export default function ChatScreen() {
         agents={session.sortedAgents}
         activeAgentName={session.activeAgent?.name}
         loading={session.agentsLoading}
+        title={
+          isCodexAgentProvider
+            ? "Select Collaboration Mode"
+            : "Select Agent"
+        }
+        searchPlaceholder={
+          isCodexAgentProvider
+            ? "Search collaboration modes"
+            : "Search agents"
+        }
+        emptyText={
+          isCodexAgentProvider
+            ? "No collaboration modes found"
+            : "No agents found"
+        }
         searchQuery={session.agentSearchQuery}
         onSearchChange={session.setAgentSearchQuery}
         onClose={session.handleCloseAgentSheet}

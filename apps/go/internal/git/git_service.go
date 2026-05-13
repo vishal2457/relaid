@@ -403,6 +403,45 @@ func (s *Service) Commit(message string, files []string) Result[CommitResultData
 // =====================
 
 func (s *Service) Push(remote string, branch string, setUpstream bool) Result[OutputStatusResultData] {
+	if remote == "" {
+		remote = "origin"
+	}
+	resolvedBranch := strings.TrimSpace(branch)
+	if resolvedBranch == "" {
+		branchResult := s.GetCurrentBranch()
+		if !branchResult.Success {
+			return fail[OutputStatusResultData](branchResult.Error)
+		}
+		resolvedBranch = strings.TrimSpace(branchResult.Data)
+	}
+
+	shouldSetUpstream := setUpstream && !s.hasUpstreamForBranch(remote, resolvedBranch)
+	args := s.pushArgs(remote, resolvedBranch, shouldSetUpstream)
+
+	result, err := runGitDetailed(s.cwd, networkGitTimeout, args...)
+	if err != nil && shouldSetUpstream {
+		// Some repos still complete the push but reject the explicit upstream update.
+		// Retry once without --set-upstream so the API reflects the real remote state.
+		args = s.pushArgs(remote, resolvedBranch, false)
+		result, err = runGitDetailed(s.cwd, networkGitTimeout, args...)
+	}
+	if err != nil {
+		s.handleError("push", err)
+		return fail[OutputStatusResultData](err.Error())
+	}
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fail[OutputStatusResultData](statusResult.Error)
+	}
+	log.Printf("Pushed to %s/%s (cwd=%s)", remote, resolvedBranch, s.cwd)
+	return ok(OutputStatusResultData{
+		Output:  firstNonEmpty(result.Stdout, result.Stderr, "Pushed successfully"),
+		Status:  statusResult.Data,
+		Changed: true,
+	})
+}
+
+func (s *Service) pushArgs(remote string, branch string, setUpstream bool) []string {
 	args := []string{"push"}
 	if setUpstream {
 		args = append(args, "--set-upstream")
@@ -413,21 +452,25 @@ func (s *Service) Push(remote string, branch string, setUpstream bool) Result[Ou
 	if branch != "" {
 		args = append(args, branch)
 	}
-	result, err := runGitDetailed(s.cwd, networkGitTimeout, args...)
+	return args
+}
+
+func (s *Service) hasUpstreamForBranch(remote string, branch string) bool {
+	if strings.TrimSpace(branch) == "" {
+		return false
+	}
+	upstream, err := runGitWithTimeout(
+		s.cwd,
+		defaultGitTimeout,
+		"rev-parse",
+		"--abbrev-ref",
+		"--symbolic-full-name",
+		branch+"@{upstream}",
+	)
 	if err != nil {
-		s.handleError("push", err)
-		return fail[OutputStatusResultData](err.Error())
+		return false
 	}
-	statusResult := s.GetFileStatusLists()
-	if !statusResult.Success {
-		return fail[OutputStatusResultData](statusResult.Error)
-	}
-	log.Printf("Pushed to %s/%s (cwd=%s)", remote, branch, s.cwd)
-	return ok(OutputStatusResultData{
-		Output:  firstNonEmpty(result.Stdout, result.Stderr, "Pushed successfully"),
-		Status:  statusResult.Data,
-		Changed: true,
-	})
+	return strings.TrimSpace(upstream) == fmt.Sprintf("%s/%s", remote, branch)
 }
 
 func (s *Service) Pull(remote string, branch string) Result[OutputStatusResultData] {

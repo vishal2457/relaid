@@ -3,6 +3,7 @@ import { Animated, Pressable, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Text, useTheme } from "react-native-paper";
 import { AssistantBlockSequence } from "./AssistantBlockSequence";
+import { FormattedText } from "./FormattedText";
 import type {
   SessionAssistantActivity,
   SessionAssistantBlock,

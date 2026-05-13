@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -60,7 +61,7 @@ func TestBuildCollaborationModeSelectionReturnsNilForEmptyAgent(t *testing.T) {
 	}
 }
 
-func TestTurnStartParamsDoNotSerializeCollaborationMode(t *testing.T) {
+func TestTurnStartParamsSerializeCollaborationMode(t *testing.T) {
 	model := "gpt-5.4"
 	payload, err := json.Marshal(turnStartParams{
 		ThreadID: "thread-123",
@@ -69,6 +70,12 @@ func TestTurnStartParamsDoNotSerializeCollaborationMode(t *testing.T) {
 			Text: "hello",
 		}},
 		Model: &model,
+		CollaborationMode: &collaborationModeSelection{
+			Mode: "plan",
+			Settings: map[string]any{
+				"developer_instructions": nil,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("marshal turnStartParams: %v", err)
@@ -78,8 +85,19 @@ func TestTurnStartParamsDoNotSerializeCollaborationMode(t *testing.T) {
 	if !strings.Contains(jsonText, `"model":"gpt-5.4"`) {
 		t.Fatalf("expected model in payload, got %s", jsonText)
 	}
-	if strings.Contains(jsonText, "collaborationMode") {
-		t.Fatalf("expected collaborationMode to be omitted, got %s", jsonText)
+	if !strings.Contains(jsonText, `"collaborationMode":{"mode":"plan"`) {
+		t.Fatalf("expected collaborationMode in payload, got %s", jsonText)
+	}
+}
+
+func TestIsTurnStartCollaborationModeRejected(t *testing.T) {
+	if !isTurnStartCollaborationModeRejected(
+		errors.New("Invalid request: missing field `model`"),
+	) {
+		t.Fatalf("expected missing-model error to trigger compatibility retry")
+	}
+	if isTurnStartCollaborationModeRejected(errors.New("thread not loaded")) {
+		t.Fatalf("expected unrelated errors to skip compatibility retry")
 	}
 }
 

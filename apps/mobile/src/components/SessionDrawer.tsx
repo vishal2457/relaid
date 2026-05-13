@@ -166,6 +166,10 @@ export function SessionDrawer({
       return;
     }
 
+    if (activeProject) {
+      void refetchSessions();
+    }
+
     let isCancelled = false;
 
     void getActiveSessionStream().then((stream) => {
@@ -177,7 +181,7 @@ export function SessionDrawer({
     return () => {
       isCancelled = true;
     };
-  }, [visible]);
+  }, [visible, activeProject]);
 
   React.useEffect(() => {
     setExpandedProviders(new Set());

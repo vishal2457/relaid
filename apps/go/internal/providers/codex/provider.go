@@ -596,12 +596,27 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 		onChunk(agent.StreamChunk{Type: "status", Content: "Codex thread initialized"})
 	}
 
+	collaborationMode := buildCollaborationModeSelection(input.Agent, input.SystemPrompt)
 	turnResult, err := conn.turnStart(runCtx, turnStartParams{
-		ThreadID: threadID,
-		Input:    buildUserInputs(prompt, input.Items),
-		Cwd:      emptyToNil(input.WorkingDir),
-		Model:    modelToNil(input.Model),
+		ThreadID:          threadID,
+		Input:             buildUserInputs(prompt, input.Items),
+		Cwd:               emptyToNil(input.WorkingDir),
+		Model:             modelToNil(input.Model),
+		CollaborationMode: collaborationMode,
 	})
+	if err != nil && collaborationMode != nil && isTurnStartCollaborationModeRejected(err) {
+		s.logger.Printf(
+			"codex: turn/start rejected collaboration mode %q; retrying without it: %v",
+			collaborationMode.Mode,
+			err,
+		)
+		turnResult, err = conn.turnStart(runCtx, turnStartParams{
+			ThreadID: threadID,
+			Input:    buildUserInputs(prompt, input.Items),
+			Cwd:      emptyToNil(input.WorkingDir),
+			Model:    modelToNil(input.Model),
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1886,6 +1901,15 @@ func isTurnsUnavailable(err error) bool {
 		(strings.Contains(msg, "not materialized yet") && strings.Contains(msg, "includeturns"))
 }
 
+func isTurnStartCollaborationModeRejected(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "invalid request: missing field `model`") ||
+		strings.Contains(msg, "invalid request: missing field model")
+}
+
 func mapThread(t thread) agent.Session {
 	title := firstNonEmpty(stringPtrValue(t.Name, ""), t.Preview, "Untitled Codex thread")
 	return agent.Session{
@@ -1969,10 +1993,11 @@ type fuzzyFileSearchParams struct {
 }
 
 type turnStartParams struct {
-	ThreadID string      `json:"threadId"`
-	Input    []userInput `json:"input"`
-	Cwd      *string     `json:"cwd,omitempty"`
-	Model    *string     `json:"model,omitempty"`
+	ThreadID          string                      `json:"threadId"`
+	Input             []userInput                 `json:"input"`
+	Cwd               *string                     `json:"cwd,omitempty"`
+	Model             *string                     `json:"model,omitempty"`
+	CollaborationMode *collaborationModeSelection `json:"collaborationMode,omitempty"`
 }
 
 type userInput struct {

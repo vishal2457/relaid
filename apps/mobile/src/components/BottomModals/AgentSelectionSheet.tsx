@@ -9,6 +9,9 @@ type AgentSelectionSheetProps = {
   agents: Agent[];
   activeAgentName?: string | null;
   loading?: boolean;
+  title?: string;
+  searchPlaceholder?: string;
+  emptyText?: string;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onClose: () => void;
@@ -21,6 +24,9 @@ export function AgentSelectionSheet({
   agents,
   activeAgentName,
   loading = false,
+  title = "Select Agent",
+  searchPlaceholder = "Search agents",
+  emptyText = "No agents found",
   searchQuery,
   onSearchChange,
   onClose,
@@ -35,15 +41,15 @@ export function AgentSelectionSheet({
   return (
     <SelectionSheet
       visible={visible}
-      title="Select Agent"
+      title={title}
       data={agents}
       onClose={onClose}
       onItemPress={onSelectAgent}
-      searchPlaceholder="Search agents"
+      searchPlaceholder={searchPlaceholder}
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}
       isLoading={loading}
-      emptyText="No agents found"
+      emptyText={emptyText}
       selectedId={activeAgentName}
       getItemId={(item) => item.name}
       keyExtractor={(item) => item.name}
