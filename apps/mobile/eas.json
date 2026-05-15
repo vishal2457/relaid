@@ -15,8 +15,11 @@
       }
     },
     "production": {
-      "credentialsSource": "local",
-      "autoIncrement": true
+      "credentialsSource": "remote",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      }
     }
   },
   "submit": {

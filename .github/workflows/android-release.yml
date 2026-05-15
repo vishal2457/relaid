@@ -1,15 +1,6 @@
 name: Android Preview Build
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "apps/mobile/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - ".github/workflows/android-release.yml"
   workflow_dispatch:
 
 jobs:

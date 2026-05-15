@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { NuqsAdapter } from "nuqs/adapters/react";
-import { useEffect, useState } from "react";
-import { Toaster } from "sonner";
+import { useEffect, useRef, useState } from "react";
+import { toast, Toaster } from "sonner";
 import { AppRouter } from "./routes/router";
 import { updateApi, type UpdateStatus } from "./shared/api/features/update.api";
 import { TooltipProvider } from "./shared/components/ui/tooltip";
@@ -24,6 +24,7 @@ function App() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const updateTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -115,6 +116,11 @@ function App() {
         setIsUpdateDialogOpen(true);
       } catch (error) {
         console.error("Failed to check for updates:", error);
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Unable to check for desktop updates.",
+        );
       }
     };
 
@@ -144,6 +150,31 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (updateTimeoutRef.current !== null) {
+      window.clearTimeout(updateTimeoutRef.current);
+      updateTimeoutRef.current = null;
+    }
+
+    if (!isUpdating) {
+      return;
+    }
+
+    updateTimeoutRef.current = window.setTimeout(() => {
+      setIsUpdating(false);
+      toast.error(
+        "The update is taking longer than expected. Check the relay URL and try again.",
+      );
+    }, 90_000);
+
+    return () => {
+      if (updateTimeoutRef.current !== null) {
+        window.clearTimeout(updateTimeoutRef.current);
+        updateTimeoutRef.current = null;
+      }
+    };
+  }, [isUpdating]);
+
   const handleUpdate = async () => {
     if (!updateStatus || isUpdating) {
       return;
@@ -158,6 +189,11 @@ function App() {
     } catch (error) {
       console.error("Failed to install update:", error);
       setIsUpdating(false);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Unable to download or install the desktop update.",
+      );
     }
   };
 

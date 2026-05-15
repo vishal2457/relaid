@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { ActivityIndicator, PaperProvider } from "react-native-paper";
 import { router, Stack, usePathname } from "expo-router";
@@ -23,6 +23,7 @@ import {
   requestNotificationPermissions,
   registerPushTokenWithServer,
 } from "@/src/lib/notifications";
+import { hasSeenOnboarding, markOnboardingSeen } from "@/src/lib/onboarding";
 
 function StartupInit() {
   useEffect(() => {
@@ -63,31 +64,73 @@ function RootLayoutInner() {
   const { hydrated: pairingHydrated, isPaired } = usePairingSession();
   const { hydrated: serverUrlHydrated } = useServerUrl();
   const pathname = usePathname();
+  const [onboardingHydrated, setOnboardingHydrated] = useState(false);
+  const [onboardingSeen, setOnboardingSeen] = useState(false);
   const currentTheme = (THEMES.find((t) => t.key === selectedTheme)?.theme ??
     defaultTheme) as typeof defaultTheme;
 
   useEffect(() => {
-    if (!pairingHydrated || !serverUrlHydrated) {
+    let cancelled = false;
+
+    void (async () => {
+      const seen = await hasSeenOnboarding();
+      if (!cancelled) {
+        setOnboardingSeen(seen);
+        setOnboardingHydrated(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pairingHydrated || !onboardingHydrated || !isPaired || onboardingSeen) {
+      return;
+    }
+
+    setOnboardingSeen(true);
+    void markOnboardingSeen();
+  }, [isPaired, onboardingHydrated, onboardingSeen, pairingHydrated]);
+
+  useEffect(() => {
+    if (!pairingHydrated || !serverUrlHydrated || !onboardingHydrated) {
+      return;
+    }
+
+    if (isPaired) {
+      if (pathname === "/pair" || pathname === "/onboarding") {
+        router.replace("/");
+      }
+      return;
+    }
+
+    if (!onboardingSeen) {
+      if (pathname !== "/onboarding") {
+        router.replace("/onboarding" as any);
+      }
       return;
     }
 
     if (
-      !isPaired &&
-      pathname !== "/onboarding" &&
       pathname !== "/pair" &&
       pathname !== "/settings" &&
-      pathname !== "/auth"
+      pathname !== "/auth" &&
+      pathname !== "/diff"
     ) {
-      router.replace("/onboarding" as any);
-      return;
+      router.replace("/pair" as any);
     }
+  }, [
+    isPaired,
+    onboardingHydrated,
+    onboardingSeen,
+    pairingHydrated,
+    pathname,
+    serverUrlHydrated,
+  ]);
 
-    if (isPaired && pathname === "/pair") {
-      router.replace("/");
-    }
-  }, [isPaired, pairingHydrated, pathname, serverUrlHydrated]);
-
-  if (!pairingHydrated || !serverUrlHydrated) {
+  if (!pairingHydrated || !serverUrlHydrated || !onboardingHydrated) {
     return (
       <PaperProvider theme={currentTheme}>
         <View
@@ -124,6 +167,7 @@ function RootLayoutInner() {
             name="git"
             options={{ headerShown: false, presentation: "card" }}
           />
+          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         </Stack>
       ) : (
         <Stack>

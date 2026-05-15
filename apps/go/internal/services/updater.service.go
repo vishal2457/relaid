@@ -104,17 +104,16 @@ func CurrentTarget() (string, error) {
 
 func DownloadAndInstallUpdate(ctx context.Context, downloadURL string, fileName string) error {
 	wailsRuntime.EventsEmit(ctx, "update_loading_start", nil)
+	defer wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 		return fmt.Errorf("failed to create update download request: %w", err)
 	}
 
 	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
-		wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 		return fmt.Errorf("failed to download update: %w", err)
 	}
 	defer resp.Body.Close()
@@ -122,16 +121,13 @@ func DownloadAndInstallUpdate(ctx context.Context, downloadURL string, fileName 
 	if resp.StatusCode != http.StatusOK {
 		var payload errorResponse
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil && payload.Error != "" {
-			wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 			return errors.New(payload.Error)
 		}
-		wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 		return fmt.Errorf("update download returned status %d", resp.StatusCode)
 	}
 
 	binaryData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 		return fmt.Errorf("failed to read update payload: %w", err)
 	}
 
@@ -150,13 +146,13 @@ func InstallFromBinaryData(ctx context.Context, binaryData []byte, fileName stri
 func installFromBinaryData(ctx context.Context, binaryData []byte, fileName string, emitStart bool) error {
 	if emitStart {
 		wailsRuntime.EventsEmit(ctx, "update_loading_start", nil)
+		defer wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 	}
 
 	// Check for reasonable file size (limit to 500MB)
 	const maxFileSize = 500 * 1024 * 1024 // 500MB
 	if len(binaryData) > maxFileSize {
 		err := fmt.Errorf("binary data too large: %d bytes (max: %d bytes)", len(binaryData), maxFileSize)
-		wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 		return err
 	}
 
@@ -176,7 +172,6 @@ func installFromBinaryData(ctx context.Context, binaryData []byte, fileName stri
 
 		err := handleMacOSZipUpdate(ctx, binaryData)
 		if err != nil {
-			wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 			return err
 		}
 		return nil
@@ -186,12 +181,8 @@ func installFromBinaryData(ctx context.Context, binaryData []byte, fileName stri
 	err := update.Apply(bytes.NewReader(binaryData), update.Options{})
 	if err != nil {
 		log.Printf("Failed to apply update: %v", err)
-		wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 		return err
 	}
-
-	// Notify loading end before restart
-	wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 
 	// Restart application
 	return restartApplication(ctx)
@@ -253,9 +244,6 @@ func handleMacOSZipUpdate(ctx context.Context, zipData []byte) error {
 		log.Printf("Failed to apply update: %v", err)
 		return err
 	}
-
-	// Notify loading end before restart
-	wailsRuntime.EventsEmit(ctx, "update_loading_end", nil)
 
 	// Restart application
 	log.Println("Restarting application...")

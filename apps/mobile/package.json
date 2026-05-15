@@ -10,6 +10,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "build:aab": "bash ./src/scripts/build-aab.sh",
     "build:apk": "bash ./src/scripts/build-apk.sh",
     "build:apk:eas": "bash ./src/scripts/build-apk-eas.sh"
   },

@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "react-native-paper";
 import { router } from "expo-router";
+import { markOnboardingSeen } from "@/src/lib/onboarding";
 
 const { width, height } = Dimensions.get("window");
 
@@ -47,6 +48,10 @@ export default function Onboarding() {
   const theme = useTheme();
   const scrollX = useRef(new Animated.Value(0)).current;
   const [index, setIndex] = useState(0);
+
+  React.useEffect(() => {
+    void markOnboardingSeen();
+  }, []);
 
   const isLastSlide = index === DATA.length - 1;
 
