@@ -658,6 +658,50 @@ func (s *Service) DiffUnstaged() Result[string] {
 }
 
 func (s *Service) DiffFile(filePath string) Result[[]FileDiff] {
+	if strings.TrimSpace(filePath) == "" {
+		return s.diffAllFiles()
+	}
+
+	return s.diffSingleFile(filePath)
+}
+
+func (s *Service) diffAllFiles() Result[[]FileDiff] {
+	out, err := runGit(s.cwd, "diff", "HEAD")
+	if err != nil {
+		s.handleError("diffAllFiles", err)
+		return fail[[]FileDiff](err.Error())
+	}
+
+	files := ParseDiff(out)
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return ok(files)
+	}
+
+	for _, f := range statusResult.Data.Unstaged {
+		if f.Status != "untracked" && f.Status != "added" && f.Status != "copied" {
+			continue
+		}
+		if hasFileDiff(files, f.Path) {
+			continue
+		}
+		files = append(files, s.buildAddedFileDiff(f.Path))
+	}
+
+	for _, f := range statusResult.Data.Staged {
+		if f.Status != "added" {
+			continue
+		}
+		if hasFileDiff(files, f.Path) {
+			continue
+		}
+		files = append(files, s.buildAddedFileDiff(f.Path))
+	}
+
+	return ok(files)
+}
+
+func (s *Service) diffSingleFile(filePath string) Result[[]FileDiff] {
 	out, err := runGit(s.cwd, "diff", "HEAD", "--", filePath)
 	if err != nil {
 		s.handleError("diffFile", err)
@@ -683,24 +727,7 @@ func (s *Service) DiffFile(filePath string) Result[[]FileDiff] {
 		}
 
 		if isNewFile {
-			fullPath := filepath.Join(s.cwd, filePath)
-			content, err := os.ReadFile(fullPath)
-			if err != nil {
-				return ok([]FileDiff{})
-			}
-			lines := strings.Split(string(content), "\n")
-			var diffLines []DiffLine
-			for _, line := range lines {
-				diffLines = append(diffLines, DiffLine{
-					Type:    "add",
-					Content: line,
-				})
-			}
-			header := fmt.Sprintf("@@ -0,0 +1,%d @@", len(lines))
-			return ok([]FileDiff{{
-				FileName: filePath,
-				Hunks:    []DiffHunk{{Header: header, Lines: diffLines}},
-			}})
+			return ok([]FileDiff{s.buildAddedFileDiff(filePath)})
 		}
 
 		return ok([]FileDiff{})
@@ -708,6 +735,41 @@ func (s *Service) DiffFile(filePath string) Result[[]FileDiff] {
 
 	parsed := ParseDiff(out)
 	return ok(parsed)
+}
+
+func (s *Service) buildAddedFileDiff(filePath string) FileDiff {
+	fullPath := filepath.Join(s.cwd, filePath)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return FileDiff{
+			FileName: filePath,
+			Hunks:    []DiffHunk{},
+		}
+	}
+
+	lines := strings.Split(string(content), "\n")
+	diffLines := make([]DiffLine, 0, len(lines))
+	for _, line := range lines {
+		diffLines = append(diffLines, DiffLine{
+			Type:    "add",
+			Content: line,
+		})
+	}
+
+	header := fmt.Sprintf("@@ -0,0 +1,%d @@", len(lines))
+	return FileDiff{
+		FileName: filePath,
+		Hunks:    []DiffHunk{{Header: header, Lines: diffLines}},
+	}
+}
+
+func hasFileDiff(files []FileDiff, filePath string) bool {
+	for _, file := range files {
+		if file.FileName == filePath {
+			return true
+		}
+	}
+	return false
 }
 
 // =====================

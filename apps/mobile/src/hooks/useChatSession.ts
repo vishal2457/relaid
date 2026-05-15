@@ -252,6 +252,7 @@ export function getAgentSubtitle(agent: Agent): string {
 }
 
 export type HydrationDeps = {
+  activeAgentProviderIdOverride?: string;
   isMountedRef: React.MutableRefObject<boolean>;
   allowSessionChangeRecoveryRef: React.MutableRefObject<boolean>;
   activeSessionIdRef: React.MutableRefObject<string | null>;
@@ -300,9 +301,11 @@ export function useChatSession(deps: HydrationDeps) {
     () => flattenProvidersToModels(providers ?? []),
     [providers],
   );
+  const effectiveAgentProviderId =
+    deps.activeAgentProviderIdOverride ?? selectedAgentProviderId;
   const { data: agents = [], isLoading: agentsLoading } = useAgents(
     activeProject?.id ?? "",
-    selectedAgentProviderId,
+    effectiveAgentProviderId,
     Boolean(activeProject),
   );
   const { data: gitFileStatus } = useGitFileStatus(
@@ -414,7 +417,7 @@ export function useChatSession(deps: HydrationDeps) {
 
   // Restore agent from storage on project/agents change
   React.useEffect(() => {
-    if (!hydrated || !activeProject || !selectedAgentProviderId) {
+    if (!hydrated || !activeProject || !effectiveAgentProviderId) {
       return;
     }
 
@@ -427,7 +430,7 @@ export function useChatSession(deps: HydrationDeps) {
         const saved = parseStoredAgentSelectionsByProject(raw);
         const projectSelections = saved[activeProject.id];
         const savedAgentName =
-          projectSelections?.[selectedAgentProviderId] ??
+          projectSelections?.[effectiveAgentProviderId] ??
           projectSelections?.[LEGACY_AGENT_SELECTION_KEY];
         if (!savedAgentName || agents.length === 0) {
           return;
@@ -444,7 +447,7 @@ export function useChatSession(deps: HydrationDeps) {
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProject, agents, hydrated, selectedAgentProviderId]);
+  }, [activeProject, agents, effectiveAgentProviderId, hydrated]);
 
   // Sync agent when agents list changes
   React.useEffect(() => {
@@ -471,7 +474,7 @@ export function useChatSession(deps: HydrationDeps) {
       !hydrated ||
       !activeProject ||
       !activeAgent ||
-      !selectedAgentProviderId
+      !effectiveAgentProviderId
     ) {
       return;
     }
@@ -481,7 +484,7 @@ export function useChatSession(deps: HydrationDeps) {
         const currentMap = parseStoredAgentSelectionsByProject(raw);
         currentMap[activeProject.id] = {
           ...(currentMap[activeProject.id] ?? {}),
-          [selectedAgentProviderId]: activeAgent.name,
+          [effectiveAgentProviderId]: activeAgent.name,
         };
         return AsyncStorage.setItem(
           LAST_SELECTED_AGENT_BY_PROJECT,
@@ -489,7 +492,7 @@ export function useChatSession(deps: HydrationDeps) {
         );
       })
       .catch(() => {});
-  }, [activeAgent, activeProject, hydrated, selectedAgentProviderId]);
+  }, [activeAgent, activeProject, effectiveAgentProviderId, hydrated]);
 
   React.useEffect(() => {
     if (!hydrated || selectionHydrated || !providers) return;

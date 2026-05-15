@@ -5,6 +5,9 @@ export type ParsedPairingUrl = {
   serverId?: string;
   serverName?: string;
   expiresAt?: string;
+  serverPublicKey?: string;
+  serverKeyId?: string;
+  fingerprint?: string;
 };
 
 export function parsePairingUrl(value: string): ParsedPairingUrl {
@@ -29,5 +32,9 @@ export function parsePairingUrl(value: string): ParsedPairingUrl {
     serverId: url.searchParams.get("serverId")?.trim() || undefined,
     serverName: url.searchParams.get("serverName")?.trim() || undefined,
     expiresAt: url.searchParams.get("expiresAt")?.trim() || undefined,
+    serverPublicKey:
+      url.searchParams.get("serverPublicKey")?.trim() || undefined,
+    serverKeyId: url.searchParams.get("serverKeyId")?.trim() || undefined,
+    fingerprint: url.searchParams.get("fingerprint")?.trim() || undefined,
   };
 }

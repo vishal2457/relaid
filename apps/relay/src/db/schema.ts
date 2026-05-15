@@ -28,6 +28,8 @@ export const mobileDevices = pgTable("mobile_devices", {
   name: text("name").notNull(),
   platform: text("platform"),
   tokenHash: text("token_hash").notNull(),
+  devicePublicKey: text("device_public_key").notNull(),
+  deviceKeyId: text("device_key_id").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at"),
   revokedAt: timestamp("revoked_at"),
@@ -39,6 +41,9 @@ export const pairingSessions = pgTable("pairing_sessions", {
     .notNull()
     .references(() => localServers.id),
   secretHash: text("secret_hash").notNull(),
+  serverPublicKey: text("server_public_key").notNull(),
+  serverKeyId: text("server_key_id").notNull(),
+  fingerprint: text("fingerprint").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   expiresAt: timestamp("expires_at").notNull(),
   usedAt: timestamp("used_at"),

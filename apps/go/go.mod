@@ -10,6 +10,7 @@ require (
 	github.com/labstack/echo/v4 v4.13.3
 	github.com/sst/opencode-sdk-go v0.19.0
 	github.com/wailsapp/wails/v2 v2.12.0
+	golang.org/x/crypto v0.48.0
 	modernc.org/sqlite v1.46.1
 	nhooyr.io/websocket v1.8.17
 )
@@ -60,7 +61,6 @@ require (
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect

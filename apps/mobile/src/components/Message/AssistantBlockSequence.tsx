@@ -1,5 +1,5 @@
 import React from "react";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Text } from "react-native-paper";
 import { FormattedText } from "./FormattedText";
 import { ToolPart } from "./ToolPart";
@@ -9,6 +9,7 @@ interface AssistantBlockSequenceProps {
   blocks: SessionAssistantBlock[];
   metaText?: string | null;
   showMetaText?: boolean;
+  onTextBlockLongPress?: (() => void) | undefined;
   assistantBubble: string;
   textColor: string;
   metaColor: string;
@@ -21,6 +22,7 @@ export const AssistantBlockSequence: React.FC<AssistantBlockSequenceProps> =
       blocks,
       metaText,
       showMetaText = true,
+      onTextBlockLongPress,
       assistantBubble,
       textColor,
       metaColor,
@@ -34,8 +36,10 @@ export const AssistantBlockSequence: React.FC<AssistantBlockSequenceProps> =
                 !blocks.slice(index + 1).some((candidate) => candidate.type === "text");
 
               return (
-                <View
+                <Pressable
                   key={block.id}
+                  onLongPress={onTextBlockLongPress}
+                  delayLongPress={250}
                   style={{
                     backgroundColor: assistantBubble,
                     borderRadius: 5,
@@ -55,7 +59,7 @@ export const AssistantBlockSequence: React.FC<AssistantBlockSequenceProps> =
                       {metaText}
                     </Text>
                   ) : null}
-                </View>
+                </Pressable>
               );
             }
 

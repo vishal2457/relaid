@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Text as NativeText,
   View,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -19,8 +20,9 @@ import { type Project } from "@/src/lib/api/projects";
 import { useProviders } from "@/src/lib/api/providers";
 import {
   clearActiveSessionStream,
-  getActiveSessionStream,
+  isActiveRuntimePhase,
   isStreamingSessionStatus,
+  type SessionRuntime,
 } from "@/src/lib/active-session-stream";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -40,7 +42,13 @@ type SessionDrawerProps = {
   onClose: () => void;
   activeProject: Project | null;
   activeSessionId: string | null;
-  onSelectSession: (sessionId: string | null, agentProviderId?: string) => void;
+  allProjects: Project[];
+  runtimeBySessionKey: Record<string, SessionRuntime>;
+  onSelectSession: (
+    sessionId: string | null,
+    agentProviderId?: string,
+    projectId?: string,
+  ) => void;
 };
 
 export function SessionDrawer({
@@ -48,15 +56,17 @@ export function SessionDrawer({
   onClose,
   activeProject,
   activeSessionId,
+  allProjects,
+  runtimeBySessionKey,
   onSelectSession,
 }: SessionDrawerProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const [isMounted, setIsMounted] = React.useState(visible);
-  const [hasPendingSession, setHasPendingSession] = React.useState(false);
   const [expandedProviders, setExpandedProviders] = React.useState<Set<string>>(
     new Set(),
   );
+  const previousVisibleRef = React.useRef(visible);
   const slideAnim = React.useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const backdropAnim = React.useRef(new Animated.Value(0)).current;
   const { data: providers = [], isLoading: providersLoading } = useProviders();
@@ -89,6 +99,18 @@ export function SessionDrawer({
   const surfaceColor = theme.dark ? "#1E293B" : "#FFFFFF";
   const surfaceVariant = theme.dark ? "#111827" : "#F8FAFC";
   const providerChipBackground = theme.dark ? "#273449" : "#E8EEF6";
+  const hasPendingSession = React.useMemo(
+    () => Object.values(runtimeBySessionKey).some((runtime) => isActiveRuntimePhase(runtime.phase)),
+    [runtimeBySessionKey],
+  );
+
+  const getProviderLabel = React.useCallback((providerId?: string) => {
+    const id = providerId ?? "opencode";
+    if (id === "opencode") return "OpenCode";
+    if (id === "codex") return "Codex";
+    if (id === "claude") return "Claude";
+    return id.charAt(0).toUpperCase() + id.slice(1);
+  }, []);
 
   const groupedSessions = React.useMemo<SessionGroup[]>(() => {
     if (!sessions) return [];
@@ -98,14 +120,7 @@ export function SessionDrawer({
     for (const session of sessions) {
       const providerId = session.agentProviderId ?? "opencode";
       const existing = groups.get(providerId);
-      const providerLabel =
-        providerId === "opencode"
-          ? "OpenCode"
-          : providerId === "codex"
-            ? "Codex"
-            : providerId === "claude"
-              ? "Claude"
-            : providerId.charAt(0).toUpperCase() + providerId.slice(1);
+      const providerLabel = getProviderLabel(providerId);
 
       if (existing) {
         existing.sessions.push(session);
@@ -133,13 +148,22 @@ export function SessionDrawer({
         const rightLatest = right.sessions[0]?.updatedAt ?? 0;
         return rightLatest - leftLatest;
       });
-  }, [sessions]);
+  }, [getProviderLabel, sessions]);
+
+  const activeRuntimeEntries = React.useMemo(
+    () =>
+      Object.values(runtimeBySessionKey)
+        .filter((runtime) => isActiveRuntimePhase(runtime.phase))
+        .sort((left, right) => right.updatedAt - left.updatedAt),
+    [runtimeBySessionKey],
+  );
 
   const handleSelectSession = (
     sessionId: string,
     sessionAgentProviderId?: string,
+    projectId?: string,
   ) => {
-    onSelectSession(sessionId, sessionAgentProviderId);
+    onSelectSession(sessionId, sessionAgentProviderId, projectId);
     onClose();
   };
 
@@ -154,7 +178,6 @@ export function SessionDrawer({
           style: "destructive",
           onPress: async () => {
             await clearActiveSessionStream();
-            setHasPendingSession(false);
           },
         },
       ],
@@ -162,26 +185,15 @@ export function SessionDrawer({
   };
 
   React.useEffect(() => {
-    if (!visible) {
+    const wasVisible = previousVisibleRef.current;
+    previousVisibleRef.current = visible;
+
+    if (!visible || wasVisible || !activeProject) {
       return;
     }
 
-    if (activeProject) {
-      void refetchSessions();
-    }
-
-    let isCancelled = false;
-
-    void getActiveSessionStream().then((stream) => {
-      if (!isCancelled) {
-        setHasPendingSession(Boolean(stream));
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [visible, activeProject]);
+    void refetchSessions();
+  }, [activeProject?.id, refetchSessions, visible]);
 
   React.useEffect(() => {
     setExpandedProviders(new Set());
@@ -329,6 +341,303 @@ export function SessionDrawer({
                 Failed to load sessions
               </Text>
             </View>
+          ) : activeRuntimeEntries.length > 0 ? (
+            <>
+              <View style={styles.providerSection}>
+                <View style={styles.providerSectionHeader}>
+                  <View style={styles.providerSectionTitleRow}>
+                    <View
+                      style={[
+                        styles.providerChip,
+                        { backgroundColor: providerChipBackground },
+                      ]}
+                    >
+                      <Text
+                        variant="labelSmall"
+                        style={[
+                          styles.providerChipText,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Active Now
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.providerSectionBody}>
+                  {activeRuntimeEntries.map((runtime) => {
+                    const project = allProjects.find(
+                      (item) => item.id === runtime.projectId,
+                    );
+                    const isActive = runtime.sessionId === activeSessionId;
+                    const statusLabel =
+                      runtime.phase === "awaiting_permission"
+                        ? "Permission"
+                        : runtime.phase === "awaiting_question"
+                          ? "Question"
+                          : "Running";
+                    return (
+                      <Pressable
+                        key={runtime.sessionKey}
+                        onPress={() =>
+                          handleSelectSession(
+                            runtime.sessionId,
+                            runtime.agentProviderId,
+                            runtime.projectId,
+                          )
+                        }
+                        style={[
+                          styles.sessionItem,
+                          {
+                            backgroundColor: isActive
+                              ? "rgba(156, 163, 175, 0.15)"
+                              : "transparent",
+                            borderColor,
+                          },
+                        ]}
+                      >
+                        <View style={styles.sessionRow}>
+                          <View style={styles.sessionTextBlock}>
+                            <NativeText
+                              numberOfLines={1}
+                              ellipsizeMode="tail"
+                              style={[
+                                styles.sessionPrompt,
+                                {
+                                  color: isActive
+                                    ? "#6B7280"
+                                    : theme.colors.onSurface,
+                                },
+                              ]}
+                            >
+                              {project?.name ?? runtime.projectId}
+                            </NativeText>
+                            <NativeText
+                              numberOfLines={1}
+                              ellipsizeMode="tail"
+                              style={styles.sessionMeta}
+                            >
+                              {getProviderLabel(runtime.agentProviderId)} •{" "}
+                              {runtime.lastStatusText ||
+                                runtime.lastToolLabel ||
+                                "Thinking"}
+                            </NativeText>
+                          </View>
+                          <View style={styles.sessionLoading}>
+                            <ActivityIndicator
+                              size={14}
+                              color={theme.colors.primary}
+                            />
+                            <Text
+                              variant="labelSmall"
+                              style={[
+                                styles.sessionLoadingText,
+                                { color: theme.colors.primary },
+                              ]}
+                            >
+                              {statusLabel}
+                            </Text>
+                          </View>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {!activeProject ? (
+                <View style={styles.centered}>
+                  <MaterialCommunityIcons
+                    name="folder-outline"
+                    size={32}
+                    color={metaColor}
+                  />
+                  <Text
+                    variant="bodyMedium"
+                    style={{ color: metaColor, marginTop: 12 }}
+                  >
+                    Select a project first
+                  </Text>
+                </View>
+              ) : groupedSessions.length === 0 ? (
+                <View style={styles.centered}>
+                  <MaterialCommunityIcons
+                    name="chat-outline"
+                    size={32}
+                    color={metaColor}
+                  />
+                  <Text
+                    variant="bodyMedium"
+                    style={{ color: metaColor, marginTop: 12 }}
+                  >
+                    No sessions yet
+                  </Text>
+                </View>
+              ) : (
+                groupedSessions.map((group) => {
+                  const isSingleProvider = groupedSessions.length === 1;
+                  const isExpanded = expandedProviders.has(group.providerId);
+                  const limitedSessions = group.sessions.slice(0, INITIAL_SESSION_LIMIT);
+                  const visibleProviderSessions = isExpanded
+                    ? group.sessions
+                    : isSingleProvider
+                      ? group.sessions
+                      : limitedSessions;
+                  const hiddenCount =
+                    group.sessions.length - visibleProviderSessions.length;
+
+                  return (
+                    <View key={group.providerId} style={styles.providerSection}>
+                      <View style={styles.providerSectionHeader}>
+                        <View style={styles.providerSectionTitleRow}>
+                          <View
+                            style={[
+                              styles.providerChip,
+                              { backgroundColor: providerChipBackground },
+                            ]}
+                          >
+                            <Text
+                              variant="labelSmall"
+                              style={[
+                                styles.providerChipText,
+                                { color: theme.colors.onSurfaceVariant },
+                              ]}
+                            >
+                              {group.providerLabel}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {!isSingleProvider &&
+                        group.sessions.length > INITIAL_SESSION_LIMIT ? (
+                          <Pressable
+                            onPress={() => toggleProviderExpansion(group.providerId)}
+                            style={styles.providerExpandButton}
+                          >
+                            <Text
+                              variant="labelMedium"
+                              style={{
+                                color: theme.colors.primary,
+                                fontWeight: "600",
+                              }}
+                            >
+                              {isExpanded ? "Show Less" : "View All"}
+                            </Text>
+                            <MaterialCommunityIcons
+                              name={isExpanded ? "chevron-up" : "chevron-down"}
+                              size={18}
+                              color={theme.colors.primary}
+                            />
+                          </Pressable>
+                        ) : null}
+                      </View>
+
+                      <View style={styles.providerSectionBody}>
+                        {visibleProviderSessions.map((session) => {
+                          const isActive = session.id === activeSessionId;
+                          const runtime =
+                            runtimeBySessionKey[
+                              `${session.agentProviderId ?? "opencode"}:${session.id}`
+                            ];
+                          const isSessionLoading =
+                            (runtime && isActiveRuntimePhase(runtime.phase)) ||
+                            isStreamingSessionStatus(session.status);
+                          const sessionStatusLabel = runtime
+                            ? runtime.phase === "awaiting_permission"
+                              ? "Permission"
+                              : runtime.phase === "awaiting_question"
+                                ? "Question"
+                                : "Running"
+                            : session.status === "pending"
+                              ? "Pending"
+                              : "Running";
+
+                          return (
+                            <Pressable
+                              key={session.id}
+                              onPress={() =>
+                                handleSelectSession(
+                                  session.id,
+                                  session.agentProviderId,
+                                  activeProject?.id,
+                                )
+                              }
+                              style={[
+                                styles.sessionItem,
+                                {
+                                  backgroundColor: isActive
+                                    ? "rgba(156, 163, 175, 0.15)"
+                                    : "transparent",
+                                  borderColor,
+                                },
+                              ]}
+                            >
+                              <View style={styles.sessionRow}>
+                                <View style={styles.sessionTextBlock}>
+                                  <Text
+                                    variant="titleSmall"
+                                    style={[
+                                      styles.sessionPrompt,
+                                      {
+                                        color: isActive
+                                          ? "#6B7280"
+                                          : theme.colors.onSurface,
+                                      },
+                                    ]}
+                                  >
+                                    {session.prompt || "Untitled session"}
+                                  </Text>
+                                </View>
+
+                                {isSessionLoading ? (
+                                  <View style={styles.sessionLoading}>
+                                    <ActivityIndicator
+                                      size={14}
+                                      color={theme.colors.primary}
+                                    />
+                                    <Text
+                                      variant="labelSmall"
+                                      style={[
+                                        styles.sessionLoadingText,
+                                        { color: theme.colors.primary },
+                                      ]}
+                                    >
+                                      {sessionStatusLabel}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+
+                        {!isSingleProvider && !isExpanded && hiddenCount > 0 ? (
+                          <Pressable
+                            onPress={() => toggleProviderExpansion(group.providerId)}
+                            style={[styles.loadMoreButton, { borderColor }]}
+                          >
+                            <Text
+                              variant="labelLarge"
+                              style={{
+                                color: theme.colors.onSurfaceVariant,
+                                fontWeight: "600",
+                              }}
+                            >
+                              Load More
+                            </Text>
+                            <MaterialCommunityIcons
+                              name="chevron-down"
+                              size={20}
+                              color={theme.colors.onSurfaceVariant}
+                            />
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </>
           ) : !activeProject ? (
             <View style={styles.centered}>
               <MaterialCommunityIcons
@@ -430,6 +739,10 @@ export function SessionDrawer({
                   <View style={styles.providerSectionBody}>
                     {visibleProviderSessions.map((session) => {
                       const isActive = session.id === activeSessionId;
+                      const runtime =
+                        runtimeBySessionKey[
+                          `${session.agentProviderId ?? "opencode"}:${session.id}`
+                        ];
                       const isSessionLoading = isStreamingSessionStatus(
                         session.status,
                       );
@@ -462,20 +775,31 @@ export function SessionDrawer({
                         >
                           <View style={styles.sessionRow}>
                             <View style={styles.sessionTextBlock}>
-                              <Text
-                                variant="titleSmall"
-                                style={[
-                                  styles.sessionPrompt,
-                                  {
-                                    color: isActive
-                                      ? "#6B7280"
-                                      : theme.colors.onSurface,
-                                  },
-                                ]}
-                                numberOfLines={1}
-                              >
-                                {session.prompt || "Untitled session"}
-                              </Text>
+                                  <NativeText
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                    style={[
+                                      styles.sessionPrompt,
+                                      {
+                                        color: isActive
+                                          ? "#6B7280"
+                                          : theme.colors.onSurface,
+                                      },
+                                    ]}
+                                  >
+                                    {session.prompt || "Untitled session"}
+                                  </NativeText>
+                                  {runtime ? (
+                                    <NativeText
+                                      numberOfLines={1}
+                                      ellipsizeMode="tail"
+                                      style={styles.sessionMeta}
+                                    >
+                                      {runtime.lastStatusText ||
+                                        runtime.lastToolLabel ||
+                                        "Thinking"}
+                                    </NativeText>
+                                  ) : null}
                             </View>
 
                             {isSessionLoading ? (
@@ -731,11 +1055,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   sessionMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     marginTop: 4,
-    paddingLeft: 28,
+    fontSize: 12,
+    lineHeight: 16,
   },
   statusRow: {
     flexDirection: "row",

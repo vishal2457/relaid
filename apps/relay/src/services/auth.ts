@@ -29,6 +29,9 @@ export type PairingSessionPayload = {
   pairedDeviceCount: number;
   serverId: string;
   serverName: string;
+  serverPublicKey: string;
+  serverKeyId: string;
+  fingerprint: string;
 };
 
 function hashSecret(value: string): string {
@@ -188,6 +191,8 @@ export function getServerHeaders(req: Request): {
 
 export async function issueMobileAccessToken(
   serverId: string,
+  devicePublicKey: string,
+  deviceKeyId: string,
   name?: string,
   platform?: string,
 ): Promise<{ accessToken: string; device: MobileDevice }> {
@@ -202,6 +207,8 @@ export async function issueMobileAccessToken(
       name: name?.trim() || "Mobile Device",
       platform: platform?.trim() || null,
       tokenHash: hashSecret(accessToken),
+      devicePublicKey,
+      deviceKeyId,
       createdAt: now,
       lastSeenAt: now,
     })
@@ -263,6 +270,23 @@ export async function authenticateMobileAccessToken(
   };
 }
 
+export async function getMobileDeviceById(
+  deviceId: string,
+): Promise<MobileDevice> {
+  const db = getDb();
+  const [device] = await db
+    .select()
+    .from(mobileDevices)
+    .where(eq(mobileDevices.id, deviceId))
+    .limit(1);
+
+  if (!device) {
+    throw new RouteError(404, "Mobile device not found");
+  }
+
+  return device;
+}
+
 export async function countPairedDevices(serverId: string): Promise<number> {
   const db = getDb();
   const devices = await db
@@ -280,6 +304,9 @@ export async function countPairedDevices(serverId: string): Promise<number> {
 
 export async function createPairingSessionForServer(
   serverId: string,
+  serverPublicKey: string,
+  serverKeyId: string,
+  fingerprint: string,
 ): Promise<PairingSessionPayload> {
   const db = getDb();
   const now = Date.now();
@@ -300,6 +327,9 @@ export async function createPairingSessionForServer(
     id: pairingId,
     serverId,
     secretHash: hashSecret(pairingSecret),
+    serverPublicKey,
+    serverKeyId,
+    fingerprint,
     createdAt: new Date(now),
     expiresAt,
   });
@@ -321,12 +351,17 @@ export async function createPairingSessionForServer(
     pairedDeviceCount: await countPairedDevices(serverId),
     serverId,
     serverName: server.name,
+    serverPublicKey,
+    serverKeyId,
+    fingerprint,
   };
 }
 
 export async function claimPairingSession(
   pairingId: string,
   pairingSecret: string,
+  devicePublicKey: string,
+  deviceKeyId: string,
   deviceName?: string,
   platform?: string,
 ): Promise<{
@@ -334,6 +369,9 @@ export async function claimPairingSession(
   deviceId: string;
   serverId: string;
   serverName: string;
+  serverPublicKey: string;
+  serverKeyId: string;
+  fingerprint: string;
 }> {
   if (!pairingId.trim()) {
     throw new RouteError(400, "pairingId is required");
@@ -341,6 +379,14 @@ export async function claimPairingSession(
 
   if (!pairingSecret.trim()) {
     throw new RouteError(400, "pairingSecret is required");
+  }
+
+  if (!devicePublicKey.trim()) {
+    throw new RouteError(400, "devicePublicKey is required");
+  }
+
+  if (!deviceKeyId.trim()) {
+    throw new RouteError(400, "deviceKeyId is required");
   }
 
   const db = getDb();
@@ -353,9 +399,6 @@ export async function claimPairingSession(
   if (!pairingSession) {
     throw new RouteError(404, "Pairing session not found");
   }
-
-  console.log(pairingSession, "aring");
-  
 
   if (pairingSession.expiresAt.getTime() < Date.now()) {
     throw new RouteError(410, "Pairing session has expired");
@@ -382,14 +425,27 @@ export async function claimPairingSession(
 
   const { accessToken, device } = await issueMobileAccessToken(
     server.id,
+    devicePublicKey,
+    deviceKeyId,
     deviceName,
     platform,
   );
+
+  await db
+    .update(pairingSessions)
+    .set({
+      usedAt: new Date(),
+      claimedDeviceId: device.id,
+    })
+    .where(eq(pairingSessions.id, pairingSession.id));
 
   return {
     accessToken,
     deviceId: device.id,
     serverId: server.id,
     serverName: server.name,
+    serverPublicKey: pairingSession.serverPublicKey,
+    serverKeyId: pairingSession.serverKeyId,
+    fingerprint: pairingSession.fingerprint,
   };
 }

@@ -518,4 +518,11 @@ export type StreamChunkType =
 export interface SessionMessageResponse {
   info: Message;
   parts: Part[];
+  sealedBody?: {
+    version: "v1";
+    senderDeviceId?: string;
+    recipientServerId?: string;
+    nonce: string;
+    ciphertext: string;
+  };
 }

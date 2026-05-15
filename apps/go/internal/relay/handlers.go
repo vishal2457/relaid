@@ -20,10 +20,13 @@ type Handler struct {
 	registry   *agent.Registry
 	logger     *log.Logger
 	workspaces *workspace.Service
+	e2eeKeys   *E2EEKeyMaterial
 
 	dirService         *filesystem.DirectoryService
 	pendingPermissions map[string]chan PermissionReply
 	pendingQuestions   map[string]chan QuestionReply
+	sessionDevices     map[string]deviceTarget
+	requestDevices     map[string]deviceTarget
 	mu                 sync.Mutex
 }
 
@@ -33,6 +36,55 @@ type PermissionReply struct {
 
 type QuestionReply struct {
 	Answers [][]string
+}
+
+type deviceTarget struct {
+	DeviceID        string
+	DeviceKeyID     string
+	DevicePublicKey string
+}
+
+type sessionPromptInnerPayload struct {
+	Prompt      string          `json:"prompt"`
+	Agent       string          `json:"agent,omitempty"`
+	Model       *agent.ModelRef `json:"model,omitempty"`
+	AppMentions []AppMention    `json:"appMentions,omitempty"`
+}
+
+type sessionPromptResponseInnerPayload struct {
+	SessionTitle string `json:"sessionTitle,omitempty"`
+	Output       string `json:"output"`
+	Error        string `json:"error,omitempty"`
+}
+
+type sessionStreamChunkInnerPayload struct {
+	Chunk string `json:"chunk"`
+}
+
+type permissionRequestInnerPayload struct {
+	Permission string                 `json:"permission"`
+	Patterns   []string               `json:"patterns"`
+	Metadata   map[string]interface{} `json:"metadata"`
+}
+
+type permissionResponseInnerPayload struct {
+	Reply string `json:"reply"`
+}
+
+type questionRequestInnerPayload struct {
+	Questions []Question `json:"questions"`
+}
+
+type questionResponseInnerPayload struct {
+	Answers [][]string `json:"answers"`
+}
+
+type messageBodyPayload struct {
+	Content                 string        `json:"content"`
+	VisibleContent          string        `json:"visibleContent"`
+	ThinkingContent         string        `json:"thinkingContent"`
+	ThinkingDurationSeconds *int          `json:"thinkingDurationSeconds,omitempty"`
+	Parts                   []MessagePart `json:"parts"`
 }
 
 func toRelayGitFiles(files []gitservice.FileWithStatus) []GitFile {
@@ -47,15 +99,124 @@ func toRelayGitFiles(files []gitservice.FileWithStatus) []GitFile {
 }
 
 func NewHandler(client *Client, registry *agent.Registry, workspaces *workspace.Service, logger *log.Logger) *Handler {
+	keys, err := LoadOrCreateE2EEKeyMaterial()
+	if err != nil {
+		logger.Printf("relay: failed to load e2ee keys: %v", err)
+	}
 	return &Handler{
 		client:             client,
 		registry:           registry,
 		logger:             logger,
 		workspaces:         workspaces,
+		e2eeKeys:           keys,
 		dirService:         filesystem.NewDirectoryService(),
 		pendingPermissions: make(map[string]chan PermissionReply),
 		pendingQuestions:   make(map[string]chan QuestionReply),
+		sessionDevices:     make(map[string]deviceTarget),
+		requestDevices:     make(map[string]deviceTarget),
 	}
+}
+
+func (h *Handler) setRequestDevice(requestID string, target deviceTarget) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.requestDevices[requestID] = target
+}
+
+func (h *Handler) setSessionDevice(sessionID string, target deviceTarget) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sessionDevices[sessionID] = target
+}
+
+func (h *Handler) getSessionDevice(sessionID string) (deviceTarget, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	target, ok := h.sessionDevices[sessionID]
+	return target, ok
+}
+
+func (h *Handler) getRequestDevice(requestID string) (deviceTarget, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	target, ok := h.requestDevices[requestID]
+	return target, ok
+}
+
+func decryptEnvelopePayload[T any](h *Handler, target deviceTarget, envelope EncryptedEnvelope) (T, error) {
+	if h.e2eeKeys == nil {
+		var zero T
+		return zero, fmt.Errorf("missing desktop e2ee keys")
+	}
+	return DecryptEnvelope[T](envelope, target.DevicePublicKey, h.e2eeKeys.PrivateKey)
+}
+
+func (h *Handler) encryptEnvelope(target deviceTarget, payload any) (*EncryptedEnvelope, error) {
+	if h.e2eeKeys == nil {
+		return nil, fmt.Errorf("missing desktop e2ee keys")
+	}
+	return EncryptEnvelope(payload, target.DeviceID, "", target.DevicePublicKey, h.e2eeKeys.PrivateKey)
+}
+
+func (h *Handler) convertEncryptedMessagePayload(
+	target deviceTarget,
+	response agent.SessionMessagesResponse,
+) (EnvelopePayload, error) {
+	var info map[string]interface{}
+	if err := json.Unmarshal(response.Info, &info); err != nil {
+		return EnvelopePayload{}, err
+	}
+
+	parts := make([]MessagePart, 0, len(response.Parts))
+	textParts := make([]string, 0)
+	reasoningParts := make([]string, 0)
+	for _, part := range response.Parts {
+		raw, err := json.Marshal(part)
+		if err != nil {
+			continue
+		}
+		switch part.Type {
+		case "text", "reasoning":
+			var parsed struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(raw, &parsed) == nil {
+				parts = append(parts, MessagePart{Type: string(part.Type), Content: parsed.Text})
+				if part.Type == "text" {
+					textParts = append(textParts, parsed.Text)
+				} else {
+					reasoningParts = append(reasoningParts, parsed.Text)
+				}
+			}
+		case "tool":
+			parts = append(parts, MessagePart{Type: "tool", Content: string(raw)})
+		case "step-start", "step-finish":
+			parts = append(parts, MessagePart{Type: "step", Content: string(raw)})
+		}
+	}
+
+	body := messageBodyPayload{
+		Content:                 strings.Join(textParts, ""),
+		VisibleContent:          strings.Join(textParts, ""),
+		ThinkingContent:         strings.Join(reasoningParts, "\n\n"),
+		ThinkingDurationSeconds: nil,
+		Parts:                   parts,
+	}
+	sealedBody, err := h.encryptEnvelope(target, body)
+	if err != nil {
+		return EnvelopePayload{}, err
+	}
+
+	info["sealedBody"] = sealedBody
+	rawInfo, err := json.Marshal(info)
+	if err != nil {
+		return EnvelopePayload{}, err
+	}
+
+	return EnvelopePayload{
+		Info:  rawInfo,
+		Parts: nil,
+	}, nil
 }
 
 func (h *Handler) OnEvent(event string, args []json.RawMessage) {
@@ -550,6 +711,8 @@ func (h *Handler) handleProjectBranchSwitch(args []json.RawMessage) {
 
 	h.emit(EventProjectBranchSwitchResponse, ProjectBranchSwitchResponse{
 		RequestID: req.RequestID,
+		ProjectID: req.ProjectID,
+		Branch:    req.Branch,
 		Success:   true,
 	})
 }
@@ -659,9 +822,24 @@ func (h *Handler) handleSessionMessages(args []json.RawMessage) {
 		return
 	}
 
+	target := deviceTarget{
+		DeviceID:        req.DeviceID,
+		DeviceKeyID:     req.DeviceKeyID,
+		DevicePublicKey: req.DevicePublicKey,
+	}
+	result := make([]EnvelopePayload, 0, len(envelopes))
+	for _, item := range envelopes {
+		payload, convErr := h.convertEncryptedMessagePayload(target, item)
+		if convErr != nil {
+			h.logger.Printf("relay: failed to encrypt message payload: %v", convErr)
+			continue
+		}
+		result = append(result, payload)
+	}
+
 	h.emit(EventSessionMessagesResponse, SessionMessagesResponse{
 		RequestID: req.RequestID,
-		Envelopes: envelopes,
+		Envelopes: result,
 	})
 }
 
@@ -784,22 +962,44 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		return
 	}
 
+	target := deviceTarget{
+		DeviceID:        req.DeviceID,
+		DeviceKeyID:     req.DeviceKeyID,
+		DevicePublicKey: req.DevicePublicKey,
+	}
+	inner, err := decryptEnvelopePayload[sessionPromptInnerPayload](h, target, req.SealedPayload)
+	if err != nil {
+		h.emit(EventSessionPromptResponse, SessionPromptResponsePayload{
+			RequestID:       req.RequestID,
+			AgentProviderID: req.AgentProviderID,
+			ProjectID:       req.ProjectID,
+			SessionID:       req.SessionID,
+			Success:         false,
+			ExitCode:        -1,
+			Duration:        0,
+		})
+		return
+	}
+	h.setRequestDevice(req.RequestID, target)
+	h.setSessionDevice(req.SessionID, target)
+
 	h.emit(EventSessionPromptStarted, SessionPromptStarted{
-		RequestID: req.RequestID,
-		ProjectID: req.ProjectID,
-		SessionID: req.SessionID,
+		RequestID:       req.RequestID,
+		AgentProviderID: req.AgentProviderID,
+		ProjectID:       req.ProjectID,
+		SessionID:       req.SessionID,
 	})
 
 	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emit(EventSessionPromptResponse, SessionPromptResponsePayload{
-			RequestID: req.RequestID,
-			ProjectID: req.ProjectID,
-			SessionID: req.SessionID,
-			Success:   false,
-			Error:     err.Error(),
-			ExitCode:  -1,
-			Duration:  0,
+			RequestID:       req.RequestID,
+			AgentProviderID: req.AgentProviderID,
+			ProjectID:       req.ProjectID,
+			SessionID:       req.SessionID,
+			Success:         false,
+			ExitCode:        -1,
+			Duration:        0,
 		})
 		return
 	}
@@ -812,15 +1012,15 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 	}
 
 	runInput := agent.RunInput{
-		Prompt:     req.Prompt,
+		Prompt:     inner.Prompt,
 		SessionID:  req.SessionID,
 		ProjectID:  req.ProjectID,
 		WorkingDir: directory,
-		Agent:      req.Agent,
+		Agent:      inner.Agent,
 	}
-	if len(req.AppMentions) > 0 {
-		runInput.Items = make([]agent.InputItem, 0, len(req.AppMentions))
-		for _, mention := range req.AppMentions {
+	if len(inner.AppMentions) > 0 {
+		runInput.Items = make([]agent.InputItem, 0, len(inner.AppMentions))
+		for _, mention := range inner.AppMentions {
 			if strings.TrimSpace(mention.ID) == "" {
 				continue
 			}
@@ -831,47 +1031,66 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 			})
 		}
 	}
-	if req.Model != nil {
+	if inner.Model != nil {
 		runInput.Model = &agent.ModelRef{
-			ProviderID: req.Model.ProviderID,
-			ModelID:    req.Model.ModelID,
+			ProviderID: inner.Model.ProviderID,
+			ModelID:    inner.Model.ModelID,
 		}
 	}
 
 	result, err := provider.Sessions().RunStream(context.Background(), runInput, func(chunk agent.StreamChunk) {
+		sealedChunk, sealErr := h.encryptEnvelope(target, sessionStreamChunkInnerPayload{
+			Chunk: chunk.Content,
+		})
+		if sealErr != nil {
+			h.logger.Printf("relay: failed to encrypt stream chunk: %v", sealErr)
+			return
+		}
 		h.emit(EventSessionStreamChunk, SessionStreamChunkPayload{
-			RequestID:  req.RequestID,
-			ProjectID:  req.ProjectID,
-			SessionID:  req.SessionID,
-			MessageID:  chunk.MessageID,
-			Chunk:      chunk.Content,
-			Type:       chunk.Type,
-			IsComplete: chunk.IsComplete,
+			RequestID:       req.RequestID,
+			AgentProviderID: req.AgentProviderID,
+			ProjectID:       req.ProjectID,
+			SessionID:       req.SessionID,
+			MessageID:       chunk.MessageID,
+			Type:            chunk.Type,
+			IsComplete:      chunk.IsComplete,
+			SealedPayload:   sealedChunk,
 		})
 	})
 
 	response := SessionPromptResponsePayload{
-		RequestID: req.RequestID,
-		ProjectID: req.ProjectID,
-		SessionID: req.SessionID,
+		RequestID:       req.RequestID,
+		AgentProviderID: req.AgentProviderID,
+		ProjectID:       req.ProjectID,
+		SessionID:       req.SessionID,
 	}
+	responseInner := sessionPromptResponseInnerPayload{}
 
 	if err != nil {
 		response.Success = false
-		response.Error = err.Error()
 		response.ExitCode = -1
 		response.Duration = 0
+		responseInner.Error = err.Error()
 	} else {
 		response.Success = result.Success
-		response.Output = result.Output
-		response.Error = result.Error
 		response.ExitCode = result.ExitCode
 		response.Duration = int(result.Duration.Milliseconds())
 		response.SessionID = result.SessionID
+		responseInner.Output = result.Output
+		responseInner.Error = result.Error
 	}
 
 	if session, sessErr := provider.Sessions().Get(context.Background(), response.SessionID); sessErr == nil && session != nil {
-		response.SessionTitle = session.Title
+		responseInner.SessionTitle = session.Title
+		sealedResponse, sealErr := h.encryptEnvelope(target, responseInner)
+		if sealErr == nil {
+			response.SealedPayload = sealedResponse
+		}
+	} else {
+		sealedResponse, sealErr := h.encryptEnvelope(target, responseInner)
+		if sealErr == nil {
+			response.SealedPayload = sealedResponse
+		}
 	}
 
 	h.emit(EventSessionPromptResponse, response)
@@ -890,10 +1109,12 @@ func (h *Handler) handleSessionAbort(args []json.RawMessage) {
 	provider, err := h.resolveProvider(req.AgentProviderID)
 	if err != nil {
 		h.emit(EventSessionAborted, SessionAbortedPayload{
-			RequestID: req.RequestID,
-			SessionID: req.SessionID,
-			Success:   false,
-			Error:     err.Error(),
+			RequestID:       req.RequestID,
+			AgentProviderID: req.AgentProviderID,
+			ProjectID:       req.ProjectID,
+			SessionID:       req.SessionID,
+			Success:         false,
+			Error:           err.Error(),
 		})
 		return
 	}
@@ -901,18 +1122,22 @@ func (h *Handler) handleSessionAbort(args []json.RawMessage) {
 	aborted, err := provider.Sessions().Abort(context.Background(), req.SessionID, "")
 	if err != nil {
 		h.emit(EventSessionAborted, SessionAbortedPayload{
-			RequestID: req.RequestID,
-			SessionID: req.SessionID,
-			Success:   false,
-			Error:     err.Error(),
+			RequestID:       req.RequestID,
+			AgentProviderID: req.AgentProviderID,
+			ProjectID:       req.ProjectID,
+			SessionID:       req.SessionID,
+			Success:         false,
+			Error:           err.Error(),
 		})
 		return
 	}
 
 	h.emit(EventSessionAborted, SessionAbortedPayload{
-		RequestID: req.RequestID,
-		SessionID: req.SessionID,
-		Success:   aborted,
+		RequestID:       req.RequestID,
+		AgentProviderID: req.AgentProviderID,
+		ProjectID:       req.ProjectID,
+		SessionID:       req.SessionID,
+		Success:         aborted,
 	})
 }
 
@@ -2037,6 +2262,20 @@ func (h *Handler) handlePermissionResponse(args []json.RawMessage) {
 		return
 	}
 
+	target, ok := h.getRequestDevice(resp.RequestID)
+	if !ok {
+		target, ok = h.getSessionDevice(resp.SessionID)
+	}
+	if !ok {
+		h.logger.Printf("relay: missing device for permission response: %s", resp.RequestID)
+		return
+	}
+	inner, err := decryptEnvelopePayload[permissionResponseInnerPayload](h, target, resp.SealedPayload)
+	if err != nil {
+		h.logger.Printf("relay: failed to decrypt permission_response: %v", err)
+		return
+	}
+
 	h.mu.Lock()
 	ch, ok := h.pendingPermissions[resp.RequestID]
 	if ok {
@@ -2045,7 +2284,7 @@ func (h *Handler) handlePermissionResponse(args []json.RawMessage) {
 	h.mu.Unlock()
 
 	if ok {
-		ch <- PermissionReply{Reply: resp.Reply}
+		ch <- PermissionReply{Reply: inner.Reply}
 	}
 }
 
@@ -2059,6 +2298,20 @@ func (h *Handler) handleQuestionResponse(args []json.RawMessage) {
 		return
 	}
 
+	target, ok := h.getRequestDevice(resp.RequestID)
+	if !ok {
+		target, ok = h.getSessionDevice(resp.SessionID)
+	}
+	if !ok {
+		h.logger.Printf("relay: missing device for question response: %s", resp.RequestID)
+		return
+	}
+	inner, err := decryptEnvelopePayload[questionResponseInnerPayload](h, target, resp.SealedPayload)
+	if err != nil {
+		h.logger.Printf("relay: failed to decrypt question_response: %v", err)
+		return
+	}
+
 	h.mu.Lock()
 	ch, ok := h.pendingQuestions[resp.RequestID]
 	if ok {
@@ -2067,11 +2320,24 @@ func (h *Handler) handleQuestionResponse(args []json.RawMessage) {
 	h.mu.Unlock()
 
 	if ok {
-		ch <- QuestionReply{Answers: resp.Answers}
+		ch <- QuestionReply{Answers: inner.Answers}
 	}
 }
 
 func (h *Handler) RequestPermission(payload PermissionRequestPayload) (string, error) {
+	target, ok := h.getSessionDevice(payload.SessionID)
+	if !ok {
+		return "", fmt.Errorf("missing device target for permission request")
+	}
+	sealedPayload, err := h.encryptEnvelope(target, permissionRequestInnerPayload{
+		Permission: payload.Permission,
+		Patterns:   payload.Patterns,
+		Metadata:   payload.Metadata,
+	})
+	if err != nil {
+		return "", err
+	}
+	payload.SealedPayload = *sealedPayload
 	ch := make(chan PermissionReply, 1)
 	h.mu.Lock()
 	h.pendingPermissions[payload.RequestID] = ch
@@ -2095,6 +2361,17 @@ func (h *Handler) RequestPermission(payload PermissionRequestPayload) (string, e
 }
 
 func (h *Handler) RequestQuestion(payload QuestionRequestPayload) ([][]string, error) {
+	target, ok := h.getSessionDevice(payload.SessionID)
+	if !ok {
+		return nil, fmt.Errorf("missing device target for question request")
+	}
+	sealedPayload, err := h.encryptEnvelope(target, questionRequestInnerPayload{
+		Questions: payload.Questions,
+	})
+	if err != nil {
+		return nil, err
+	}
+	payload.SealedPayload = *sealedPayload
 	ch := make(chan QuestionReply, 1)
 	h.mu.Lock()
 	h.pendingQuestions[payload.RequestID] = ch

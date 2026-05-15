@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { getMobileDeviceById } from "../services/auth";
 import {
   requestConnectedServer,
   requestConnectedServerWithRequestId,
@@ -9,11 +10,20 @@ import {
 } from "../services/local-server-proxy";
 import { broadcastToUser } from "../services/sse-bus";
 import { clearBufferedInteraction } from "../services/interaction-buffer";
+import {
+  clearSessionInteractionRuntime,
+  getSessionRuntimeByKey,
+  listSessionRuntimes,
+  markSessionPromptResponse,
+  upsertPendingSessionRuntime,
+} from "../services/session-runtime-store";
 import { savePushToken } from "../services/push-notification";
 import { logger } from "../shared/logger";
 import type {
   PermissionResponseEvent,
   QuestionResponseEvent,
+  SessionRuntimeDetail,
+  SessionRuntimeSummary,
   SessionPromptResponseEvent,
 } from "../shared/types";
 
@@ -32,10 +42,10 @@ type SessionPromptRequest = {
   agentProviderId?: string;
   projectId: string;
   sessionId: string;
-  prompt: string;
-  agent?: string;
-  appMentions?: Array<{ id: string; name: string }>;
-  model?: { providerId: string; modelId: string };
+  deviceId: string;
+  deviceKeyId: string;
+  devicePublicKey: string;
+  sealedPayload: Record<string, unknown>;
 };
 
 type SessionAbortRequest = {
@@ -66,20 +76,50 @@ function handleRouteError(
   res.status(500).json({ error: defaultMessage });
 }
 
+router.get("/session-runtimes", (req: Request, res: Response) => {
+  try {
+    const userId = requireUserId(req.headers["x-user-id"]);
+    const runtimes = listSessionRuntimes(userId, { activeOnly: true });
+    res.json({ runtimes } satisfies { runtimes: SessionRuntimeSummary[] });
+  } catch (error) {
+    handleRouteError(res, "Failed to load session runtimes", error);
+  }
+});
+
+router.get("/sessions/:sessionId/runtime", (req: Request, res: Response) => {
+  try {
+    const userId = requireUserId(req.headers["x-user-id"]);
+    const agentProviderId =
+      typeof req.query.agentProviderId === "string"
+        ? req.query.agentProviderId
+        : undefined;
+    const runtime = getSessionRuntimeByKey(
+      userId,
+      req.params.sessionId,
+      agentProviderId,
+    );
+    res.json({ runtime } satisfies { runtime: SessionRuntimeDetail | null });
+  } catch (error) {
+    handleRouteError(res, "Failed to load session runtime", error);
+  }
+});
+
 router.post(
   "/sessions/:sessionId/prompt",
   async (req: Request, res: Response) => {
     try {
       const userId = requireUserId(req.headers["x-user-id"]);
+      const authenticatedDeviceId = String(req.headers["x-device-id"] || "");
+      const authenticatedDevice = await getMobileDeviceById(authenticatedDeviceId);
       const sessionId = req.params.sessionId;
       const {
         requestId,
         agentProviderId,
         projectId,
-        prompt,
-        agent,
-        appMentions,
-        model,
+        deviceId,
+        deviceKeyId,
+        devicePublicKey,
+        sealedPayload,
       } =
         req.body as SessionPromptRequest;
 
@@ -132,7 +172,7 @@ router.post(
       }
 
       if (!targetServerId) {
-        broadcastToUser(userId, "session_prompt_response", {
+        const failurePayload = {
           requestId,
           agentProviderId,
           projectId,
@@ -143,14 +183,25 @@ router.post(
           exitCode: -1,
           duration: 0,
           messages: [],
-        } satisfies Partial<SessionPromptResponseEvent> as Record<
-          string,
-          unknown
-        >);
+        } satisfies Partial<SessionPromptResponseEvent>;
+        markSessionPromptResponse(userId, failurePayload as SessionPromptResponseEvent);
+        broadcastToUser(
+          userId,
+          "session_prompt_response",
+          failurePayload as Record<string, unknown>,
+        );
         res.json({ accepted: true, requestId });
         return;
       }
 
+      upsertPendingSessionRuntime({
+        userId,
+        serverId: targetServerId,
+        sessionId,
+        agentProviderId,
+        projectId,
+        requestId,
+      });
       res.json({ accepted: true, requestId });
 
       try {
@@ -163,17 +214,18 @@ router.post(
             agentProviderId,
             projectId,
             sessionId,
-            prompt,
-            agent,
-            appMentions,
-            model,
+            deviceId: deviceId || authenticatedDevice.id,
+            deviceKeyId: deviceKeyId || authenticatedDevice.deviceKeyId,
+            devicePublicKey:
+              devicePublicKey || authenticatedDevice.devicePublicKey,
+            sealedPayload,
             userId,
           },
           targetServerId,
         );
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
-        broadcastToUser(userId, "session_prompt_response", {
+        const failurePayload = {
           requestId,
           agentProviderId,
           projectId,
@@ -184,10 +236,13 @@ router.post(
           duration: 0,
           messages: [],
           error: errMsg || "Local server request failed",
-        } satisfies Partial<SessionPromptResponseEvent> as Record<
-          string,
-          unknown
-        >);
+        } satisfies Partial<SessionPromptResponseEvent>;
+        markSessionPromptResponse(userId, failurePayload as SessionPromptResponseEvent);
+        broadcastToUser(
+          userId,
+          "session_prompt_response",
+          failurePayload as Record<string, unknown>,
+        );
       }
     } catch (error) {
       handleRouteError(res, "Failed to send prompt", error);
@@ -284,11 +339,11 @@ router.post(
         sessionResult.serverId,
       );
       clearBufferedInteraction(data.requestId);
+      clearSessionInteractionRuntime(userId, data.requestId);
 
       logger.info("Permission response forwarded to local server", {
         sessionId,
         jobId: data.jobId,
-        reply: data.reply,
       });
 
       res.json({ success: true });
@@ -330,6 +385,7 @@ router.post(
         sessionResult.serverId,
       );
       clearBufferedInteraction(data.requestId);
+      clearSessionInteractionRuntime(userId, data.requestId);
 
       logger.info("Question response forwarded to local server", {
         sessionId,

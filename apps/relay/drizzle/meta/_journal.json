@@ -8,6 +8,13 @@
       "when": 1777220983550,
       "tag": "0000_careless_typhoid_mary",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779999999000,
+      "tag": "0001_e2ee_mobile_keys",
+      "breakpoints": true
     }
   ]
 }

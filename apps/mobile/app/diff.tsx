@@ -74,7 +74,7 @@ export default function FileDiffScreen() {
       />
 
       <View style={styles.container}>
-        <DiffViewer projectId={projectId ?? ""} filePath={filePath ?? ""} />
+        <DiffViewer projectId={projectId ?? ""} filePath={filePath} />
       </View>
     </>
   );

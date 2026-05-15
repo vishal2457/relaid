@@ -207,6 +207,7 @@ type ProjectBranchSwitchRequest struct {
 type ProjectBranchSwitchResponse struct {
 	RequestID string `json:"requestId"`
 	ProjectID string `json:"projectId"`
+	Branch    string `json:"branch"`
 	Success   bool   `json:"success"`
 }
 
@@ -276,6 +277,9 @@ type SessionMessagesRequest struct {
 	AgentProviderID string `json:"agentProviderId,omitempty"`
 	SessionID       string `json:"sessionId"`
 	Limit           int    `json:"limit,omitempty"`
+	DeviceID        string `json:"deviceId,omitempty"`
+	DeviceKeyID     string `json:"deviceKeyId,omitempty"`
+	DevicePublicKey string `json:"devicePublicKey,omitempty"`
 }
 
 type SessionMessagesResponse struct {
@@ -311,15 +315,15 @@ type SessionUpdateResponse struct {
 }
 
 type SessionPromptRequest struct {
-	RequestID       string          `json:"requestId"`
-	AgentProviderID string          `json:"agentProviderId,omitempty"`
-	ProjectID       string          `json:"projectId"`
-	SessionID       string          `json:"sessionId"`
-	Prompt          string          `json:"prompt"`
-	Agent           string          `json:"agent,omitempty"`
-	UserID          string          `json:"userId,omitempty"`
-	Model           *agent.ModelRef `json:"model,omitempty"`
-	AppMentions     []AppMention    `json:"appMentions,omitempty"`
+	RequestID       string            `json:"requestId"`
+	AgentProviderID string            `json:"agentProviderId,omitempty"`
+	ProjectID       string            `json:"projectId"`
+	SessionID       string            `json:"sessionId"`
+	DeviceID        string            `json:"deviceId"`
+	DeviceKeyID     string            `json:"deviceKeyId"`
+	DevicePublicKey string            `json:"devicePublicKey"`
+	SealedPayload   EncryptedEnvelope `json:"sealedPayload"`
+	UserID          string            `json:"userId,omitempty"`
 }
 
 type AppMention struct {
@@ -333,32 +337,33 @@ type ModelRef struct {
 }
 
 type SessionPromptStarted struct {
-	RequestID string `json:"requestId"`
-	ProjectID string `json:"projectId"`
-	SessionID string `json:"sessionId"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	ProjectID       string `json:"projectId"`
+	SessionID       string `json:"sessionId"`
 }
 
 type SessionStreamChunkPayload struct {
-	RequestID  string `json:"requestId"`
-	ProjectID  string `json:"projectId"`
-	SessionID  string `json:"sessionId"`
-	MessageID  string `json:"messageId,omitempty"`
-	Chunk      string `json:"chunk"`
-	Type       string `json:"type"`
-	IsComplete bool   `json:"isComplete,omitempty"`
+	RequestID       string             `json:"requestId"`
+	AgentProviderID string             `json:"agentProviderId,omitempty"`
+	ProjectID       string             `json:"projectId"`
+	SessionID       string             `json:"sessionId"`
+	MessageID       string             `json:"messageId,omitempty"`
+	Type            string             `json:"type"`
+	IsComplete      bool               `json:"isComplete,omitempty"`
+	SealedPayload   *EncryptedEnvelope `json:"sealedPayload,omitempty"`
 }
 
 type SessionPromptResponsePayload struct {
-	RequestID    string           `json:"requestId"`
-	ProjectID    string           `json:"projectId"`
-	SessionID    string           `json:"sessionId"`
-	SessionTitle string           `json:"sessionTitle,omitempty"`
-	Success      bool             `json:"success"`
-	Output       string           `json:"output"`
-	Error        string           `json:"error,omitempty"`
-	ExitCode     int              `json:"exitCode"`
-	Duration     int              `json:"duration"`
-	Messages     []MessagePayload `json:"messages,omitempty"`
+	RequestID       string             `json:"requestId"`
+	AgentProviderID string             `json:"agentProviderId,omitempty"`
+	ProjectID       string             `json:"projectId"`
+	SessionID       string             `json:"sessionId"`
+	Success         bool               `json:"success"`
+	ExitCode        int                `json:"exitCode"`
+	Duration        int                `json:"duration"`
+	SealedPayload   *EncryptedEnvelope `json:"sealedPayload,omitempty"`
+	Messages        []MessagePayload   `json:"messages,omitempty"`
 }
 
 type SessionAbortPayload struct {
@@ -369,10 +374,12 @@ type SessionAbortPayload struct {
 }
 
 type SessionAbortedPayload struct {
-	RequestID string `json:"requestId"`
-	SessionID string `json:"sessionId"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	ProjectID       string `json:"projectId,omitempty"`
+	SessionID       string `json:"sessionId"`
+	Success         bool   `json:"success"`
+	Error           string `json:"error,omitempty"`
 }
 
 type SessionPayload struct {
@@ -395,15 +402,16 @@ type SessionPayload struct {
 }
 
 type MessagePayload struct {
-	ID                      string        `json:"id"`
-	SessionID               string        `json:"sessionId"`
-	Role                    string        `json:"role"`
-	Content                 string        `json:"content"`
-	VisibleContent          string        `json:"visibleContent"`
-	ThinkingContent         string        `json:"thinkingContent"`
-	ThinkingDurationSeconds *int          `json:"thinkingDurationSeconds,omitempty"`
-	Parts                   []MessagePart `json:"parts"`
-	CreatedAt               string        `json:"createdAt"`
+	ID                      string            `json:"id"`
+	SessionID               string            `json:"sessionId"`
+	Role                    string            `json:"role"`
+	SealedBody              EncryptedEnvelope `json:"sealedBody"`
+	Content                 string            `json:"content,omitempty"`
+	VisibleContent          string            `json:"visibleContent,omitempty"`
+	ThinkingContent         string            `json:"thinkingContent,omitempty"`
+	ThinkingDurationSeconds *int              `json:"thinkingDurationSeconds,omitempty"`
+	Parts                   []MessagePart     `json:"parts,omitempty"`
+	CreatedAt               string            `json:"createdAt"`
 }
 
 type MessagePart struct {
@@ -548,7 +556,7 @@ type GitUnstageFilesResponse struct {
 type GitFileDiffRequest struct {
 	RequestID string `json:"requestId"`
 	ProjectID string `json:"projectId"`
-	FilePath  string `json:"filePath"`
+	FilePath  string `json:"filePath,omitempty"`
 }
 
 type GitFileDiffResponse struct {
@@ -938,17 +946,19 @@ type PermissionRequestPayload struct {
 	SessionID       string                 `json:"sessionId"`
 	JobID           string                 `json:"jobId"`
 	ThreadID        string                 `json:"threadId"`
-	Permission      string                 `json:"permission"`
-	Patterns        []string               `json:"patterns"`
-	Metadata        map[string]interface{} `json:"metadata"`
+	SealedPayload   EncryptedEnvelope      `json:"sealedPayload"`
+	Permission      string                 `json:"-"`
+	Patterns        []string               `json:"-"`
+	Metadata        map[string]interface{} `json:"-"`
 }
 
 type PermissionResponsePayload struct {
-	RequestID       string `json:"requestId"`
-	AgentProviderID string `json:"agentProviderId,omitempty"`
-	SessionID       string `json:"sessionId"`
-	JobID           string `json:"jobId"`
-	Reply           string `json:"reply"`
+	RequestID       string            `json:"requestId"`
+	AgentProviderID string            `json:"agentProviderId,omitempty"`
+	SessionID       string            `json:"sessionId"`
+	JobID           string            `json:"jobId"`
+	SealedPayload   EncryptedEnvelope `json:"sealedPayload"`
+	Reply           string            `json:"-"`
 }
 
 type QuestionOption struct {
@@ -965,21 +975,23 @@ type Question struct {
 }
 
 type QuestionRequestPayload struct {
-	RequestID       string     `json:"requestId"`
-	AgentProviderID string     `json:"agentProviderId,omitempty"`
-	ProjectID       string     `json:"projectId"`
-	SessionID       string     `json:"sessionId"`
-	JobID           string     `json:"jobId"`
-	ThreadID        string     `json:"threadId"`
-	Questions       []Question `json:"questions"`
+	RequestID       string            `json:"requestId"`
+	AgentProviderID string            `json:"agentProviderId,omitempty"`
+	ProjectID       string            `json:"projectId"`
+	SessionID       string            `json:"sessionId"`
+	JobID           string            `json:"jobId"`
+	ThreadID        string            `json:"threadId"`
+	SealedPayload   EncryptedEnvelope `json:"sealedPayload"`
+	Questions       []Question        `json:"-"`
 }
 
 type QuestionResponsePayload struct {
-	RequestID       string     `json:"requestId"`
-	AgentProviderID string     `json:"agentProviderId,omitempty"`
-	SessionID       string     `json:"sessionId"`
-	JobID           string     `json:"jobId"`
-	Answers         [][]string `json:"answers"`
+	RequestID       string            `json:"requestId"`
+	AgentProviderID string            `json:"agentProviderId,omitempty"`
+	SessionID       string            `json:"sessionId"`
+	JobID           string            `json:"jobId"`
+	SealedPayload   EncryptedEnvelope `json:"sealedPayload"`
+	Answers         [][]string        `json:"-"`
 }
 
 type ErrorResponse struct {
@@ -989,9 +1001,10 @@ type ErrorResponse struct {
 }
 
 type SkillsListRequest struct {
-	RequestID string `json:"requestId"`
-	ProjectID string `json:"projectId"`
-	Query     string `json:"query,omitempty"`
+	RequestID       string `json:"requestId"`
+	AgentProviderID string `json:"agentProviderId,omitempty"`
+	ProjectID       string `json:"projectId"`
+	Query           string `json:"query,omitempty"`
 }
 
 type SkillPayload struct {

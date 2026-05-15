@@ -9,16 +9,15 @@ import { UpdateDialog } from "./shared/components/update-dialog/update-dialog";
 import { ipcRuntime } from "./shared/ipc/ipc-runtime";
 import { healthApi } from "./shared/api/features/health.api";
 import {
-  getApiBaseUrl,
   initializeApiBaseUrl,
 } from "./shared/utils/runtime-config";
 import { queryClient } from "./shared/utils/query-client";
+import { SpinnerLoader } from "./shared/components/loader/spinner.loader";
 
 function App() {
   const [healthState, setHealthState] = useState<
     "loading" | "ready" | "failed"
   >("loading");
-  const [apiBaseUrl, setApiBaseUrl] = useState(getApiBaseUrl());
   const [healthMessage, setHealthMessage] = useState(
     "Starting desktop services...",
   );
@@ -40,7 +39,6 @@ function App() {
       if (cancelled) {
         return;
       }
-      setApiBaseUrl(resolvedApiBaseUrl);
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
@@ -77,7 +75,7 @@ function App() {
           }
 
           setHealthMessage(
-            `Waiting for local API (${attempt}/${maxAttempts}) at ${resolvedApiBaseUrl}...`,
+            "Connecting to local API...",
           );
         }
 
@@ -165,23 +163,9 @@ function App() {
 
   if (healthState !== "ready") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
-        <div className="w-full max-w-2xl rounded-3xl border border-border bg-card p-8 shadow-xl">
-          <p className="text-sm uppercase tracking-[0.25em] text-muted-foreground">
-            Desktop Bootstrap
-          </p>
-          <h1 className="mt-4 text-4xl font-semibold">
-            {healthState === "loading"
-              ? "Waiting for local API"
-              : "Desktop API unavailable"}
-          </h1>
-          <p className="mt-4 text-base text-muted-foreground">
-            {healthMessage}
-          </p>
-          <p className="mt-8 text-sm text-muted-foreground">
-            Expected API base: {apiBaseUrl}
-          </p>
-        </div>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
+        <SpinnerLoader className="h-8 w-8" />
+        <p className="text-sm text-muted-foreground">{healthMessage}</p>
       </div>
     );
   }

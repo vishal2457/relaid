@@ -313,7 +313,12 @@ func (a *App) CreatePairingSession() (*relay.PairingSessionResponse, error) {
 		return nil, err
 	}
 
-	return relay.CreatePairingSession(url, creds)
+	keys, err := relay.LoadOrCreateE2EEKeyMaterial()
+	if err != nil {
+		return nil, err
+	}
+
+	return relay.CreatePairingSession(url, creds, keys)
 }
 
 func (a *App) PingRelay() (bool, error) {

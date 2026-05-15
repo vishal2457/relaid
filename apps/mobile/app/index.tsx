@@ -14,6 +14,7 @@ import {
 import { ErrorToast } from "@/src/components/ErrorToast";
 import { SessionDrawer } from "@/src/components/SessionDrawer";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import React from "react";
 import {
@@ -39,11 +40,19 @@ import { HeaderActionMenu } from "@/src/components/HeaderActionMenu";
 import {
   clearActiveSessionStream,
   FOLLOW_UP_SESSION_REFRESH_DELAY_MS,
-  getActiveSessionStream,
+  getActiveSessionRuntimeMap,
+  isActiveRuntimePhase,
   isStreamingSessionStatus,
-  saveActiveSessionStream,
+  makeSessionKey,
+  saveActiveSessionRuntimeMap,
   shouldScheduleSessionRefresh,
+  type SessionRuntime,
+  type SessionRuntimeMap,
 } from "@/src/lib/active-session-stream";
+import {
+  fetchSessionRuntimeDetail,
+  fetchSessionRuntimes,
+} from "@/src/lib/api/session-runtimes";
 import {
   messageKeys,
   useSessionMessages,
@@ -78,6 +87,7 @@ import {
 } from "@/src/lib/sse";
 import type {
   SessionPromptResponseEvent,
+  SessionPromptStartedEvent,
   SessionStreamChunkEvent,
 } from "@/src/lib/sse/events";
 // Message queue temporarily disabled - will be re-enabled later
@@ -96,14 +106,38 @@ import { useKeyboardHeight } from "@/src/hooks/useKeyboardHeight";
 
 type ConnectionState = "connected" | "disconnected" | "connecting" | "error";
 
-type SessionPromptStartedEvent = {
-  requestId: string;
-  projectId: string;
-  sessionId: string;
-};
-
 type PermissionRequestEvent = PermissionRequest;
 type QuestionRequestEvent = QuestionRequest;
+
+function upsertRuntime(
+  runtimes: SessionRuntimeMap,
+  runtime: SessionRuntime,
+): SessionRuntimeMap {
+  return {
+    ...runtimes,
+    [runtime.sessionKey]: runtime,
+  };
+}
+
+function findRuntimeByRequestId(
+  runtimes: SessionRuntimeMap,
+  requestId: string,
+): SessionRuntime | null {
+  return (
+    Object.values(runtimes).find((runtime) => runtime.requestId === requestId) ??
+    null
+  );
+}
+
+function getRuntimeStatusLabel(runtime: SessionRuntime): string {
+  if (runtime.phase === "awaiting_permission") {
+    return "Permission needed";
+  }
+  if (runtime.phase === "awaiting_question") {
+    return "Question needed";
+  }
+  return runtime.lastStatusText || runtime.lastToolLabel || "Thinking";
+}
 
 function getSingleSearchParam(
   value: string | string[] | undefined,
@@ -136,11 +170,16 @@ export default function ChatScreen() {
   const [pendingRequestIds, setPendingRequestIds] = React.useState<
     Map<string, string>
   >(new Map());
+  const [runtimeBySessionKey, setRuntimeBySessionKey] =
+    React.useState<SessionRuntimeMap>({});
   const [creatingSessionId, setCreatingSessionId] = React.useState<
     string | null
   >(null);
-  const [hasActiveStreamEvent, setHasActiveStreamEvent] = React.useState(false);
+  const [hasVisibleRuntimeStream, setHasVisibleRuntimeStream] =
+    React.useState(false);
   const pendingRequestIdsRef = React.useRef<Map<string, string>>(new Map());
+  const runtimeBySessionKeyRef = React.useRef<SessionRuntimeMap>({});
+  const selectedSessionKeyRef = React.useRef<string | null>(null);
   const activeSessionIdRef = React.useRef<string | null>(null);
   const activeAgentProviderIdRef = React.useRef<string | undefined>(undefined);
   const allowSessionChangeRecoveryRef = React.useRef(false);
@@ -168,11 +207,16 @@ export default function ChatScreen() {
     React.useState<string | undefined>(undefined);
   const [errorToastVisible, setErrorToastVisible] = React.useState(false);
   const [errorToastMessage, setErrorToastMessage] = React.useState("");
+  const [errorToastKey, setErrorToastKey] = React.useState(0);
+  const [errorToastDurationMs, setErrorToastDurationMs] = React.useState(5000);
 
-  const showError = React.useCallback((message: string) => {
+  const showToast = React.useCallback((message: string, durationMs = 5000) => {
     setErrorToastMessage(message);
+    setErrorToastDurationMs(durationMs);
+    setErrorToastKey((current) => current + 1);
     setErrorToastVisible(true);
   }, []);
+  const showError = showToast;
 
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showFileDrawer, setShowFileDrawer] = React.useState(false);
@@ -183,10 +227,6 @@ export default function ChatScreen() {
   const [isNearBottom, setIsNearBottom] = React.useState(true);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [menuExpanded, setMenuExpanded] = React.useState(false);
-  const [pendingPermission, setPendingPermission] =
-    React.useState<PermissionRequestEvent | null>(null);
-  const [pendingQuestion, setPendingQuestion] =
-    React.useState<QuestionRequestEvent | null>(null);
   const [isRespondingToPermission, setIsRespondingToPermission] =
     React.useState(false);
   const [isRespondingToQuestion, setIsRespondingToQuestion] =
@@ -194,8 +234,10 @@ export default function ChatScreen() {
   const streamScrollTimeoutRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const restoredRuntimeSignatureRef = React.useRef<string | null>(null);
 
   const session = useChatSession({
+    activeAgentProviderIdOverride: activeSessionAgentProviderId,
     isMountedRef: React.useRef(true),
     allowSessionChangeRecoveryRef,
     activeSessionIdRef,
@@ -229,6 +271,13 @@ export default function ChatScreen() {
     activeSessionId
       ? activeSessionAgentProviderId ?? draftAgentProviderId
       : draftAgentProviderId;
+  const selectedSessionKey = React.useMemo(
+    () =>
+      activeSessionId
+        ? makeSessionKey(activeSessionId, activeLookupAgentProviderId)
+        : null,
+    [activeLookupAgentProviderId, activeSessionId],
+  );
   const composer = useComposerState(
     session.activeProject?.id,
     activeLookupAgentProviderId,
@@ -241,6 +290,15 @@ export default function ChatScreen() {
   const availableAgentProviders = React.useMemo(
     () => groupModelsByRuntime(allModels),
     [allModels],
+  );
+  const syncSessionAgentProvider = React.useCallback(
+    (agentProviderId?: string) => {
+      setActiveSessionAgentProviderId(agentProviderId);
+      if (agentProviderId) {
+        session.handleSelectAgentProvider(agentProviderId);
+      }
+    },
+    [session],
   );
   const selectedAgentProvider = React.useMemo(() => {
     if (!activeLookupAgentProviderId) {
@@ -285,6 +343,14 @@ export default function ChatScreen() {
   }, [pendingRequestIds]);
 
   React.useEffect(() => {
+    runtimeBySessionKeyRef.current = runtimeBySessionKey;
+  }, [runtimeBySessionKey]);
+
+  React.useEffect(() => {
+    selectedSessionKeyRef.current = selectedSessionKey;
+  }, [selectedSessionKey]);
+
+  React.useEffect(() => {
     return () => {
       isMountedRef.current = false;
       disconnectSseClient();
@@ -310,6 +376,11 @@ export default function ChatScreen() {
     notificationSessionId ?? "",
     notificationAgentProviderId,
   );
+  const selectedRuntime = selectedSessionKey
+    ? runtimeBySessionKey[selectedSessionKey] ?? null
+    : null;
+  const pendingPermission = selectedRuntime?.pendingPermission ?? null;
+  const pendingQuestion = selectedRuntime?.pendingQuestion ?? null;
 
   const activeSessionMessages = React.useMemo(() => {
     if (!activeSessionId) {
@@ -341,6 +412,41 @@ export default function ChatScreen() {
     [theme.dark],
   );
 
+  const persistRuntimeMap = React.useCallback(
+    (next: SessionRuntimeMap) => {
+      const nextPending = new Map<string, string>();
+      Object.values(next).forEach((runtime) => {
+        if (isActiveRuntimePhase(runtime.phase)) {
+          nextPending.set(runtime.sessionId, runtime.requestId);
+        }
+      });
+      runtimeBySessionKeyRef.current = next;
+      pendingRequestIdsRef.current = nextPending;
+      setRuntimeBySessionKey(next);
+      setPendingRequestIds(nextPending);
+      void saveActiveSessionRuntimeMap(next);
+    },
+    [],
+  );
+
+  const upsertRuntimeState = React.useCallback(
+    (runtime: SessionRuntime) => {
+      const next = upsertRuntime(runtimeBySessionKeyRef.current, runtime);
+      persistRuntimeMap(next);
+      return runtime;
+    },
+    [persistRuntimeMap],
+  );
+
+  const removeRuntimeState = React.useCallback(
+    (sessionKey: string) => {
+      const next = { ...runtimeBySessionKeyRef.current };
+      delete next[sessionKey];
+      persistRuntimeMap(next);
+    },
+    [persistRuntimeMap],
+  );
+
   const hasScrolledToBottom = React.useRef(false);
 
   React.useEffect(() => {
@@ -367,7 +473,7 @@ export default function ChatScreen() {
 
     activeSessionIdRef.current = notificationSessionId;
     setActiveSessionId(notificationSessionId);
-    setActiveSessionAgentProviderId(targetAgentProviderId);
+    syncSessionAgentProvider(targetAgentProviderId);
     setOptimisticMessage(null);
     hasScrolledToBottom.current = false;
 
@@ -381,6 +487,7 @@ export default function ChatScreen() {
     sessionProjects,
     sessionProjectsRef,
     setActiveProject,
+    syncSessionAgentProvider,
   ]);
   React.useEffect(() => {
     if (messages && messages.length > 0 && !hasScrolledToBottom.current) {
@@ -405,8 +512,14 @@ export default function ChatScreen() {
     }
   }, [displayedMessages.length]);
 
+  const hasVisibleActiveStreamEvent =
+    hasVisibleRuntimeStream && Boolean(selectedRuntime);
+
   React.useEffect(() => {
-    if (streamingBlocks.length === 0 && !streamingThinkingContent) {
+    if (
+      !hasVisibleActiveStreamEvent ||
+      (streamingBlocks.length === 0 && !streamingThinkingContent)
+    ) {
       return;
     }
 
@@ -421,6 +534,7 @@ export default function ChatScreen() {
       }
     }, 120);
   }, [
+    hasVisibleActiveStreamEvent,
     isNearBottom,
     streamingBlocks.length,
     streamingRevision,
@@ -489,10 +603,13 @@ export default function ChatScreen() {
   }, []);
 
   const clearPendingStreamState = React.useCallback(
-    (sessionId?: string, requestId?: string) => {
-      pendingRequestIdsRef.current = new Map();
-      setPendingRequestIds(new Map());
-      setHasActiveStreamEvent(false);
+    (sessionKey?: string, requestId?: string) => {
+      if (sessionKey) {
+        removeRuntimeState(sessionKey);
+      } else {
+        persistRuntimeMap({});
+      }
+      setHasVisibleRuntimeStream(false);
       setOptimisticMessage(null);
       resetStreamingContent();
       clearFollowUpRefreshTimeout();
@@ -502,28 +619,82 @@ export default function ChatScreen() {
     [
       clearFollowUpRefreshTimeout,
       clearRequestRecoveryTimeout,
+      persistRuntimeMap,
+      removeRuntimeState,
       resetStreamingContent,
     ],
   );
 
+  const restoreSelectedRuntimeStream = React.useCallback(
+    async (sessionId: string, agentProviderId?: string) => {
+      const runtimeDetail = await fetchSessionRuntimeDetail(
+        sessionId,
+        agentProviderId,
+      );
+      resetStreamingContent();
+      setHasVisibleRuntimeStream(false);
+
+      if (!runtimeDetail || !isActiveRuntimePhase(runtimeDetail.phase)) {
+        return runtimeDetail;
+      }
+
+      upsertRuntimeState(runtimeDetail);
+      for (const chunk of runtimeDetail.bufferedChunks) {
+        applyStreamingChunk(chunk);
+      }
+      setHasVisibleRuntimeStream(runtimeDetail.bufferedChunks.length > 0);
+      return runtimeDetail;
+    },
+    [applyStreamingChunk, resetStreamingContent, upsertRuntimeState],
+  );
+
+  React.useEffect(() => {
+    if (!selectedRuntime || !isActiveRuntimePhase(selectedRuntime.phase)) {
+      restoredRuntimeSignatureRef.current = null;
+      setHasVisibleRuntimeStream(false);
+      resetStreamingContent();
+      return;
+    }
+
+    const signature = `${selectedRuntime.sessionKey}:${selectedRuntime.requestId}:${selectedRuntime.updatedAt}`;
+    if (restoredRuntimeSignatureRef.current === signature) {
+      return;
+    }
+    restoredRuntimeSignatureRef.current = signature;
+
+    void restoreSelectedRuntimeStream(
+      selectedRuntime.sessionId,
+      selectedRuntime.agentProviderId,
+    );
+  }, [resetStreamingContent, restoreSelectedRuntimeStream, selectedRuntime]);
+
   const recoverPendingStream = React.useCallback(async () => {
+    const persisted = await getActiveSessionRuntimeMap();
+    const serverRuntimes = await fetchSessionRuntimes().catch(() => []);
+    const merged: SessionRuntimeMap = { ...persisted };
+    for (const runtime of serverRuntimes) {
+      merged[runtime.sessionKey] = runtime;
+    }
+    persistRuntimeMap(merged);
+
     const sessionId = activeSessionIdRef.current;
     if (!sessionId) {
       return;
     }
 
-    const activeStream = await getActiveSessionStream();
-    if (!activeStream || activeStream.sessionId !== sessionId) {
+    const selectedRuntime =
+      merged[
+        makeSessionKey(sessionId, activeAgentProviderIdRef.current)
+      ] ?? null;
+    if (!selectedRuntime || !isActiveRuntimePhase(selectedRuntime.phase)) {
       return;
     }
 
-    const newPending = new Map<string, string>();
-    newPending.set(sessionId, activeStream.requestId);
-    pendingRequestIdsRef.current = newPending;
-    setPendingRequestIds(newPending);
-    setHasActiveStreamEvent(false);
     setOptimisticMessage(null);
-    resetStreamingContent();
+    await restoreSelectedRuntimeStream(
+      selectedRuntime.sessionId,
+      selectedRuntime.agentProviderId,
+    );
 
     const [sessionResult] = await Promise.allSettled([
       refetchActiveSession(),
@@ -538,14 +709,15 @@ export default function ChatScreen() {
 
     if (!isStreamingSessionStatus(recoveredStatus)) {
       flushStreamingContent();
-      clearPendingStreamState(sessionId, activeStream.requestId);
+      clearPendingStreamState(selectedRuntime.sessionKey, selectedRuntime.requestId);
     }
   }, [
     clearPendingStreamState,
     flushStreamingContent,
+    persistRuntimeMap,
     refetch,
     refetchActiveSession,
-    resetStreamingContent,
+    restoreSelectedRuntimeStream,
   ]);
 
   React.useEffect(() => {
@@ -618,12 +790,7 @@ export default function ChatScreen() {
         console.log("[Chat] SSE connected");
         setConnectionState("connected");
 
-        if (
-          activeSessionIdRef.current &&
-          pendingRequestIdsRef.current.size > 0
-        ) {
-          void recoverPendingStream();
-        }
+        void recoverPendingStream();
       },
       onDisconnect() {
         if (!isMountedRef.current) return;
@@ -651,63 +818,104 @@ export default function ChatScreen() {
 
   const handlePromptStartedRef = React.useRef(
     (payload: SessionPromptStartedEvent) => {
-      const pending = pendingRequestIdsRef.current;
-      if (
-        pending.get(payload.sessionId) === payload.requestId &&
-        payload.sessionId === activeSessionIdRef.current
-      ) {
-        setHasActiveStreamEvent(false);
-        setPendingRequestIds(new Map(pending));
+      const sessionKey = makeSessionKey(
+        payload.sessionId,
+        payload.agentProviderId,
+      );
+      const runtime =
+        runtimeBySessionKeyRef.current[sessionKey] ??
+        findRuntimeByRequestId(runtimeBySessionKeyRef.current, payload.requestId);
+      if (!runtime) {
+        return;
+      }
+      upsertRuntimeState({
+        ...runtime,
+        sessionKey,
+        sessionId: payload.sessionId,
+        agentProviderId: payload.agentProviderId ?? runtime.agentProviderId,
+        projectId: payload.projectId,
+        requestId: payload.requestId,
+        phase: "pending",
+        updatedAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      if (sessionKey === selectedSessionKeyRef.current) {
+        setHasVisibleRuntimeStream(false);
       }
     },
   );
 
   const handleStreamChunkRef = React.useRef(
     (payload: SessionStreamChunkEvent) => {
-      const pending = pendingRequestIdsRef.current;
-      if (
-        pending.get(payload.sessionId) !== payload.requestId ||
-        payload.sessionId !== activeSessionIdRef.current
-      ) {
-        return;
+      const sessionKey = makeSessionKey(
+        payload.sessionId,
+        payload.agentProviderId,
+      );
+      const current =
+        runtimeBySessionKeyRef.current[sessionKey] ??
+        findRuntimeByRequestId(runtimeBySessionKeyRef.current, payload.requestId);
+      const runtime: SessionRuntime = {
+        sessionKey,
+        sessionId: payload.sessionId,
+        agentProviderId: payload.agentProviderId ?? current?.agentProviderId,
+        projectId: payload.projectId,
+        requestId: payload.requestId,
+        phase: "streaming",
+        updatedAt: Date.now(),
+        lastActivityAt: Date.now(),
+        lastStatusText:
+          payload.type === "status"
+            ? payload.chunk
+            : (current?.lastStatusText ?? null),
+        lastToolLabel:
+          payload.type === "tool" || payload.type === "step"
+            ? payload.chunk
+            : (current?.lastToolLabel ?? null),
+        baselineMessageId: current?.baselineMessageId ?? null,
+        pendingPermission: undefined,
+        pendingQuestion: undefined,
+      };
+      upsertRuntimeState(runtime);
+      if (sessionKey === selectedSessionKeyRef.current) {
+        setHasVisibleRuntimeStream(true);
+        applyStreamingChunk(payload);
       }
-
-      setHasActiveStreamEvent(true);
-      applyStreamingChunk(payload);
     },
   );
 
   const handlePromptResponseRef = React.useRef(
     (payload: SessionPromptResponseEvent) => {
-      const pending = pendingRequestIdsRef.current;
-      let requestSessionId: string | null = null;
-      for (const [sessionId, requestId] of pending) {
-        if (requestId === payload.requestId) {
-          requestSessionId = sessionId;
-          break;
-        }
-      }
-      if (
-        !requestSessionId ||
-        requestSessionId !== activeSessionIdRef.current
-      ) {
+      const runtime = findRuntimeByRequestId(
+        runtimeBySessionKeyRef.current,
+        payload.requestId,
+      );
+      if (!runtime) {
         return;
       }
 
-      const responseSessionId = payload.sessionId || requestSessionId;
-      if (responseSessionId !== requestSessionId) {
+      const responseSessionId = payload.sessionId || runtime.sessionId;
+      const responseSessionKey = makeSessionKey(
+        responseSessionId,
+        payload.agentProviderId ?? runtime.agentProviderId,
+      );
+      if (responseSessionId !== runtime.sessionId) {
         activeSessionIdRef.current = responseSessionId;
         allowSessionChangeRecoveryRef.current = false;
         setActiveSessionId(responseSessionId);
-        setActiveSessionAgentProviderId(activeAgentProviderIdRef.current);
+        setActiveSessionAgentProviderId(
+          payload.agentProviderId ?? runtime.agentProviderId,
+        );
       }
 
       flushStreamingContent();
-      clearPendingStreamState(requestSessionId, payload.requestId);
+      clearPendingStreamState(runtime.sessionKey, payload.requestId);
 
       if (payload.messages) {
         queryClient.setQueryData(
-          messageKeys.list(responseSessionId, activeAgentProviderIdRef.current),
+          messageKeys.list(
+            responseSessionId,
+            payload.agentProviderId ?? runtime.agentProviderId,
+          ),
           payload.messages,
         );
       }
@@ -732,59 +940,60 @@ export default function ChatScreen() {
           {
             projectId: payload.projectId,
             sessionId: responseSessionId,
-            agentProviderId: activeAgentProviderIdRef.current,
+            agentProviderId:
+              payload.agentProviderId ?? runtime.agentProviderId,
           },
         );
+      }
+      if (responseSessionKey !== runtime.sessionKey) {
+        removeRuntimeState(runtime.sessionKey);
       }
     },
   );
 
   const handleErrorResponseRef = React.useRef(
     (payload: { requestId?: string; message?: string }) => {
-      const pending = pendingRequestIdsRef.current;
-      let foundSessionId: string | null = null;
-      for (const [sessionId, requestId] of pending) {
-        if (requestId === payload.requestId) {
-          foundSessionId = sessionId;
-          break;
-        }
+      if (!payload.requestId) {
+        return;
       }
-      if (!foundSessionId) {
+      const runtime = findRuntimeByRequestId(
+        runtimeBySessionKeyRef.current,
+        payload.requestId,
+      );
+      if (!runtime) {
         return;
       }
 
       flushStreamingContent();
-      clearPendingStreamState(foundSessionId, payload.requestId);
+      clearPendingStreamState(runtime.sessionKey, payload.requestId);
       showError(payload.message || "Failed to send message");
     },
   );
 
   const handlePermissionRequestRef = React.useRef(
     (payload: PermissionRequestEvent) => {
-      const currentProject = session.activeProjectRef.current;
-      const availableProjects = session.projectsRef.current ?? [];
       const requestAgentProviderId =
         payload.agentProviderId ?? activeAgentProviderIdRef.current;
-
-      if (currentProject?.id !== payload.projectId) {
-        const matchingProject = availableProjects.find(
-          (project) => project.id === payload.projectId,
-        );
-        if (matchingProject) {
-          session.setActiveProject(matchingProject);
-        }
-      }
-
-      if (activeSessionIdRef.current !== payload.sessionId) {
-        activeSessionIdRef.current = payload.sessionId;
-        setActiveSessionAgentProviderId(requestAgentProviderId);
-        setActiveSessionId(payload.sessionId);
-      } else if (requestAgentProviderId) {
-        setActiveSessionAgentProviderId(requestAgentProviderId);
-      }
-
-      setPendingPermission(payload);
-      setPendingQuestion(null);
+      const sessionKey = makeSessionKey(
+        payload.sessionId,
+        payload.agentProviderId,
+      );
+      const current = runtimeBySessionKeyRef.current[sessionKey];
+      upsertRuntimeState({
+        sessionKey,
+        sessionId: payload.sessionId,
+        agentProviderId: payload.agentProviderId ?? current?.agentProviderId,
+        projectId: payload.projectId,
+        requestId: payload.requestId,
+        phase: "awaiting_permission",
+        updatedAt: Date.now(),
+        lastActivityAt: Date.now(),
+        lastStatusText: "Permission needed",
+        lastToolLabel: current?.lastToolLabel ?? null,
+        baselineMessageId: current?.baselineMessageId ?? null,
+        pendingPermission: payload,
+        pendingQuestion: undefined,
+      });
 
       if (!isAppInForeground()) {
         showPermissionNotification({
@@ -808,30 +1017,26 @@ export default function ChatScreen() {
 
   const handleQuestionRequestRef = React.useRef(
     (payload: QuestionRequestEvent) => {
-      const currentProject = session.activeProjectRef.current;
-      const availableProjects = session.projectsRef.current ?? [];
-      const requestAgentProviderId =
-        payload.agentProviderId ?? activeAgentProviderIdRef.current;
-
-      if (currentProject?.id !== payload.projectId) {
-        const matchingProject = availableProjects.find(
-          (project) => project.id === payload.projectId,
-        );
-        if (matchingProject) {
-          session.setActiveProject(matchingProject);
-        }
-      }
-
-      if (activeSessionIdRef.current !== payload.sessionId) {
-        activeSessionIdRef.current = payload.sessionId;
-        setActiveSessionAgentProviderId(requestAgentProviderId);
-        setActiveSessionId(payload.sessionId);
-      } else if (requestAgentProviderId) {
-        setActiveSessionAgentProviderId(requestAgentProviderId);
-      }
-
-      setPendingQuestion(payload);
-      setPendingPermission(null);
+      const sessionKey = makeSessionKey(
+        payload.sessionId,
+        payload.agentProviderId,
+      );
+      const current = runtimeBySessionKeyRef.current[sessionKey];
+      upsertRuntimeState({
+        sessionKey,
+        sessionId: payload.sessionId,
+        agentProviderId: payload.agentProviderId ?? current?.agentProviderId,
+        projectId: payload.projectId,
+        requestId: payload.requestId,
+        phase: "awaiting_question",
+        updatedAt: Date.now(),
+        lastActivityAt: Date.now(),
+        lastStatusText: "Question needed",
+        lastToolLabel: current?.lastToolLabel ?? null,
+        baselineMessageId: current?.baselineMessageId ?? null,
+        pendingPermission: undefined,
+        pendingQuestion: payload,
+      });
     },
   );
 
@@ -864,9 +1069,7 @@ export default function ChatScreen() {
             sseClientRef.current = connectSseClient() ?? getSseClient();
           }
 
-          if (pendingRequestIdsRef.current.size > 0) {
-            void recoverPendingStream();
-          }
+          void recoverPendingStream();
         } else if (nextState === "background" && prevState === "active") {
           console.log("[Chat] App went to background");
         }
@@ -907,14 +1110,16 @@ export default function ChatScreen() {
     composer.composerLayoutHeight || composerHeight;
   const isSessionSending = creatingSessionId
     ? true
-    : activeSessionId
-      ? pendingRequestIds.has(activeSessionId)
+    : selectedRuntime
+      ? isActiveRuntimePhase(selectedRuntime.phase)
       : false;
-  const footerThinkingContent = hasActiveStreamEvent
+  const footerThinkingContent = hasVisibleActiveStreamEvent
     ? streamingThinkingContent
     : null;
-  const footerBlocks = hasActiveStreamEvent ? streamingBlocks : [];
-  const footerPhase = hasActiveStreamEvent ? streamingPhase : "thinking";
+  const footerBlocks = hasVisibleActiveStreamEvent ? streamingBlocks : [];
+  const footerPhase = hasVisibleActiveStreamEvent
+    ? streamingPhase
+    : "thinking";
 
   const handleSend = React.useCallback(async () => {
     if (!session.activeProject || !composer.trimmedInput || isSessionSending) {
@@ -943,7 +1148,7 @@ export default function ChatScreen() {
       parts: [{ type: "text", content: prompt, durationSeconds: null }],
       createdAt: Date.now(),
     });
-    setHasActiveStreamEvent(false);
+    setHasVisibleRuntimeStream(false);
     resetStreamingContent();
     composer.resetInput();
 
@@ -958,7 +1163,7 @@ export default function ChatScreen() {
         const resolvedSessionId = newSession.id;
         sessionId = resolvedSessionId;
         allowSessionChangeRecoveryRef.current = false;
-        setActiveSessionAgentProviderId(requestAgentProviderId);
+        syncSessionAgentProvider(requestAgentProviderId);
         setActiveSessionId(resolvedSessionId);
         setCreatingSessionId(null);
         setOptimisticMessage((current) =>
@@ -975,16 +1180,19 @@ export default function ChatScreen() {
         return;
       }
     }
-    const newPending = new Map(pendingRequestIds);
-    newPending.set(sessionId, requestId);
-    setPendingRequestIds(newPending);
-    pendingRequestIdsRef.current = newPending;
+    const sessionKey = makeSessionKey(sessionId, requestAgentProviderId);
     activeSessionIdRef.current = sessionId;
-    void saveActiveSessionStream({
+    upsertRuntimeState({
+      sessionKey,
       requestId,
       projectId: session.activeProject.id,
       sessionId,
       agentProviderId: requestAgentProviderId,
+      phase: "pending",
+      updatedAt: Date.now(),
+      lastActivityAt: Date.now(),
+      lastStatusText: "Thinking",
+      lastToolLabel: null,
       baselineMessageId: isCreatingSession
         ? null
         : (activeSessionMessages[activeSessionMessages.length - 1]?.id ?? null),
@@ -993,7 +1201,9 @@ export default function ChatScreen() {
     clearRequestRecoveryTimeout();
     requestRecoveryTimeoutRef.current = setTimeout(() => {
       requestRecoveryTimeoutRef.current = null;
-      if (pendingRequestIdsRef.current.get(sessionId) === requestId) {
+      if (
+        runtimeBySessionKeyRef.current[sessionKey]?.requestId === requestId
+      ) {
         void recoverPendingStream();
       }
     }, 60_000);
@@ -1016,7 +1226,7 @@ export default function ChatScreen() {
       });
     } catch (error) {
       console.error("[Chat] Failed to send prompt:", error);
-      clearPendingStreamState(sessionId, requestId);
+      clearPendingStreamState(sessionKey, requestId);
       composer.restoreInput(prompt, appMentions);
       showError("Failed to send message. Please try again.");
     }
@@ -1025,7 +1235,6 @@ export default function ChatScreen() {
     activeLookupAgentProviderId,
     activeSessionId,
     isSessionSending,
-    pendingRequestIds,
     activeSessionMessages,
     createSessionMutation,
     clearPendingStreamState,
@@ -1035,7 +1244,9 @@ export default function ChatScreen() {
     session.activeAgent,
     showError,
     resetStreamingContent,
+    upsertRuntimeState,
     composer,
+    syncSessionAgentProvider,
   ]);
 
   const handleAbort = React.useCallback(async () => {
@@ -1044,7 +1255,11 @@ export default function ChatScreen() {
       return;
     }
 
-    const requestId = pendingRequestIdsRef.current.get(sessionId);
+    const sessionKey = makeSessionKey(
+      sessionId,
+      activeAgentProviderIdRef.current,
+    );
+    const requestId = runtimeBySessionKeyRef.current[sessionKey]?.requestId;
     if (!requestId || !session.activeProject) {
       return;
     }
@@ -1053,12 +1268,8 @@ export default function ChatScreen() {
     resetStreamingContent();
     clearRequestRecoveryTimeout();
     void clearActiveSessionStream(requestId);
-
-    // Remove only this session from pending request IDs
-    const newPending = new Map(pendingRequestIdsRef.current);
-    newPending.delete(sessionId);
-    pendingRequestIdsRef.current = newPending;
-    setPendingRequestIds(new Map(newPending));
+    setHasVisibleRuntimeStream(false);
+    removeRuntimeState(sessionKey);
 
     // Fire abort request in background (don't block UI)
     sendAbortRequest({
@@ -1073,6 +1284,7 @@ export default function ChatScreen() {
     session.activeProject,
     activeLookupAgentProviderId,
     clearRequestRecoveryTimeout,
+    removeRuntimeState,
     resetStreamingContent,
   ]);
 
@@ -1093,7 +1305,20 @@ export default function ChatScreen() {
           jobId: pendingPermission.jobId,
           reply,
         });
-        setPendingPermission(null);
+        const sessionKey = makeSessionKey(
+          pendingPermission.sessionId,
+          pendingPermission.agentProviderId ?? activeLookupAgentProviderId,
+        );
+        const current = runtimeBySessionKeyRef.current[sessionKey];
+        if (current) {
+          upsertRuntimeState({
+            ...current,
+            phase: "streaming",
+            pendingPermission: undefined,
+            updatedAt: Date.now(),
+            lastActivityAt: Date.now(),
+          });
+        }
       } catch (error) {
         console.error("[PermissionResponse] Failed to send:", error);
         showError(
@@ -1103,7 +1328,12 @@ export default function ChatScreen() {
         setIsRespondingToPermission(false);
       }
     },
-    [pendingPermission, activeLookupAgentProviderId, showError],
+    [
+      pendingPermission,
+      activeLookupAgentProviderId,
+      showError,
+      upsertRuntimeState,
+    ],
   );
 
   const handleQuestionResponse = React.useCallback(
@@ -1123,7 +1353,20 @@ export default function ChatScreen() {
           jobId: pendingQuestion.jobId,
           answers,
         });
-        setPendingQuestion(null);
+        const sessionKey = makeSessionKey(
+          pendingQuestion.sessionId,
+          pendingQuestion.agentProviderId ?? activeLookupAgentProviderId,
+        );
+        const current = runtimeBySessionKeyRef.current[sessionKey];
+        if (current) {
+          upsertRuntimeState({
+            ...current,
+            phase: "streaming",
+            pendingQuestion: undefined,
+            updatedAt: Date.now(),
+            lastActivityAt: Date.now(),
+          });
+        }
       } catch (error) {
         console.error("[QuestionResponse] Failed to send:", error);
         showError("The answers were not delivered. Please try again.");
@@ -1131,7 +1374,12 @@ export default function ChatScreen() {
         setIsRespondingToQuestion(false);
       }
     },
-    [pendingQuestion, activeLookupAgentProviderId, showError],
+    [
+      pendingQuestion,
+      activeLookupAgentProviderId,
+      showError,
+      upsertRuntimeState,
+    ],
   );
 
   // Phase 3: Use a ref for displayedMessages so renderMessage stays stable
@@ -1154,6 +1402,15 @@ export default function ChatScreen() {
           responseSummary={responseSummaryContext}
           showAssistantMeta={isLastAssistantMessage}
           showResponseSummary={isLastAssistantMessage}
+          onCopyAssistantResponse={(message) => {
+            const content = message.visibleContent.trim();
+            if (!content) {
+              return;
+            }
+
+            void Clipboard.setStringAsync(content);
+            showToast("Copied", 2000);
+          }}
           borderColor={colors.borderColor}
           metaColor={colors.metaColor}
           userBubble={colors.userBubble}
@@ -1163,7 +1420,7 @@ export default function ChatScreen() {
         />
       );
     },
-    [colors, theme.colors.onSurface],
+    [colors, showToast, theme.colors.onSurface],
   );
 
   const handleScroll = React.useCallback(
@@ -1332,7 +1589,7 @@ export default function ChatScreen() {
                 </View>
               }
               ListFooterComponent={
-                isSessionSending || hasActiveStreamEvent ? (
+                isSessionSending || hasVisibleActiveStreamEvent ? (
                   <TypingIndicator
                     key={
                       (activeSessionId
@@ -1436,7 +1693,9 @@ export default function ChatScreen() {
         <ErrorToast
           visible={errorToastVisible}
           message={errorToastMessage}
+          toastKey={errorToastKey}
           onDismiss={() => setErrorToastVisible(false)}
+          durationMs={errorToastDurationMs}
           bottomOffset={
             keyboardHeight > 0
               ? keyboardHeight +
@@ -1541,17 +1800,28 @@ export default function ChatScreen() {
         onClose={handleCloseDrawer}
         activeProject={session.activeProject}
         activeSessionId={activeSessionId}
-        onSelectSession={(sessionId, sessionAgentProviderId) => {
+        allProjects={sessionProjects ?? []}
+        runtimeBySessionKey={runtimeBySessionKey}
+        onSelectSession={(sessionId, sessionAgentProviderId, projectId) => {
           if (sessionId === null) {
             activeSessionIdRef.current = null;
-            clearPendingStreamState();
             setActiveSessionId(null);
             setActiveSessionAgentProviderId(undefined);
             setOptimisticMessage(null);
+            setHasVisibleRuntimeStream(false);
+            resetStreamingContent();
             hasScrolledToBottom.current = false;
           } else {
             clearRequestRecoveryTimeout();
-            setActiveSessionAgentProviderId(
+            if (projectId) {
+              const targetProject = (sessionProjects ?? []).find(
+                (project) => project.id === projectId,
+              );
+              if (targetProject) {
+                setActiveProject(targetProject);
+              }
+            }
+            syncSessionAgentProvider(
               sessionAgentProviderId ?? draftAgentProviderId,
             );
             setActiveSessionId(sessionId);

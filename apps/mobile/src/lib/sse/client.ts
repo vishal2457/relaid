@@ -1,7 +1,8 @@
 import { fetch as expoFetch } from "expo/fetch";
 import { invalidateSession, isUnauthorizedStatus } from "../pairing/auth";
 import { chatServerApiUrl } from "../axios/base";
-import { getCurrentAccessToken } from "../pairing/session";
+import { decryptFromServer, type EncryptedEnvelope } from "../e2ee";
+import { getCurrentAccessToken, getCurrentPairingSession } from "../pairing/session";
 
 export type SseEventCallback = (
   event: string,
@@ -282,10 +283,60 @@ export class SseClient {
 
     const data = message.data.join("\n");
     try {
-      const parsed = JSON.parse(data) as Record<string, unknown>;
+      const parsed = this.normalizeEncryptedEvent(
+        message.event,
+        JSON.parse(data) as Record<string, unknown>,
+      );
       this.options.onEvent(message.event, parsed);
     } catch {
       console.warn("[SSE] Failed to parse event data:", data);
+    }
+  }
+
+  private normalizeEncryptedEvent(
+    event: string,
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const session = getCurrentPairingSession();
+    if (!session) {
+      return payload;
+    }
+
+    const sealed = payload.sealedPayload as EncryptedEnvelope | undefined;
+    if (!sealed || typeof sealed !== "object") {
+      return payload;
+    }
+
+    try {
+      const decrypted = decryptFromServer<Record<string, unknown>>(session, sealed);
+      switch (event) {
+        case "session_stream_chunk":
+          return { ...payload, chunk: decrypted.chunk ?? "" };
+        case "session_prompt_response":
+          return {
+            ...payload,
+            output: decrypted.output ?? "",
+            error: decrypted.error,
+            sessionTitle: decrypted.sessionTitle,
+          };
+        case "permission_request":
+          return {
+            ...payload,
+            permission: decrypted.permission,
+            patterns: decrypted.patterns ?? [],
+            metadata: decrypted.metadata ?? {},
+          };
+        case "question_request":
+          return {
+            ...payload,
+            questions: decrypted.questions ?? [],
+          };
+        default:
+          return payload;
+      }
+    } catch (error) {
+      console.warn("[SSE] Failed to decrypt event", event, error);
+      return payload;
     }
   }
 

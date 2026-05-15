@@ -49,8 +49,8 @@ export const gitKeys = {
   all: ["git"] as const,
   files: () => [...gitKeys.all, "files"] as const,
   fileStatus: (projectId: string) => [...gitKeys.files(), projectId] as const,
-  fileDiff: (projectId: string, filePath: string) =>
-    [...gitKeys.files(), projectId, "diff", filePath] as const,
+  fileDiff: (projectId: string, filePath?: string) =>
+    [...gitKeys.files(), projectId, "diff", filePath ?? "__all__"] as const,
   fileContent: (projectId: string, filePath: string) =>
     [...gitKeys.files(), projectId, "content", filePath] as const,
 };
@@ -136,16 +136,16 @@ export function useGitUnstageFiles(
 
 export function useFileDiff(
   projectId: string,
-  filePath: string,
+  filePath?: string,
   enabled = true,
 ) {
   return useQuery<GitFileDiffResponse>({
     queryKey: gitKeys.fileDiff(projectId, filePath),
-    enabled: Boolean(projectId) && Boolean(filePath) && enabled,
+    enabled: Boolean(projectId) && enabled,
     queryFn: async () => {
       const response = await baseApi.get<GitFileDiffResponse>(
         `/git/${projectId}/diff`,
-        { params: { filePath } },
+        filePath ? { params: { filePath } } : undefined,
       );
       return {
         files: response.data.files ?? [],
@@ -168,7 +168,7 @@ export function useFileContent(
 ) {
   return useQuery<FileContentResponse>({
     queryKey: gitKeys.fileContent(projectId, filePath),
-    enabled: Boolean(projectId) && Boolean(filePath) && enabled,
+    enabled: Boolean(projectId) && enabled,
     queryFn: async () => {
       const response = await baseApi.get<FileContentResponse>(
         `/git/${projectId}/file-content`,

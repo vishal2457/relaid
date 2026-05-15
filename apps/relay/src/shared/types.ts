@@ -24,6 +24,16 @@ export const MessageRoleSchema = z.enum(["user", "assistant", "system"]);
 
 export type MessageRole = z.infer<typeof MessageRoleSchema>;
 
+export const EncryptedEnvelopeSchema = z.object({
+  version: z.literal("v1"),
+  senderDeviceId: z.string().optional(),
+  recipientServerId: z.string().optional(),
+  nonce: z.string(),
+  ciphertext: z.string(),
+});
+
+export type EncryptedEnvelope = z.infer<typeof EncryptedEnvelopeSchema>;
+
 export const RunRequestEventSchema = z.object({
   requestId: z.string(),
   projectId: z.string(),
@@ -57,6 +67,9 @@ export const SessionAbortEventSchema = z.object({
 export type SessionAbortEvent = z.infer<typeof SessionAbortEventSchema>;
 
 export const SessionAbortedEventSchema = z.object({
+  requestId: z.string().optional(),
+  agentProviderId: z.string().optional(),
+  projectId: z.string().optional(),
   sessionId: z.string(),
   success: z.boolean(),
   error: z.string().optional(),
@@ -69,22 +82,10 @@ export const SessionPromptRequestEventSchema = z.object({
   agentProviderId: z.string().optional(),
   projectId: z.string(),
   sessionId: z.string(),
-  prompt: z.string(),
-  agent: z.string().optional(),
-  appMentions: z
-    .array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-      }),
-    )
-    .optional(),
-  model: z
-    .object({
-      providerId: z.string(),
-      modelId: z.string(),
-    })
-    .optional(),
+  deviceId: z.string(),
+  deviceKeyId: z.string(),
+  devicePublicKey: z.string(),
+  sealedPayload: EncryptedEnvelopeSchema,
   userId: z.string().optional(),
 });
 
@@ -94,6 +95,7 @@ export type SessionPromptRequestEvent = z.infer<
 
 export const SessionPromptStartedEventSchema = z.object({
   requestId: z.string(),
+  agentProviderId: z.string().optional(),
   projectId: z.string(),
   sessionId: z.string(),
 });
@@ -107,12 +109,13 @@ export const SessionPromptResponseEventSchema = z.object({
   agentProviderId: z.string().optional(),
   projectId: z.string(),
   sessionId: z.string(),
-  sessionTitle: z.string().optional(),
   success: z.boolean(),
-  output: z.string(),
-  error: z.string().optional(),
   exitCode: z.number(),
   duration: z.number(),
+  sealedPayload: EncryptedEnvelopeSchema.optional(),
+  sessionTitle: z.string().optional(),
+  output: z.string().optional(),
+  error: z.string().optional(),
   messages: z.array(z.lazy(() => MessagePayloadSchema)).optional(),
 });
 
@@ -122,17 +125,50 @@ export type SessionPromptResponseEvent = z.infer<
 
 export const SessionStreamChunkEventSchema = z.object({
   requestId: z.string(),
+  agentProviderId: z.string().optional(),
   projectId: z.string(),
   sessionId: z.string(),
   messageId: z.string().optional(),
   partId: z.string().optional(),
-  chunk: z.string(),
   type: z.enum(["text", "reasoning", "tool", "step", "status", "complete"]),
   isComplete: z.boolean().optional(),
+  sealedPayload: EncryptedEnvelopeSchema.optional(),
+  chunk: z.string().optional(),
 });
 
 export type SessionStreamChunkEvent = z.infer<
   typeof SessionStreamChunkEventSchema
+>;
+
+export const SessionRuntimePhaseSchema = z.enum([
+  "pending",
+  "streaming",
+  "awaiting_permission",
+  "awaiting_question",
+  "completed",
+  "failed",
+  "aborted",
+]);
+
+export type SessionRuntimePhase = z.infer<typeof SessionRuntimePhaseSchema>;
+
+export const SessionRuntimeSnapshotSchema = z.object({
+  sessionKey: z.string(),
+  sessionId: z.string(),
+  agentProviderId: z.string().optional(),
+  projectId: z.string(),
+  requestId: z.string(),
+  serverId: z.string(),
+  phase: SessionRuntimePhaseSchema,
+  lastActivityAt: z.number(),
+  updatedAt: z.number(),
+  lastStatusText: z.string().nullable(),
+  lastToolLabel: z.string().nullable(),
+  baselineMessageId: z.string().nullable().optional(),
+});
+
+export type SessionRuntimeSnapshot = z.infer<
+  typeof SessionRuntimeSnapshotSchema
 >;
 
 export const RunStreamChunkEventSchema = z.object({
@@ -367,9 +403,10 @@ export const MessagePayloadSchema = z.object({
   id: z.string(),
   sessionId: z.string(),
   role: z.enum(["user", "assistant", "system"]),
-  content: z.string(),
-  visibleContent: z.string(),
-  thinkingContent: z.string().nullable(),
+  sealedBody: EncryptedEnvelopeSchema,
+  content: z.string().optional().default(""),
+  visibleContent: z.string().optional().default(""),
+  thinkingContent: z.string().nullable().optional().default(null),
   thinkingDurationSeconds: z.number().nullable(),
   parts: z.array(
     z.object({
@@ -377,7 +414,7 @@ export const MessagePayloadSchema = z.object({
       content: z.string(),
       durationSeconds: z.number().nullable(),
     }),
-  ),
+  ).optional().default([]),
   createdAt: z.string(),
 });
 
@@ -474,21 +511,30 @@ export const PermissionRequestEventSchema = z.object({
   sessionId: z.string(),
   jobId: z.string(),
   threadId: z.string(),
-  permission: z.string(),
-  patterns: z.array(z.string()),
-  metadata: z.record(z.unknown()),
+  sealedPayload: EncryptedEnvelopeSchema,
+  permission: z.string().optional(),
+  patterns: z.array(z.string()).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 export type PermissionRequestEvent = z.infer<
   typeof PermissionRequestEventSchema
 >;
 
+export const SessionRuntimeSummarySchema = SessionRuntimeSnapshotSchema.extend({
+  pendingPermission: PermissionRequestEventSchema.optional(),
+  pendingQuestion: z.lazy(() => QuestionRequestEventSchema).optional(),
+});
+
+export type SessionRuntimeSummary = z.infer<typeof SessionRuntimeSummarySchema>;
+
 export const PermissionResponseEventSchema = z.object({
   requestId: z.string(),
   agentProviderId: z.string().optional(),
   sessionId: z.string(),
   jobId: z.string(),
-  reply: PermissionReplySchema,
+  sealedPayload: EncryptedEnvelopeSchema,
+  reply: PermissionReplySchema.optional(),
 });
 
 export type PermissionResponseEvent = z.infer<
@@ -519,17 +565,25 @@ export const QuestionRequestEventSchema = z.object({
   sessionId: z.string(),
   jobId: z.string(),
   threadId: z.string(),
-  questions: z.array(QuestionSchema),
+  sealedPayload: EncryptedEnvelopeSchema,
+  questions: z.array(QuestionSchema).optional(),
 });
 
 export type QuestionRequestEvent = z.infer<typeof QuestionRequestEventSchema>;
+
+export const SessionRuntimeDetailSchema = SessionRuntimeSummarySchema.extend({
+  bufferedChunks: z.array(SessionStreamChunkEventSchema),
+});
+
+export type SessionRuntimeDetail = z.infer<typeof SessionRuntimeDetailSchema>;
 
 export const QuestionResponseEventSchema = z.object({
   requestId: z.string(),
   agentProviderId: z.string().optional(),
   sessionId: z.string(),
   jobId: z.string(),
-  answers: z.array(z.array(z.string())),
+  sealedPayload: EncryptedEnvelopeSchema,
+  answers: z.array(z.array(z.string())).optional(),
 });
 
 export type QuestionResponseEvent = z.infer<typeof QuestionResponseEventSchema>;

@@ -6,6 +6,8 @@ import {
 } from "./client";
 import { getCurrentAccessToken } from "@/src/lib/pairing/session";
 import baseApi, { chatServerApiUrl } from "@/src/lib/axios/base";
+import { encryptForServer } from "@/src/lib/e2ee";
+import { getCurrentPairingSession } from "@/src/lib/pairing/session";
 
 let sseClient: SseClient | null = null;
 let listenerIdCounter = 0;
@@ -100,14 +102,23 @@ export async function sendPromptRequest(params: {
   appMentions?: Array<{ id: string; name: string }>;
   model?: { providerId: string; modelId: string };
 }): Promise<void> {
+  const session = getCurrentPairingSession();
+  if (!session) {
+    throw new Error("Missing pairing session");
+  }
   await baseApi.post(`/mobile/sessions/${params.sessionId}/prompt`, {
     requestId: params.requestId,
     agentProviderId: params.agentProviderId,
     projectId: params.projectId,
-    prompt: params.prompt,
-    agent: params.agent,
-    appMentions: params.appMentions,
-    model: params.model,
+    deviceId: session.deviceId,
+    deviceKeyId: session.deviceKeyId,
+    devicePublicKey: session.devicePublicKey,
+    sealedPayload: encryptForServer(session, {
+      prompt: params.prompt,
+      agent: params.agent,
+      appMentions: params.appMentions,
+      model: params.model,
+    }),
   });
 }
 
@@ -154,6 +165,10 @@ export async function sendPermissionResponse(params: {
   jobId: string;
   reply: "once" | "always" | "reject";
 }): Promise<void> {
+  const session = getCurrentPairingSession();
+  if (!session) {
+    throw new Error("Missing pairing session");
+  }
   await baseApi.post(
     `/mobile/sessions/${params.sessionId}/permission-response`,
     {
@@ -161,7 +176,9 @@ export async function sendPermissionResponse(params: {
       agentProviderId: params.agentProviderId,
       sessionId: params.sessionId,
       jobId: params.jobId,
-      reply: params.reply,
+      sealedPayload: encryptForServer(session, {
+        reply: params.reply,
+      }),
     },
   );
 }
@@ -173,12 +190,18 @@ export async function sendQuestionResponse(params: {
   jobId: string;
   answers: string[][];
 }): Promise<void> {
+  const session = getCurrentPairingSession();
+  if (!session) {
+    throw new Error("Missing pairing session");
+  }
   await baseApi.post(`/mobile/sessions/${params.sessionId}/question-response`, {
     requestId: params.requestId,
     agentProviderId: params.agentProviderId,
     sessionId: params.sessionId,
     jobId: params.jobId,
-    answers: params.answers,
+    sealedPayload: encryptForServer(session, {
+      answers: params.answers,
+    }),
   });
 }
 

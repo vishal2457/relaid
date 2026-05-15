@@ -338,6 +338,9 @@ export namespace relay {
 	    pairedDeviceCount: number;
 	    serverId: string;
 	    serverName: string;
+	    serverPublicKey: string;
+	    serverKeyId: string;
+	    fingerprint: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new PairingSessionResponse(source);
@@ -352,6 +355,9 @@ export namespace relay {
 	        this.pairedDeviceCount = source["pairedDeviceCount"];
 	        this.serverId = source["serverId"];
 	        this.serverName = source["serverName"];
+	        this.serverPublicKey = source["serverPublicKey"];
+	        this.serverKeyId = source["serverKeyId"];
+	        this.fingerprint = source["fingerprint"];
 	    }
 	}
 

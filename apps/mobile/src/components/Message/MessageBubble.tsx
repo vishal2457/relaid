@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Text } from "react-native-paper";
 import { FormattedText } from "./FormattedText";
 import { AssistantBlockSequence } from "./AssistantBlockSequence";
@@ -45,6 +45,7 @@ const formatAssistantDuration = (durationMs: number | null | undefined) => {
 interface MessageBubbleProps {
   message: SessionMessage;
   showAssistantMeta?: boolean;
+  onLongPress?: (() => void) | undefined;
   borderColor: string;
   metaColor: string;
   userBubble: string;
@@ -57,6 +58,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
   ({
     message,
     showAssistantMeta = true,
+    onLongPress,
     borderColor,
     metaColor,
     userBubble,
@@ -95,6 +97,28 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
       assistantMeta.length > 0 &&
       assistantBlocks.length === 0;
 
+    const bubbleContent = (
+      <>
+        {hasVisibleText ? (
+          <>
+            <FormattedText
+              text={mainContent}
+              baseStyle={{ color: textColor }}
+            />
+            {shouldShowAssistantMeta ? (
+              <Text
+                variant="labelSmall"
+                style={{ color: metaColor, marginTop: 10 }}
+              >
+                {assistantMeta}
+              </Text>
+            ) : null}
+          </>
+        ) : null}
+      </>
+    );
+    const BubbleContainer = isAssistant && onLongPress ? Pressable : View;
+
     return (
       <View
         style={{
@@ -103,7 +127,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
         }}
       >
         {showBubble ? (
-          <View
+          <BubbleContainer
+            {...(isAssistant && onLongPress
+              ? { onLongPress, delayLongPress: 250 }
+              : {})}
             style={{
               maxWidth: "85%",
               backgroundColor: bubbleColor,
@@ -112,37 +139,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
               alignSelf: isUser ? "flex-end" : "flex-start",
             }}
           >
-            {/* <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 4,
-                alignSelf: "flex-end"
-              }}
-            >
-              <Text variant="labelSmall" style={{ color: metaColor }}>
-                {formatDateTime(message.createdAt)}
-              </Text>
-            </View> */}
-
-            {hasVisibleText ? (
-              <>
-                <FormattedText
-                  text={mainContent}
-                  baseStyle={{ color: textColor }}
-                />
-                {shouldShowAssistantMeta ? (
-                  <Text
-                    variant="labelSmall"
-                    style={{ color: metaColor, marginTop: 10 }}
-                  >
-                    {assistantMeta}
-                  </Text>
-                ) : null}
-              </>
-            ) : null}
-          </View>
+            {bubbleContent}
+          </BubbleContainer>
         ) : null}
 
         {showAssistantBlocks ? (
@@ -151,6 +149,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
               blocks={assistantBlocks}
               metaText={assistantMeta.length > 0 ? assistantMeta : null}
               showMetaText={showAssistantMeta}
+              onTextBlockLongPress={onLongPress}
               assistantBubble={assistantBubble}
               textColor={textColor}
               metaColor={metaColor}

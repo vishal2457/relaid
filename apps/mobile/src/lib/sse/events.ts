@@ -1,6 +1,13 @@
 import type { SessionMessage } from "@/src/lib/api/messages";
 import type { StreamChunkType } from "@/src/lib/opencode-types";
 
+export type SessionPromptStartedEvent = {
+  requestId: string;
+  agentProviderId?: string;
+  projectId: string;
+  sessionId: string;
+};
+
 export type SessionPromptResponseEvent = {
   requestId: string;
   agentProviderId?: string;
@@ -16,6 +23,7 @@ export type SessionPromptResponseEvent = {
 
 export type SessionStreamChunkEvent = {
   requestId: string;
+  agentProviderId?: string;
   projectId: string;
   sessionId: string;
   messageId?: string;

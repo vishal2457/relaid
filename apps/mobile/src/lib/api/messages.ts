@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import baseApi from "../axios/base";
+import { decryptFromServer, type EncryptedEnvelope } from "../e2ee";
 import type {
   AssistantMessage,
   Part,
@@ -9,6 +10,7 @@ import type {
   SessionMessageResponse,
   UserMessage,
 } from "../opencode-types";
+import { getCurrentPairingSession } from "../pairing/session";
 
 export type SessionMessageRole = "user" | "assistant" | "system";
 
@@ -119,6 +121,20 @@ export interface SessionMessage {
   assistant?: SessionAssistantSummary;
   // Message summary with diffs (only for user messages)
   summary?: MessageSummary;
+}
+
+function getMessageTime(value: unknown): {
+  created: number;
+  completed?: number;
+} {
+  const record = asRecord(value);
+  const created =
+    getNumberValue(record, ["created"]) ??
+    getNumberValue(record, ["createdAt"]) ??
+    Date.now();
+  const completed = getNumberValue(record, ["completed", "completedAt"]);
+
+  return completed === null ? { created } : { created, completed };
 }
 
 function getToolLabel(part: ToolPart): string {
@@ -1130,8 +1146,38 @@ export function adaptStreamActivity(
 export function adaptMessage(
   messageResponse: SessionMessageResponse,
 ): SessionMessage {
-  const message = messageResponse.info;
-  const parts = messageResponse.parts ?? [];
+  const session = getCurrentPairingSession();
+  const message = messageResponse.info as any;
+  const messageTime = getMessageTime(message?.time ?? message);
+  let parts = messageResponse.parts ?? [];
+  const sealedBody =
+    (message?.sealedBody as EncryptedEnvelope | undefined) ??
+    (messageResponse.sealedBody as EncryptedEnvelope | undefined);
+  if (session && sealedBody) {
+    try {
+      const decrypted = decryptFromServer<{
+        content: string;
+        visibleContent: string;
+        thinkingContent: string | null;
+        thinkingDurationSeconds: number | null;
+        parts: SessionMessagePart[];
+      }>(session, sealedBody);
+      return {
+        id: message.id,
+        sessionID: message.sessionID,
+        role: message.role,
+        content: decrypted.content,
+        visibleContent: decrypted.visibleContent,
+        thinkingContent: decrypted.thinkingContent,
+        thinkingDurationSeconds: decrypted.thinkingDurationSeconds,
+        parts: decrypted.parts ?? [],
+        createdAt: messageTime.created,
+        time: messageTime,
+      };
+    } catch (error) {
+      console.warn("Failed to decrypt message body", error);
+    }
+  }
 
   const textParts = parts.filter((p): p is TextPart => p.type === "text");
   const reasoningParts = parts.filter(
@@ -1245,8 +1291,8 @@ export function adaptMessage(
     thinkingContent,
     thinkingDurationSeconds,
     parts: convertedParts,
-    createdAt: message.time.created,
-    time: message.time,
+    createdAt: messageTime.created,
+    time: messageTime,
     tokens,
     cost: assistantMessage?.cost,
     assistant,

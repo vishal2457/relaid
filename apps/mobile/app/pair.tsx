@@ -1,4 +1,5 @@
 import { claimPairingSession } from "@/src/lib/api/pairing";
+import { generateDeviceKeyPair } from "@/src/lib/e2ee";
 import { parsePairingUrl } from "@/src/lib/pairing/url";
 import { usePairingSession } from "@/src/components/PairingSessionContext";
 import { useServerUrl } from "@/src/components/ServerUrlContext";
@@ -45,15 +46,30 @@ export default function PairScreen() {
       try {
         const parsed = parsePairingUrl(data);
         const qrRelayUrl = normalizeUrl(parsed.relayUrl);
+        const deviceKeyPair = generateDeviceKeyPair();
         await setServerUrl(qrRelayUrl);
         const claimedSession = await claimPairingSession({
           pairingId: parsed.pairingId,
           pairingSecret: parsed.pairingSecret,
+          devicePublicKey: deviceKeyPair.devicePublicKey,
+          deviceKeyId: deviceKeyPair.deviceKeyId,
           deviceName: Device.deviceName || "Mobile Device",
           platform: Platform.OS,
         });
 
-        await saveSession(claimedSession);
+        if (
+          parsed.serverPublicKey &&
+          claimedSession.serverPublicKey !== parsed.serverPublicKey
+        ) {
+          throw new Error("Pairing key verification failed");
+        }
+
+        await saveSession({
+          ...claimedSession,
+          devicePublicKey: deviceKeyPair.devicePublicKey,
+          deviceKeyId: deviceKeyPair.deviceKeyId,
+          devicePrivateKey: deviceKeyPair.devicePrivateKey,
+        });
         setScannerOpen(false);
         router.replace("/");
       } catch (error) {

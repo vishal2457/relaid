@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { getMobileDeviceById } from "../services/auth";
 import {
   requestConnectedServer,
   requestUntilMatch,
@@ -38,6 +39,7 @@ function handleRouteError(
 router.get("/", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const device = await getMobileDeviceById(String(req.headers["x-device-id"] || ""));
     const sessionId =
       typeof req.query.sessionId === "string" ? req.query.sessionId : undefined;
     const agentProviderId =
@@ -76,6 +78,9 @@ router.get("/", async (req: Request, res: Response) => {
         agentProviderId,
         sessionId,
         limit,
+        deviceId: device.id,
+        deviceKeyId: device.deviceKeyId,
+        devicePublicKey: device.devicePublicKey,
       },
       sessionLookup.serverId,
     );

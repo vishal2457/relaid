@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { getMobileDeviceById } from "../services/auth";
 import {
   requestAllConnectedServers,
   requestConnectedServer,
@@ -87,6 +88,7 @@ function getAgentProviderId(req: Request): string | undefined {
 router.get("/", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const device = await getMobileDeviceById(String(req.headers["x-device-id"] || ""));
     const cwd = typeof req.query.cwd === "string" ? req.query.cwd : undefined;
     const agentProviderId = getAgentProviderId(req);
 
@@ -174,6 +176,7 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.get("/:id/messages", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const device = await getMobileDeviceById(String(req.headers["x-device-id"] || ""));
     const agentProviderId = getAgentProviderId(req);
     console.log(userId, "user id");
     console.log(req.params.id, "id");
@@ -204,6 +207,9 @@ router.get("/:id/messages", async (req: Request, res: Response) => {
         agentProviderId,
         sessionId: req.params.id,
         limit,
+        deviceId: device.id,
+        deviceKeyId: device.deviceKeyId,
+        devicePublicKey: device.devicePublicKey,
       },
       sessionLookup.serverId,
     );

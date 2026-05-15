@@ -25,6 +25,9 @@ type PairingSessionResponse struct {
 	PairedDeviceCount int    `json:"pairedDeviceCount"`
 	ServerID          string `json:"serverId"`
 	ServerName        string `json:"serverName"`
+	ServerPublicKey   string `json:"serverPublicKey"`
+	ServerKeyID       string `json:"serverKeyId"`
+	Fingerprint       string `json:"fingerprint"`
 }
 
 type DeviceConfig struct {
@@ -94,14 +97,21 @@ func LoadOrCreateDeviceCredentials(envServerID, envServerSecret string) (DeviceC
 	return creds, nil
 }
 
-func CreatePairingSession(relayURL string, creds DeviceCredentials) (*PairingSessionResponse, error) {
+func CreatePairingSession(
+	relayURL string,
+	creds DeviceCredentials,
+	keys *E2EEKeyMaterial,
+) (*PairingSessionResponse, error) {
 	url, err := buildRelayEndpointURL(relayURL, "/api/pairing/sessions")
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve pairing URL: %w", err)
 	}
 
 	body, err := json.Marshal(map[string]string{
-		"serverName": GetServerName(),
+		"serverName":      GetServerName(),
+		"serverPublicKey": keys.PublicKey,
+		"serverKeyId":     keys.KeyID,
+		"fingerprint":     keys.Fingerprint,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode request body: %w", err)

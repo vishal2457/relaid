@@ -6,15 +6,19 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 type ErrorToastProps = {
   visible: boolean;
   message: string;
+  toastKey?: number;
   onDismiss: () => void;
   bottomOffset?: number;
+  durationMs?: number;
 };
 
 export function ErrorToast({
   visible,
   message,
+  toastKey = 0,
   onDismiss,
   bottomOffset = 0,
+  durationMs = 5000,
 }: ErrorToastProps) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(10)).current;
@@ -38,7 +42,7 @@ export function ErrorToast({
 
       const timer = setTimeout(() => {
         onDismiss();
-      }, 5000); // Auto dismiss after 5 seconds
+      }, durationMs);
 
       return () => clearTimeout(timer);
     } else {
@@ -57,7 +61,7 @@ export function ErrorToast({
         setMounted(false);
       });
     }
-  }, [visible, onDismiss, opacity, translateY]);
+  }, [durationMs, onDismiss, opacity, toastKey, translateY, visible]);
 
   if (!mounted) return null;
 

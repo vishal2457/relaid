@@ -66,11 +66,13 @@ const HunkItem = ({ hunk, isDark }: { hunk: DiffHunk; isDark: boolean }) => (
 const FileDiffItem = ({
   file,
   isDark,
+  initiallyCollapsed,
 }: {
   file: FileDiff;
   isDark: boolean;
+  initiallyCollapsed: boolean;
 }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initiallyCollapsed);
 
   return (
     <View style={[styles.fileDiff, isDark && styles.fileDiffDark]}>
@@ -94,13 +96,13 @@ const FileDiffItem = ({
 
 interface DiffViewerProps {
   projectId: string;
-  filePath: string;
+  filePath?: string;
 }
 
 export default function DiffViewer({ projectId, filePath }: DiffViewerProps) {
   const theme = useTheme();
   const isDark = theme.dark;
-  const { data, isLoading, error } = useFileDiff(projectId, filePath);
+  const { data, isLoading, error } = useFileDiff(projectId);
 
   if (isLoading) {
     return (
@@ -140,9 +142,20 @@ export default function DiffViewer({ projectId, filePath }: DiffViewerProps) {
     <ScrollView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      {data.files.map((file, i) => (
-        <FileDiffItem key={i} file={file} isDark={isDark} />
-      ))}
+      {data.files.map((file, i) => {
+        const isSelectedFile =
+          Boolean(filePath) &&
+          (file.fileName === filePath || file.fileName.endsWith(`/${filePath}`));
+
+        return (
+          <FileDiffItem
+            key={`${file.fileName}-${i}`}
+            file={file}
+            isDark={isDark}
+            initiallyCollapsed={!isSelectedFile}
+          />
+        );
+      })}
     </ScrollView>
   );
 }

@@ -193,7 +193,8 @@ router.get("/:projectId/diff", async (req: Request, res: Response) => {
   try {
     const userId = req.headers["x-user-id"] as string;
     const { projectId } = req.params;
-    const filePath = req.query.filePath as string;
+    const filePath =
+      typeof req.query.filePath === "string" ? req.query.filePath : undefined;
     const serverId = req.headers["x-server-id"] as string | undefined;
 
     if (!userId) {
@@ -203,11 +204,6 @@ router.get("/:projectId/diff", async (req: Request, res: Response) => {
 
     if (!projectId) {
       res.status(400).json({ error: "projectId is required" });
-      return;
-    }
-
-    if (!filePath) {
-      res.status(400).json({ error: "filePath query param is required" });
       return;
     }
 

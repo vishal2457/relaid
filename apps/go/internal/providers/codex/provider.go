@@ -20,6 +20,7 @@ import (
 	"relaid/internal/agent"
 	"relaid/internal/config"
 	"relaid/internal/providers/acp"
+	skillpkg "relaid/internal/skills"
 
 	opencode "github.com/sst/opencode-sdk-go"
 )
@@ -34,6 +35,7 @@ type Provider struct {
 	sessions     *sessionService
 	providers    *providerService
 	agents       *agentService
+	skills       *skillService
 	apps         *appService
 }
 
@@ -54,7 +56,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 			SessionsStream: true,
 			ProvidersList:  true,
 			AgentsList:     true,
-			SkillsList:     false,
+			SkillsList:     true,
 			AppsList:       true,
 		},
 		projects: &projectService{client: client},
@@ -66,6 +68,7 @@ func New(cfg config.Config, logger *log.Logger) *Provider {
 		},
 		providers: &providerService{client: client},
 		agents:    &agentService{client: client},
+		skills:    &skillService{cfg: cfg, logger: logger, client: client},
 		apps:      &appService{client: client},
 	}
 
@@ -78,7 +81,7 @@ func (p *Provider) Projects() agent.ProjectService                 { return p.pr
 func (p *Provider) Sessions() agent.SessionService                 { return p.sessions }
 func (p *Provider) Providers() agent.ProviderService               { return p.providers }
 func (p *Provider) Agents() agent.AgentService                     { return p.agents }
-func (p *Provider) Skills() agent.SkillsService                    { return nil }
+func (p *Provider) Skills() agent.SkillsService                    { return p.skills }
 func (p *Provider) Apps() agent.AppService                         { return p.apps }
 func (p *Provider) SetInteractionHandler(h acp.InteractionHandler) { p.sessions.client.handler = h }
 func (p *Provider) Shutdown(context.Context) error {
@@ -247,6 +250,83 @@ func (s *agentService) List(ctx context.Context, _ string) ([]agent.AgentConfig,
 	})
 
 	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// skillService
+// ---------------------------------------------------------------------------
+
+type skillService struct {
+	cfg    config.Config
+	logger *log.Logger
+	client *appServerClient
+}
+
+func (s *skillService) List(ctx context.Context, projectID string, query string) ([]agent.Skill, error) {
+	worktree := strings.TrimSpace(projectID)
+	if worktree == "" {
+		worktree = s.cfg.CodexCwd
+	}
+
+	if skills, err := s.listNative(ctx, worktree, query); err == nil {
+		return skills, nil
+	} else if s.logger != nil {
+		s.logger.Printf("codex: skills/list failed, falling back to filesystem scan: %v", err)
+	}
+
+	skills, err := skillpkg.LoadAll(skillpkg.Codex, worktree)
+	if err != nil {
+		return nil, err
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(query))
+	result := make([]agent.Skill, 0, len(skills))
+	for _, item := range skills {
+		if lower != "" &&
+			!strings.Contains(strings.ToLower(item.Name), lower) &&
+			!strings.Contains(strings.ToLower(item.Description), lower) {
+			continue
+		}
+		result = append(result, agent.Skill{
+			Name:        item.Name,
+			Description: item.Description,
+			Source:      item.Source,
+		})
+	}
+	return result, nil
+}
+
+func (s *skillService) listNative(ctx context.Context, worktree string, query string) ([]agent.Skill, error) {
+	ctx, cancel := withTimeout(ctx, defaultProviderTimeout)
+	defer cancel()
+
+	conn, err := s.client.sharedConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := conn.skillsList(ctx, skillsListParams{
+		Cwd:   worktree,
+		Query: query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	skills := make([]agent.Skill, 0, len(result.Data))
+	for _, item := range result.Data {
+		name := firstNonEmpty(item.Name, item.Title, item.ID)
+		description := firstNonEmpty(item.Description, item.Summary)
+		if name == "" {
+			continue
+		}
+		skills = append(skills, agent.Skill{
+			Name:        name,
+			Description: description,
+			Source:      firstNonEmpty(item.Source, item.Path),
+		})
+	}
+	return skills, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,6 +1087,11 @@ func (c *appServerConn) modelList(ctx context.Context) (*modelListResponse, erro
 func (c *appServerConn) appList(ctx context.Context, p appListParams) (*appListResponse, error) {
 	var r appListResponse
 	return &r, c.call(ctx, "app/list", p, &r)
+}
+
+func (c *appServerConn) skillsList(ctx context.Context, p skillsListParams) (*skillsListResponse, error) {
+	var r skillsListResponse
+	return &r, c.call(ctx, "skills/list", p, &r)
 }
 
 func (c *appServerConn) collaborationModeList(ctx context.Context) (*collaborationModeListResponse, error) {
@@ -2035,6 +2120,16 @@ type appListResponse struct {
 	NextCursor *string    `json:"nextCursor"`
 }
 
+type skillsListParams struct {
+	Cwd   string `json:"cwd,omitempty"`
+	Query string `json:"query,omitempty"`
+}
+
+type skillsListResponse struct {
+	Data       []codexSkill `json:"data"`
+	NextCursor *string      `json:"nextCursor"`
+}
+
 type fuzzyFileSearchResponse struct {
 	Files []fuzzyFileSearchResult `json:"files"`
 }
@@ -2072,6 +2167,16 @@ type codexApp struct {
 	IsAccessible bool   `json:"isAccessible"`
 	IsEnabled    bool   `json:"isEnabled"`
 	Labels       any    `json:"labels"`
+}
+
+type codexSkill struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Summary     string `json:"summary"`
+	Source      string `json:"source"`
+	Path        string `json:"path"`
 }
 
 type thread struct {

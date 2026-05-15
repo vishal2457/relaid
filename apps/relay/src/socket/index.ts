@@ -28,6 +28,7 @@ import type {
   RunResponseEvent,
   SessionAbortedEvent,
   SessionAbortEvent,
+  SessionStreamChunkEvent,
   SessionPromptRequestEvent,
   SessionPromptResponseEvent,
   SessionPayload,
@@ -52,6 +53,15 @@ import {
   clearBufferedInteraction,
   deliverBufferedInteractions,
 } from "../services/interaction-buffer";
+import {
+  appendSessionStreamChunk,
+  clearSessionInteractionRuntime,
+  markSessionAborted,
+  markSessionPermissionRequest,
+  markSessionPromptResponse,
+  markSessionPromptStarted,
+  markSessionQuestionRequest,
+} from "../services/session-runtime-store";
 
 const PERMISSION_NOTIFICATION_CATEGORY = "PERMISSION_REQUEST";
 
@@ -299,21 +309,41 @@ async function handleLocalServerConnection(
           requestId,
         });
       }
+      if (eventName === "session_prompt_started") {
+        const startedPayload = payload as {
+          requestId: string;
+          sessionId: string;
+          projectId: string;
+          agentProviderId?: string;
+        };
+        markSessionPromptStarted({
+          userId,
+          serverId,
+          requestId: startedPayload.requestId,
+          sessionId: startedPayload.sessionId,
+          projectId: startedPayload.projectId,
+          agentProviderId: startedPayload.agentProviderId,
+        });
+      }
+      if (eventName === "session_stream_chunk") {
+        appendSessionStreamChunk(userId, {
+          ...(payload as SessionStreamChunkEvent),
+          serverId,
+        });
+      }
+      if (eventName === "session_aborted") {
+        markSessionAborted(userId, payload as SessionAbortedEvent);
+      }
       resolvePendingRequest(eventName, payload);
       io.to(`user:${userId}`).emit(eventName, payload);
       broadcastToUser(userId, eventName, payload);
 
       if (eventName === "session_prompt_response") {
         const responsePayload = payload as SessionPromptResponseEvent;
-        const title = responsePayload.sessionTitle || "Relaid";
-        const maxBodyLen = 150;
+        markSessionPromptResponse(userId, responsePayload);
+        const title = "Relaid";
         if (responsePayload.success) {
-          const body = responsePayload.output
-            ? responsePayload.output.length > maxBodyLen
-              ? `${responsePayload.output.slice(0, maxBodyLen)}…`
-              : responsePayload.output
-            : "Response ready";
-          void sendPushNotification(userId, title, body, {
+          void sendPushNotification(userId, title, "Response ready", {
             type: "request_completed",
             agentProviderId: responsePayload.agentProviderId,
             sessionId: responsePayload.sessionId,
@@ -321,12 +351,7 @@ async function handleLocalServerConnection(
             success: responsePayload.success,
           });
         } else if (!responsePayload.success) {
-          const body = responsePayload.error
-            ? responsePayload.error.length > maxBodyLen
-              ? `${responsePayload.error.slice(0, maxBodyLen)}…`
-              : responsePayload.error
-            : "The request failed with an error";
-          void sendPushNotification(userId, title, body, {
+          void sendPushNotification(userId, title, "Request failed", {
             type: "request_completed",
             agentProviderId: responsePayload.agentProviderId,
             sessionId: responsePayload.sessionId,
@@ -383,11 +408,11 @@ async function handleLocalServerConnection(
       userId,
       requestId: payload.requestId,
       sessionId: payload.sessionId,
-      permission: payload.permission,
       projectId: payload.projectId,
     });
     resolvePendingRequest("permission_request", payload);
     bufferInteraction(userId, "permission_request", payload);
+    markSessionPermissionRequest(userId, serverId, payload);
     io.to(`user:${userId}`).emit("permission_request", payload);
     broadcastToUser(
       userId,
@@ -395,13 +420,10 @@ async function handleLocalServerConnection(
       payload as unknown as Record<string, unknown>,
     );
 
-    const permissionType = payload.permission;
-    const patternsPreview = payload.patterns.slice(0, 2).join(", ");
-    const body = `Permission: ${permissionType}${patternsPreview ? ` (${patternsPreview})` : ""}`;
     void sendPushNotification(
       userId,
       "Permission Required",
-      body,
+      "Action required",
       {
         type: "permission_request",
         requestId: payload.requestId,
@@ -409,7 +431,6 @@ async function handleLocalServerConnection(
         projectId: payload.projectId,
         sessionId: payload.sessionId,
         jobId: payload.jobId,
-        permission: payload.permission,
       },
       {
         categoryId: PERMISSION_NOTIFICATION_CATEGORY,
@@ -422,10 +443,10 @@ async function handleLocalServerConnection(
       userId,
       requestId: payload.requestId,
       sessionId: payload.sessionId,
-      questionCount: payload.questions.length,
     });
     resolvePendingRequest("question_request", payload);
     bufferInteraction(userId, "question_request", payload);
+    markSessionQuestionRequest(userId, serverId, payload);
     io.to(`user:${userId}`).emit("question_request", payload);
     broadcastToUser(
       userId,
@@ -433,9 +454,7 @@ async function handleLocalServerConnection(
       payload as unknown as Record<string, unknown>,
     );
 
-    const firstQuestion = payload.questions[0];
-    const body = firstQuestion?.question.slice(0, 100) || "Question required";
-    void sendPushNotification(userId, "Question Required", body, {
+    void sendPushNotification(userId, "Question Required", "Action required", {
       type: "question_request",
       requestId: payload.requestId,
       agentProviderId: payload.agentProviderId,
@@ -449,6 +468,7 @@ async function handleLocalServerConnection(
     "error_response",
     (payload: { requestId: string; code: string; message: string }) => {
       rejectPendingRequest(payload);
+      clearSessionInteractionRuntime(userId, payload.requestId);
       io.to(`user:${userId}`).emit("error_response", payload);
       broadcastToUser(userId, "error_response", payload);
     },
@@ -546,6 +566,9 @@ function handleMobileConnection(socket: Socket, userId: string): void {
 
       if (!sessionResult?.response.session) {
         socket.emit("session_aborted", {
+          requestId: data.requestId,
+          agentProviderId: data.agentProviderId,
+          projectId: data.projectId,
           sessionId: data.sessionId,
           success: false,
           error: "Session not found",
@@ -569,13 +592,19 @@ function handleMobileConnection(socket: Socket, userId: string): void {
       );
 
       socket.emit("session_aborted", response);
+      markSessionAborted(userId, response);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      socket.emit("session_aborted", {
+      const payload = {
+        requestId: data.requestId,
+        agentProviderId: data.agentProviderId,
+        projectId: data.projectId,
         sessionId: data.sessionId,
         success: false,
         error: errMsg,
-      } satisfies SessionAbortedEvent);
+      } satisfies SessionAbortedEvent;
+      socket.emit("session_aborted", payload);
+      markSessionAborted(userId, payload);
     }
   });
 

@@ -263,15 +263,24 @@ type BranchesResponse = {
 router.get("/:id/branches", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
-    const result = await requestUntilMatch<BranchesResponse>(
-      userId,
-      "project_branches_request",
-      "project_branches_response",
-      { projectId: req.params.id },
-      (response) => Array.isArray(response.branches),
-    );
+    const serverId = req.headers["x-server-id"] as string | undefined;
+    const result = serverId
+      ? await requestConnectedServer<BranchesResponse>(
+          userId,
+          "project_branches_request",
+          "project_branches_response",
+          { projectId: req.params.id },
+          serverId,
+        )
+      : await requestUntilMatch<BranchesResponse>(
+          userId,
+          "project_branches_request",
+          "project_branches_response",
+          { projectId: req.params.id },
+          (response) => Array.isArray(response.branches),
+        );
 
-    if (!result?.response.branches) {
+    if (!result || !result.response.branches) {
       res.status(404).json({ error: "Project not found" });
       return;
     }
@@ -290,6 +299,7 @@ type BranchSwitchResponse = {
 router.post("/:id/branches/switch", async (req: Request, res: Response) => {
   try {
     const userId = requireUserId(req.headers["x-user-id"]);
+    const serverId = req.headers["x-server-id"] as string | undefined;
     const { branch } = req.body;
 
     if (!branch) {
@@ -297,15 +307,23 @@ router.post("/:id/branches/switch", async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await requestUntilMatch<BranchSwitchResponse>(
-      userId,
-      "project_branch_switch_request",
-      "project_branch_switch_response",
-      { projectId: req.params.id, branch },
-      (response) => Boolean(response.branch),
-    );
+    const result = serverId
+      ? await requestConnectedServer<BranchSwitchResponse>(
+          userId,
+          "project_branch_switch_request",
+          "project_branch_switch_response",
+          { projectId: req.params.id, branch },
+          serverId,
+        )
+      : await requestUntilMatch<BranchSwitchResponse>(
+          userId,
+          "project_branch_switch_request",
+          "project_branch_switch_response",
+          { projectId: req.params.id, branch },
+          (response) => Boolean(response.branch),
+        );
 
-    if (!result?.response.branch) {
+    if (!result || !result.response.branch) {
       res.status(404).json({ error: "Failed to switch branch" });
       return;
     }

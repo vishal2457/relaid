@@ -91,6 +91,7 @@ interface MessageRowProps {
   responseSummary?: AssistantResponseSummaryContext;
   showAssistantMeta?: boolean;
   showResponseSummary?: boolean;
+  onCopyAssistantResponse?: ((message: SessionMessage) => void) | undefined;
   borderColor: string;
   metaColor: string;
   userBubble: string;
@@ -105,6 +106,7 @@ export const MessageRow: React.FC<MessageRowProps> = React.memo(
     responseSummary,
     showAssistantMeta = true,
     showResponseSummary = true,
+    onCopyAssistantResponse,
     borderColor,
     metaColor,
     userBubble,
@@ -128,6 +130,11 @@ export const MessageRow: React.FC<MessageRowProps> = React.memo(
         <MessageBubble
           message={message}
           showAssistantMeta={showAssistantMeta}
+          onLongPress={
+            message.role === "assistant" && onCopyAssistantResponse
+              ? () => onCopyAssistantResponse(message)
+              : undefined
+          }
           borderColor={borderColor}
           metaColor={metaColor}
           userBubble={userBubble}

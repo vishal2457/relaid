@@ -123,7 +123,15 @@ func (r *RelayServer) createPairingSession(c echo.Context) error {
 		})
 	}
 
-	session, err := relay.CreatePairingSession(url, creds)
+	keys, keyErr := relay.LoadOrCreateE2EEKeyMaterial()
+	if keyErr != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"success": false,
+			"error":   "failed to load e2ee keys",
+		})
+	}
+
+	session, err := relay.CreatePairingSession(url, creds, keys)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"success": false,

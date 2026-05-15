@@ -3,8 +3,14 @@ import * as SecureStore from "expo-secure-store";
 export type PairingSession = {
   accessToken: string;
   deviceId: string;
+  devicePublicKey: string;
+  deviceKeyId: string;
+  devicePrivateKey: string;
   serverId: string;
   serverName: string;
+  serverPublicKey: string;
+  serverKeyId: string;
+  fingerprint: string;
 };
 
 const PAIRING_SESSION_KEY = "PAIRING_SESSION";
@@ -17,8 +23,14 @@ function isPairingSession(value: unknown): value is PairingSession {
     typeof value === "object" &&
     typeof (value as PairingSession).accessToken === "string" &&
     typeof (value as PairingSession).deviceId === "string" &&
+    typeof (value as PairingSession).devicePublicKey === "string" &&
+    typeof (value as PairingSession).deviceKeyId === "string" &&
+    typeof (value as PairingSession).devicePrivateKey === "string" &&
     typeof (value as PairingSession).serverId === "string" &&
-    typeof (value as PairingSession).serverName === "string",
+    typeof (value as PairingSession).serverName === "string" &&
+    typeof (value as PairingSession).serverPublicKey === "string" &&
+    typeof (value as PairingSession).serverKeyId === "string" &&
+    typeof (value as PairingSession).fingerprint === "string",
   );
 }
 

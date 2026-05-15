@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import baseApi from "../axios/base";
+import { gitKeys } from "./git";
 
 export interface Branch {
   name: string;
@@ -38,6 +39,7 @@ export function useSwitchBranch(projectId: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: branchesKeys.list(projectId) });
+      queryClient.invalidateQueries({ queryKey: gitKeys.fileStatus(projectId) });
     },
   });
 }

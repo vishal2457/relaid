@@ -25,10 +25,13 @@ export function useAgents(
         params: { projectId, agentProviderId },
       });
       const agents = response.data.agents ?? [];
-      const primaryAgents = agents.filter((agent) => agent.mode === "primary");
 
-      if (primaryAgents.length > 0) {
-        return primaryAgents;
+      if (agentProviderId === "codex" || agentProviderId === "claude") {
+        const primaryAgents = agents.filter((agent) => agent.mode === "primary");
+
+        if (primaryAgents.length > 0) {
+          return primaryAgents;
+        }
       }
 
       return agents.filter((agent) => agent.mode !== "subagent");
