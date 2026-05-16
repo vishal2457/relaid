@@ -32,6 +32,7 @@ type SelectionSheetProps<T> = {
   renderItem?: (item: T, isSelected: boolean, index: number) => React.ReactNode;
   keyExtractor?: (item: T, index: number) => string;
   titleAction?: React.ReactNode;
+  headerContent?: React.ReactNode;
   children?: React.ReactNode;
   snapPoints?: string[];
   enableDynamicSizing?: boolean;
@@ -53,6 +54,7 @@ export function SelectionSheet<T>({
   renderItem,
   keyExtractor,
   titleAction,
+  headerContent,
   children,
   snapPoints: customSnapPoints,
   enableDynamicSizing = false,
@@ -180,6 +182,10 @@ export function SelectionSheet<T>({
                   />
                 </View>
               )}
+
+              {headerContent ? (
+                <View style={styles.headerContent}>{headerContent}</View>
+              ) : null}
             </View>
             <View
               style={[
@@ -226,6 +232,10 @@ export function SelectionSheet<T>({
                   />
                 </View>
               )}
+
+              {headerContent ? (
+                <View style={styles.headerContent}>{headerContent}</View>
+              ) : null}
             </View>
             {isLoading ? (
               <View style={styles.loading}>
@@ -301,6 +311,10 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   searchContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  headerContent: {
     paddingHorizontal: 16,
     paddingBottom: 8,
   },

@@ -52,6 +52,29 @@ func TestServiceUnstageFilesRestoresWorktreeStatus(t *testing.T) {
 	assertHasStatus(t, result.Data.Status.Unstaged, "tracked.txt", "modified")
 }
 
+func TestServiceGetFileStatusListsIncludesNewFiles(t *testing.T) {
+	repo := newTestRepo(t)
+	writeFile(t, repo, "tracked.txt", "hello\nworld\n")
+	gitTest(t, repo, "add", "tracked.txt")
+	gitTest(t, repo, "commit", "-m", "initial")
+
+	writeFile(t, repo, "new-untracked.txt", "brand new\n")
+	writeFile(t, repo, "new-staged.txt", "ready to stage\n")
+
+	svc := NewService(repo)
+	if result := svc.AddFiles([]string{"new-staged.txt"}); !result.Success {
+		t.Fatalf("expected add files to succeed: %s", result.Error)
+	}
+
+	result := svc.GetFileStatusLists()
+	if !result.Success {
+		t.Fatalf("expected get file status to succeed: %s", result.Error)
+	}
+
+	assertHasStatus(t, result.Data.Unstaged, "new-untracked.txt", "untracked")
+	assertHasStatus(t, result.Data.Staged, "new-staged.txt", "added")
+}
+
 func TestServiceCommitCreatesCommitAndReturnsHash(t *testing.T) {
 	repo := newTestRepo(t)
 	writeFile(t, repo, "tracked.txt", "hello\nworld\n")
@@ -75,6 +98,31 @@ func TestServiceCommitCreatesCommitAndReturnsHash(t *testing.T) {
 	}
 	if len(result.Data.Status.Staged) != 0 || len(result.Data.Status.Unstaged) != 0 {
 		t.Fatalf("expected clean working tree after commit, got %+v", result.Data.Status)
+	}
+}
+
+func TestServiceSwitchBranchBlocksWhenWorktreeIsDirty(t *testing.T) {
+	repo := newTestRepo(t)
+	writeFile(t, repo, "tracked.txt", "hello\n")
+	gitTest(t, repo, "add", "tracked.txt")
+	gitTest(t, repo, "commit", "-m", "initial")
+	gitTest(t, repo, "checkout", "-b", "feature/test")
+	gitTest(t, repo, "checkout", "main")
+
+	writeFile(t, repo, "tracked.txt", "hello\nupdated\n")
+
+	svc := NewService(repo)
+	result := svc.SwitchBranch("feature/test")
+	if result.Success {
+		t.Fatal("expected branch switch to fail when worktree is dirty")
+	}
+	if result.Error != branchSwitchBlockedMessage {
+		t.Fatalf("expected branch switch error %q, got %q", branchSwitchBlockedMessage, result.Error)
+	}
+
+	currentBranch := gitOutput(t, repo, "rev-parse", "--abbrev-ref", "HEAD")
+	if currentBranch != "main" {
+		t.Fatalf("expected to remain on main, got %q", currentBranch)
 	}
 }
 

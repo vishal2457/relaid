@@ -64,6 +64,7 @@ type ChatComposerProps = {
   activeAgentName: string;
   activeAgentProviderName: string;
   activeProject: boolean;
+  activeProjectConnected?: boolean;
   activeProjectName: string;
   appSuggestions?: ProviderApp[];
   appSuggestionsLoading: boolean;
@@ -106,6 +107,7 @@ export function ChatComposer({
   activeAgentName,
   activeAgentProviderName,
   activeProject,
+  activeProjectConnected = false,
   activeProjectName,
   appSuggestions,
   appSuggestionsLoading,
@@ -209,6 +211,11 @@ export function ChatComposer({
     fileSuggestions && fileSuggestions.length > 0,
   );
   const hasAppSuggestions = Boolean(appSuggestions && appSuggestions.length > 0);
+  const projectStatusColor = activeProject
+    ? activeProjectConnected
+      ? "#22C55E"
+      : "#EF4444"
+    : metaColor;
   const showMentionLoading =
     fileSuggestionsLoading || (appSuggestionsLoading && !hasFileSuggestions);
 
@@ -486,10 +493,11 @@ export function ChatComposer({
                 pressed && styles.metaButtonPressed,
               ]}
             >
-              <MaterialCommunityIcons
-                name="folder-outline"
-                size={14}
-                color={metaColor}
+              <View
+                style={[
+                  styles.projectStatusDot,
+                  { backgroundColor: projectStatusColor },
+                ]}
               />
               <Text
                 variant="bodySmall"
@@ -682,6 +690,11 @@ const styles = StyleSheet.create({
   metaButtonText: {
     fontSize: 12,
     flexShrink: 1,
+  },
+  projectStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
   },
   mentionEmptyState: {
     paddingHorizontal: 12,

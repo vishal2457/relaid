@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Download,
   Eye,
@@ -14,6 +14,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
+import { toast } from "sonner";
 import { Button } from "../../shared/components/ui/button";
 import { Input } from "../../shared/components/ui/input";
 import {
@@ -66,6 +67,7 @@ export const HomePage = () => {
   const [pairingData, setPairingData] = useState<{
     pairingUrl: string;
     expiresAt: string;
+    initialClientCount: number;
   } | null>(null);
 
   const {
@@ -195,11 +197,39 @@ export const HomePage = () => {
         setPairingData({
           pairingUrl: data.pairingUrl,
           expiresAt: data.expiresAt,
+          initialClientCount: clients.length,
         });
         setShowQrDialog(true);
       }
     });
   };
+
+  useEffect(() => {
+    if (!showQrDialog) {
+      return;
+    }
+
+    void refreshClients();
+    const interval = window.setInterval(() => {
+      void refreshClients();
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [refreshClients, showQrDialog]);
+
+  useEffect(() => {
+    if (!showQrDialog || !pairingData) {
+      return;
+    }
+
+    if (clients.length <= pairingData.initialClientCount) {
+      return;
+    }
+
+    setShowQrDialog(false);
+    setPairingData(null);
+    toast.success("Connection successful");
+  }, [clients.length, pairingData, showQrDialog]);
 
   return (
     <div className="container mx-auto max-w-lg py-8">
@@ -502,7 +532,15 @@ export const HomePage = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showQrDialog} onOpenChange={setShowQrDialog}>
+      <Dialog
+        open={showQrDialog}
+        onOpenChange={(open) => {
+          setShowQrDialog(open);
+          if (!open) {
+            setPairingData(null);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Scan to pair</DialogTitle>

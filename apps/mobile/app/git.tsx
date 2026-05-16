@@ -1,11 +1,12 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useState, useCallback } from "react";
 import {
   FlatList,
   Pressable,
   StyleSheet,
   View,
+  Text as NativeText,
   TextInput,
   KeyboardAvoidingView,
   Platform,
@@ -59,6 +60,19 @@ const statusColorMap: Record<string, string> = {
 };
 
 type Section = "none" | "changes" | "staged";
+
+function getStatusLabel(status: string | undefined): string {
+  const normalized = status?.trim().toLowerCase();
+  if (!normalized) {
+    return "?";
+  }
+
+  if (statusLabelMap[normalized]) {
+    return statusLabelMap[normalized];
+  }
+
+  return normalized.length === 1 ? normalized.toUpperCase() : normalized;
+}
 
 function CollapsibleSection({
   title,
@@ -144,7 +158,9 @@ function CollapsibleSection({
 
       {expanded && files.length > 0 && (
         <>
-          <View style={[styles.selectAllRow, { borderBottomColor: borderColor }]}>
+          <View
+            style={[styles.selectAllRow, { borderBottomColor: borderColor }]}
+          >
             <Checkbox.Android
               status={selectAllStatus}
               onPress={handleSelectAllPress}
@@ -164,8 +180,7 @@ function CollapsibleSection({
             scrollEnabled={false}
             renderItem={({ item }) => {
               const isSelected = selectedFiles.has(item.path);
-              const statusLabel =
-                statusLabelMap[item.status] ?? item.status ?? "?";
+              const statusLabel = getStatusLabel(item.status);
               return (
                 <Pressable
                   style={[styles.fileItem, { borderBottomColor: borderColor }]}
@@ -177,22 +192,23 @@ function CollapsibleSection({
                     disabled={disabled}
                   />
                   <View style={styles.fileInfo}>
-                    <Text
-                      variant="bodyMedium"
-                      style={{ color: theme.colors.onSurface }}
+                    <NativeText
+                      style={[
+                        styles.fileName,
+                        { color: theme.colors.onSurface },
+                      ]}
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
                       {item.path.split("/").pop()}
-                    </Text>
-                    <Text
-                      variant="bodySmall"
-                      style={{ color: metaColor }}
+                    </NativeText>
+                    <NativeText
+                      style={[styles.filePath, { color: metaColor }]}
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
                       {item.path}
-                    </Text>
+                    </NativeText>
                   </View>
                   <Text
                     variant="labelSmall"
@@ -233,6 +249,24 @@ export default function GitPage() {
   const { data, isLoading, error, refetch, isRefetching } = useGitFileStatus(
     projectId ?? "",
     Boolean(projectId),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!projectId) {
+        return undefined;
+      }
+
+      void refetch();
+
+      const intervalId = setInterval(() => {
+        void refetch();
+      }, 3000);
+
+      return () => {
+        clearInterval(intervalId);
+      };
+    }, [projectId, refetch]),
   );
 
   const staged = data?.staged ?? [];
@@ -414,14 +448,20 @@ export default function GitPage() {
             size={32}
             color={metaColor}
           />
-          <Text variant="bodyMedium" style={{ color: metaColor, marginTop: 12 }}>
+          <Text
+            variant="bodyMedium"
+            style={{ color: metaColor, marginTop: 12 }}
+          >
             Select a project first
           </Text>
         </View>
       ) : isLoading ? (
         <View style={styles.centerContent}>
           <ActivityIndicator />
-          <Text variant="bodyMedium" style={{ color: metaColor, marginTop: 12 }}>
+          <Text
+            variant="bodyMedium"
+            style={{ color: metaColor, marginTop: 12 }}
+          >
             Loading...
           </Text>
         </View>
@@ -610,7 +650,10 @@ export default function GitPage() {
           </Pressable>
 
           {!canSyncChanges ? (
-            <Text variant="bodySmall" style={[styles.syncHint, { color: metaColor }]}>
+            <Text
+              variant="bodySmall"
+              style={[styles.syncHint, { color: metaColor }]}
+            >
               Sync is available when the project is on a named branch.
             </Text>
           ) : null}
@@ -803,6 +846,15 @@ const styles = StyleSheet.create({
   },
   fileInfo: {
     flex: 1,
+  },
+  fileName: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "500",
+  },
+  filePath: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   bottomActionBar: {
     marginHorizontal: 16,

@@ -8,6 +8,7 @@ type BranchSelectionSheetProps = {
   visible: boolean;
   branches: Branch[];
   currentBranch?: string | null;
+  warningMessage?: string | null;
   loading?: boolean;
   searchQuery: string;
   onSearchChange: (query: string) => void;
@@ -19,6 +20,7 @@ export function BranchSelectionSheet({
   visible,
   branches,
   currentBranch,
+  warningMessage,
   loading = false,
   searchQuery,
   onSearchChange,
@@ -42,6 +44,23 @@ export function BranchSelectionSheet({
       onSearchChange={onSearchChange}
       isLoading={loading}
       emptyText="No branches found"
+      headerContent={
+        warningMessage ? (
+          <View
+            style={[
+              styles.warningCard,
+              { backgroundColor: theme.dark ? "#3F2A00" : "#FFF4D6" },
+            ]}
+          >
+            <Text
+              variant="bodySmall"
+              style={{ color: theme.dark ? "#FFD166" : "#8A5A00" }}
+            >
+              {warningMessage}
+            </Text>
+          </View>
+        ) : null
+      }
       selectedId={currentBranch}
       getItemId={(item) => item.name}
       keyExtractor={(item) => item.name}
@@ -95,6 +114,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  warningCard: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   row: {
     flexDirection: "row",

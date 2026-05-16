@@ -37,6 +37,17 @@ func TestParsePorcelainStatusDetachedHead(t *testing.T) {
 	}
 }
 
+func TestParsePorcelainStatusNormalizesConflictAndIgnoredStates(t *testing.T) {
+	output := "## feature/test\nUU conflict.txt\n!! ignored.log\nT  script.sh\n"
+
+	status := parsePorcelainStatus(output)
+
+	assertHasStatus(t, status.Unstaged, "conflict.txt", "unmerged")
+	assertHasStatus(t, status.Unstaged, "ignored.log", "ignored")
+	assertHasStatus(t, status.Staged, "script.sh", "typechanged")
+	assertMissingStatus(t, status.Staged, "conflict.txt")
+}
+
 func assertHasStatus(t *testing.T, files []FileWithStatus, path string, expected string) {
 	t.Helper()
 
@@ -50,4 +61,14 @@ func assertHasStatus(t *testing.T, files []FileWithStatus, path string, expected
 	}
 
 	t.Fatalf("expected status for %s not found", path)
+}
+
+func assertMissingStatus(t *testing.T, files []FileWithStatus, path string) {
+	t.Helper()
+
+	for _, file := range files {
+		if file.Path == path {
+			t.Fatalf("expected %s to be absent, got status %q", path, file.Status)
+		}
+	}
 }

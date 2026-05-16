@@ -55,6 +55,84 @@ export const gitKeys = {
     [...gitKeys.files(), projectId, "content", filePath] as const,
 };
 
+const gitStatusAliases: Record<string, string> = {
+  a: "added",
+  added: "added",
+  c: "copied",
+  copied: "copied",
+  conflict: "unmerged",
+  conflicted: "unmerged",
+  d: "deleted",
+  deleted: "deleted",
+  i: "ignored",
+  ignored: "ignored",
+  m: "modified",
+  modified: "modified",
+  r: "renamed",
+  renamed: "renamed",
+  t: "typechanged",
+  typechanged: "typechanged",
+  u: "unmerged",
+  um: "unmerged",
+  unmerged: "unmerged",
+  untracked: "untracked",
+  updated: "unmerged",
+  "!": "ignored",
+  "!!": "ignored",
+  "?": "untracked",
+  "??": "untracked",
+};
+
+function normalizeGitStatus(status: string | undefined): string {
+  const trimmed = status?.trim();
+  if (!trimmed) {
+    return "modified";
+  }
+
+  const directMatch =
+    gitStatusAliases[trimmed] ??
+    gitStatusAliases[trimmed.toLowerCase()] ??
+    gitStatusAliases[trimmed.toUpperCase()];
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  return trimmed.toLowerCase();
+}
+
+function normalizeGitFileStatus(
+  file: GitFileStatus | null | undefined,
+): GitFileStatus | null {
+  const path = file?.path?.trim();
+  if (!path) {
+    return null;
+  }
+
+  return {
+    path,
+    status: normalizeGitStatus(file?.status),
+  };
+}
+
+function normalizeGitFiles(
+  files: GitFileStatus[] | undefined,
+): GitFileStatus[] {
+  return (files ?? [])
+    .map((file) => normalizeGitFileStatus(file))
+    .filter((file): file is GitFileStatus => file !== null);
+}
+
+function normalizeGitStatusResponse(
+  data: GitMutationStatusResponse | GitFileStatusResponse,
+) {
+  return {
+    staged: normalizeGitFiles(data.staged),
+    unstaged: normalizeGitFiles(data.unstaged),
+    branch: data.branch?.trim() || "HEAD",
+  };
+}
+
 export function useGitFileStatus(projectId: string, enabled = true) {
   return useQuery<GitFileStatusResponse>({
     queryKey: gitKeys.fileStatus(projectId),
@@ -63,11 +141,7 @@ export function useGitFileStatus(projectId: string, enabled = true) {
       const response = await baseApi.get<GitFileStatusResponse>(
         `/git/${projectId}/staged`,
       );
-      return {
-        staged: response.data.staged ?? [],
-        unstaged: response.data.unstaged ?? [],
-        branch: response.data.branch ?? "HEAD",
-      };
+      return normalizeGitStatusResponse(response.data);
     },
   });
 }
@@ -92,11 +166,7 @@ export function useGitStageFiles(
     onSuccess: (data) => {
       queryClient.setQueryData<GitFileStatusResponse>(
         gitKeys.fileStatus(projectId),
-        {
-          staged: data.staged ?? [],
-          unstaged: data.unstaged ?? [],
-          branch: data.branch ?? "HEAD",
-        },
+        normalizeGitStatusResponse(data),
       );
       onSuccessCallback?.();
     },
@@ -123,11 +193,7 @@ export function useGitUnstageFiles(
     onSuccess: (data) => {
       queryClient.setQueryData<GitFileStatusResponse>(
         gitKeys.fileStatus(projectId),
-        {
-          staged: data.staged ?? [],
-          unstaged: data.unstaged ?? [],
-          branch: data.branch ?? "HEAD",
-        },
+        normalizeGitStatusResponse(data),
       );
       onSuccessCallback?.();
     },
@@ -182,7 +248,10 @@ export function useFileContent(
   });
 }
 
-export function useGitCommit(projectId: string, onSuccessCallback?: () => void) {
+export function useGitCommit(
+  projectId: string,
+  onSuccessCallback?: () => void,
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -206,11 +275,7 @@ export function useGitCommit(projectId: string, onSuccessCallback?: () => void) 
     onSuccess: (data) => {
       queryClient.setQueryData<GitFileStatusResponse>(
         gitKeys.fileStatus(projectId),
-        {
-          staged: data.staged ?? [],
-          unstaged: data.unstaged ?? [],
-          branch: data.branch ?? "HEAD",
-        },
+        normalizeGitStatusResponse(data),
       );
       onSuccessCallback?.();
     },
@@ -242,11 +307,7 @@ export function useGitPush(projectId: string, onSuccessCallback?: () => void) {
     onSuccess: (data) => {
       queryClient.setQueryData<GitFileStatusResponse>(
         gitKeys.fileStatus(projectId),
-        {
-          staged: data.staged ?? [],
-          unstaged: data.unstaged ?? [],
-          branch: data.branch ?? "HEAD",
-        },
+        normalizeGitStatusResponse(data),
       );
       onSuccessCallback?.();
     },

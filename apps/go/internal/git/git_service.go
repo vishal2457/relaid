@@ -78,12 +78,27 @@ type Service struct {
 	cwd string
 }
 
+const branchSwitchBlockedMessage = "Cannot switch branches with uncommitted changes. Commit or stash your changes, then try again."
+
 func NewService(cwd string) *Service {
 	return &Service{cwd: cwd}
 }
 
 func (s *Service) handleError(operation string, err error) {
 	log.Printf("git.%s failed: %v (cwd=%s)", operation, err, s.cwd)
+}
+
+func (s *Service) ensureCleanWorktreeForBranchSwitch() error {
+	statusResult := s.GetFileStatusLists()
+	if !statusResult.Success {
+		return fmt.Errorf("failed to inspect git status before switching branches: %s", statusResult.Error)
+	}
+
+	if len(statusResult.Data.Staged) > 0 || len(statusResult.Data.Unstaged) > 0 {
+		return fmt.Errorf(branchSwitchBlockedMessage)
+	}
+
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -93,6 +108,10 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func IsBranchSwitchBlockedErrorMessage(errMsg string) bool {
+	return strings.TrimSpace(errMsg) == branchSwitchBlockedMessage
 }
 
 // =====================
@@ -195,6 +214,10 @@ func (s *Service) CreateBranch(name string, startPoint string) Result[string] {
 }
 
 func (s *Service) SwitchBranch(name string) Result[string] {
+	if err := s.ensureCleanWorktreeForBranchSwitch(); err != nil {
+		s.handleError("switchBranch", err)
+		return fail[string](err.Error())
+	}
 	_, err := runGit(s.cwd, "checkout", name)
 	if err != nil {
 		s.handleError("switchBranch", err)

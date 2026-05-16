@@ -15,10 +15,10 @@ import {
   // type GithubSession,
 } from "@/src/lib/api/github";
 import {
-  getConnectedLocalServers,
-  type ConnectedLocalServer,
+  useConnectedLocalServers,
 } from "@/src/lib/api/local-servers";
 import { disconnectSseClient } from "@/src/lib/sse";
+import Constants from "expo-constants";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -43,6 +43,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const appVersion = Constants.expoConfig?.version ?? "Unknown";
   const { serverUrl, setServerUrl } = useServerUrl();
   const { session, isPaired, clearSession } = usePairingSession();
   const { selectedTheme, setSelectedTheme } = useAppTheme();
@@ -58,13 +59,15 @@ export default function SettingsScreen() {
   // );
   // const [githubHydrated, setGithubHydrated] = useState(false);
   // const [githubConnecting, setGithubConnecting] = useState(false);
-  const [connectedServers, setConnectedServers] = useState<ConnectedLocalServer[]>(
-    [],
-  );
-  const [connectedServersLoading, setConnectedServersLoading] = useState(false);
-  const [connectedServersError, setConnectedServersError] = useState<string | null>(
-    null,
-  );
+  const {
+    data: connectedServers = [],
+    isLoading: connectedServersLoading,
+    error: connectedServersQueryError,
+    refetch: refetchConnectedServers,
+  } = useConnectedLocalServers(isPaired && showPairingSheet);
+  const connectedServersError = connectedServersQueryError
+    ? "Unable to load connected local servers"
+    : null;
 
   // useEffect(() => {
   //   let cancelled = false;
@@ -105,30 +108,10 @@ export default function SettingsScreen() {
   //   };
   // }, [isPaired]);
 
-  const loadConnectedServers = useCallback(async () => {
-    if (!isPaired) {
-      setConnectedServers([]);
-      setConnectedServersError(null);
-      return;
-    }
-
-    try {
-      setConnectedServersLoading(true);
-      setConnectedServersError(null);
-      const servers = await getConnectedLocalServers();
-      setConnectedServers(servers);
-    } catch (error) {
-      console.error("Failed to load connected local servers", error);
-      setConnectedServersError("Unable to load connected local servers");
-    } finally {
-      setConnectedServersLoading(false);
-    }
-  }, [isPaired]);
-
   useEffect(() => {
     if (!showPairingSheet) return;
-    void loadConnectedServers();
-  }, [loadConnectedServers, showPairingSheet]);
+    void refetchConnectedServers();
+  }, [refetchConnectedServers, showPairingSheet]);
 
   const handleSave = useCallback(async () => {
     const trimmed = urlInput.trim().replace(/\/+$/, "");
@@ -321,6 +304,24 @@ export default function SettingsScreen() {
                 onSelectTheme={setSelectedTheme}
               />
             </View>
+
+            <Card mode="outlined" style={{ borderColor, marginTop: 20 }}>
+              <Card.Content>
+                <Text variant="titleMedium" style={styles.cardTitle}>
+                  App
+                </Text>
+                <View style={styles.settingRow}>
+                  <View style={styles.settingInfo}>
+                    <Text variant="bodyLarge" style={styles.settingTitle}>
+                      Latest Version
+                    </Text>
+                    <Text variant="bodySmall" style={styles.settingDescription}>
+                      {appVersion}
+                    </Text>
+                  </View>
+                </View>
+              </Card.Content>
+            </Card>
           </ScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
@@ -345,7 +346,7 @@ export default function SettingsScreen() {
               <IconButton
                 icon="refresh"
                 size={20}
-                onPress={() => void loadConnectedServers()}
+                onPress={() => void refetchConnectedServers()}
                 disabled={connectedServersLoading}
               />
             </View>

@@ -107,12 +107,6 @@ export function ProjectSelectionSheet({
             ]}
           >
             <View style={styles.row}>
-              <View
-                style={[
-                  styles.dot,
-                  { backgroundColor: isSelected ? "#00FF41" : "#F2A900" },
-                ]}
-              />
               <View style={styles.content}>
                 <Text
                   variant="bodyLarge"
@@ -154,11 +148,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
   content: {
     flex: 1,

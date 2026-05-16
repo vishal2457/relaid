@@ -12,6 +12,7 @@ import { queryClient } from "@/src/lib/query-client";
 import { registerSessionInvalidationHandler } from "@/src/lib/pairing/auth";
 import {
   clearPairingSession as clearStoredPairingSession,
+  hasSessionCryptoMaterial,
   loadStoredPairingSession,
   savePairingSession as saveStoredPairingSession,
   type PairingSession,
@@ -70,7 +71,7 @@ export function PairingSessionProvider({
     () => ({
       hydrated,
       session,
-      isPaired: Boolean(session?.accessToken),
+      isPaired: Boolean(session?.accessToken && hasSessionCryptoMaterial(session)),
       saveSession,
       clearSession,
     }),

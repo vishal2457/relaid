@@ -251,6 +251,19 @@ export function getAgentSubtitle(agent: Agent): string {
   return agent.builtIn ? "Built-in" : agent.mode;
 }
 
+function getBranchSwitchWarningMessage(
+  stagedCount: number,
+  unstagedCount: number,
+): string | null {
+  const totalChanges = stagedCount + unstagedCount;
+  if (totalChanges === 0) {
+    return null;
+  }
+
+  const changeLabel = totalChanges === 1 ? "change" : "changes";
+  return `You have ${totalChanges} uncommitted ${changeLabel} on this branch. Commit or stash them before switching branches.`;
+}
+
 export type HydrationDeps = {
   activeAgentProviderIdOverride?: string;
   isMountedRef: React.MutableRefObject<boolean>;
@@ -313,6 +326,12 @@ export function useChatSession(deps: HydrationDeps) {
     Boolean(activeProject),
   );
   const currentBranch = gitFileStatus?.branch ?? "main";
+  const stagedChangeCount = gitFileStatus?.staged.length ?? 0;
+  const unstagedChangeCount = gitFileStatus?.unstaged.length ?? 0;
+  const branchSwitchWarningMessage = getBranchSwitchWarningMessage(
+    stagedChangeCount,
+    unstagedChangeCount,
+  );
   const { data: branches, isLoading: branchesLoading } = useBranches(
     activeProject?.id ?? "",
     showBranchSheet && Boolean(activeProject),
@@ -852,6 +871,7 @@ export function useChatSession(deps: HydrationDeps) {
     agents,
     agentsLoading,
     currentBranch,
+    branchSwitchWarningMessage,
     branches,
     branchesLoading,
     switchBranchMutation,

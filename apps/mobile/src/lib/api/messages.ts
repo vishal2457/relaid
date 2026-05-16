@@ -123,6 +123,15 @@ export interface SessionMessage {
   summary?: MessageSummary;
 }
 
+type AdaptedStoredMessageData = {
+  content: string;
+  visibleContent: string;
+  thinkingContent: string | null;
+  thinkingDurationSeconds: number | null;
+  sessionParts: SessionMessagePart[];
+  normalizedParts: Part[];
+};
+
 function getMessageTime(value: unknown): {
   created: number;
   completed?: number;
@@ -768,6 +777,120 @@ function getToolOutput(part: ToolPart): string | null {
   return null;
 }
 
+function getToolDurationSeconds(part: ToolPart): number | null {
+  const time = getToolStateTime(part);
+  const end = getNumberValue(time, ["end"]);
+  const start = getNumberValue(time, ["start"]);
+
+  if (end === null || start === null) {
+    return null;
+  }
+
+  return end - start;
+}
+
+function parseStoredToolPart(content: string): ToolPart | null {
+  try {
+    const parsed = JSON.parse(content) as ToolPart;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      parsed.type !== "tool" ||
+      typeof parsed.id !== "string" ||
+      typeof parsed.tool !== "string"
+    ) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function parseStoredSessionPart(
+  part: SessionMessagePart,
+  index: number,
+): Part | null {
+  switch (part.type) {
+    case "text":
+      return {
+        id: `stored-text-${index}`,
+        type: "text",
+        text: part.content,
+        time:
+          part.durationSeconds === null
+            ? undefined
+            : {
+                start: 0,
+                end: part.durationSeconds,
+              },
+      } as TextPart;
+    case "reasoning":
+      return {
+        id: `stored-reasoning-${index}`,
+        type: "reasoning",
+        text: part.content,
+        time:
+          part.durationSeconds === null
+            ? { start: 0 }
+            : {
+                start: 0,
+                end: part.durationSeconds,
+              },
+      } as ReasoningPart;
+    case "tool":
+      return parseStoredToolPart(part.content);
+    default:
+      return null;
+  }
+}
+
+function getAdaptedStoredMessageData(
+  session: ReturnType<typeof getCurrentPairingSession>,
+  messageResponse: SessionMessageResponse,
+): AdaptedStoredMessageData | null {
+  if (!session) {
+    return null;
+  }
+
+  const message = messageResponse.info as any;
+  const sealedBody =
+    (message?.sealedBody as EncryptedEnvelope | undefined) ??
+    (messageResponse.sealedBody as EncryptedEnvelope | undefined);
+
+  if (!sealedBody) {
+    return null;
+  }
+
+  try {
+    const decrypted = decryptFromServer<{
+      content: string;
+      visibleContent: string;
+      thinkingContent: string | null;
+      thinkingDurationSeconds: number | null;
+      parts: SessionMessagePart[];
+    }>(session, sealedBody);
+
+    const sessionParts = Array.isArray(decrypted.parts) ? decrypted.parts : [];
+    const normalizedParts = sessionParts
+      .map((part, index) => parseStoredSessionPart(part, index))
+      .filter((part): part is Part => part !== null);
+
+    return {
+      content: decrypted.content,
+      visibleContent: decrypted.visibleContent,
+      thinkingContent: decrypted.thinkingContent,
+      thinkingDurationSeconds: decrypted.thinkingDurationSeconds,
+      sessionParts,
+      normalizedParts,
+    };
+  } catch (error) {
+    console.warn("Failed to decrypt message body", error);
+    return null;
+  }
+}
+
 function getExplorationItemDetail(part: ToolPart): string | null {
   const input = getToolStateInput(part);
 
@@ -1149,50 +1272,37 @@ export function adaptMessage(
   const session = getCurrentPairingSession();
   const message = messageResponse.info as any;
   const messageTime = getMessageTime(message?.time ?? message);
-  let parts = messageResponse.parts ?? [];
-  const sealedBody =
-    (message?.sealedBody as EncryptedEnvelope | undefined) ??
-    (messageResponse.sealedBody as EncryptedEnvelope | undefined);
-  if (session && sealedBody) {
-    try {
-      const decrypted = decryptFromServer<{
-        content: string;
-        visibleContent: string;
-        thinkingContent: string | null;
-        thinkingDurationSeconds: number | null;
-        parts: SessionMessagePart[];
-      }>(session, sealedBody);
-      return {
-        id: message.id,
-        sessionID: message.sessionID,
-        role: message.role,
-        content: decrypted.content,
-        visibleContent: decrypted.visibleContent,
-        thinkingContent: decrypted.thinkingContent,
-        thinkingDurationSeconds: decrypted.thinkingDurationSeconds,
-        parts: decrypted.parts ?? [],
-        createdAt: messageTime.created,
-        time: messageTime,
-      };
-    } catch (error) {
-      console.warn("Failed to decrypt message body", error);
-    }
-  }
+  const storedMessageData = getAdaptedStoredMessageData(session, messageResponse);
+  const normalizedParts = storedMessageData?.normalizedParts ?? (messageResponse.parts ?? []);
 
-  const textParts = parts.filter((p): p is TextPart => p.type === "text");
-  const reasoningParts = parts.filter(
+  const textParts = normalizedParts.filter((p): p is TextPart => p.type === "text");
+  const reasoningParts = normalizedParts.filter(
     (p): p is ReasoningPart => p.type === "reasoning",
   );
-  const toolParts = parts.filter((p): p is ToolPart => p.type === "tool");
+  const toolParts = normalizedParts.filter((p): p is ToolPart => p.type === "tool");
 
   const textContent = textParts.map((p) => p.text).join("");
   const toolErrorSummary = getToolErrorSummary(toolParts);
-  const content = textContent || toolErrorSummary;
-  const visibleContent = content;
-  const { thinkingContent, thinkingDurationSeconds } =
-    getReasoningState(reasoningParts);
+  const content =
+    storedMessageData?.content ||
+    storedMessageData?.visibleContent ||
+    textContent ||
+    toolErrorSummary;
+  const visibleContent =
+    storedMessageData?.visibleContent ||
+    storedMessageData?.content ||
+    textContent ||
+    toolErrorSummary;
+  const reasoningState = getReasoningState(reasoningParts);
+  const thinkingContent =
+    storedMessageData?.thinkingContent ?? reasoningState.thinkingContent;
+  const thinkingDurationSeconds =
+    storedMessageData?.thinkingDurationSeconds ??
+    reasoningState.thinkingDurationSeconds;
 
-  const convertedParts = parts.flatMap<SessionMessagePart>((part) => {
+  const convertedParts =
+    storedMessageData?.sessionParts ??
+    normalizedParts.flatMap<SessionMessagePart>((part) => {
     if (part.type === "text") {
       return [
         {
@@ -1218,17 +1328,7 @@ export function adaptMessage(
         {
           type: "tool" as const,
           content: JSON.stringify(part),
-          durationSeconds: (() => {
-            const time = getToolStateTime(part);
-            const end = getNumberValue(time, ["end"]);
-            const start = getNumberValue(time, ["start"]);
-
-            if (end === null || start === null) {
-              return null;
-            }
-
-            return end - start;
-          })(),
+          durationSeconds: getToolDurationSeconds(part),
         },
       ];
     }
@@ -1264,8 +1364,8 @@ export function adaptMessage(
   const assistant =
     assistantMessage && message.role === "assistant"
       ? (() => {
-          const activities = getAssistantActivities(parts);
-          const blocks = getAssistantBlocks(parts);
+          const activities = getAssistantActivities(normalizedParts);
+          const blocks = getAssistantBlocks(normalizedParts);
 
           return {
             mode: assistantMessage.mode ?? null,

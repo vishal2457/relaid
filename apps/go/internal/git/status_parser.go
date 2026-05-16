@@ -31,6 +31,14 @@ func parsePorcelainStatus(output string) StatusLists {
 			continue
 		}
 
+		if isUnmergedStatus(x, y) {
+			result.Unstaged = append(result.Unstaged, FileWithStatus{
+				Path:   path,
+				Status: "unmerged",
+			})
+			continue
+		}
+
 		if status := mapPorcelainStatus(x); status != "" && status != "untracked" {
 			result.Staged = append(result.Staged, FileWithStatus{
 				Path:   path,
@@ -84,6 +92,9 @@ func mapWorktreeStatus(x, y byte) string {
 	if x == '?' && y == '?' {
 		return "untracked"
 	}
+	if x == '!' && y == '!' {
+		return "ignored"
+	}
 	return mapPorcelainStatus(y)
 }
 
@@ -101,11 +112,24 @@ func mapPorcelainStatus(code byte) string {
 		return "renamed"
 	case 'C':
 		return "copied"
+	case 'T':
+		return "typechanged"
 	case '?':
 		return "untracked"
+	case '!':
+		return "ignored"
 	case 'U':
-		return "updated"
+		return "unmerged"
 	default:
 		return strings.ToLower(string(code))
+	}
+}
+
+func isUnmergedStatus(x, y byte) bool {
+	switch string([]byte{x, y}) {
+	case "DD", "AU", "UD", "UA", "DU", "AA", "UU":
+		return true
+	default:
+		return false
 	}
 }

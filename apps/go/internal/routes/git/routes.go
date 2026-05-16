@@ -245,6 +245,9 @@ func switchBranch(registry RegistryProvider) echo.HandlerFunc {
 		svc := gitservice.NewService(worktree)
 		result := svc.SwitchBranch(body.Branch)
 		if !result.Success {
+			if gitservice.IsBranchSwitchBlockedErrorMessage(result.Error) {
+				return echo.NewHTTPError(http.StatusConflict, result.Error)
+			}
 			return echo.NewHTTPError(http.StatusInternalServerError, result.Error)
 		}
 		return httpresponse.Success(c, map[string]any{

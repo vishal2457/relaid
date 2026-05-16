@@ -109,7 +109,7 @@ export async function sendPushNotification(
         ? (raw as { data: ExpoPushTicket[] }).data
         : [raw as ExpoPushTicket];
 
-    for (const ticket of tickets) {
+    for (const [index, ticket] of tickets.entries()) {
       if (ticket.status === "error") {
         logger.error("Push notification failed", {
           userId,
@@ -118,10 +118,17 @@ export async function sendPushNotification(
         });
 
         if (ticket.details?.error === "DeviceNotRegistered") {
+          const invalidToken = tokens[index];
+          if (!invalidToken) {
+            continue;
+          }
           await db
             .delete(expoPushTokens)
-            .where(eq(expoPushTokens.userId, userId));
-          logger.info("Removed invalid push token for scope", { userId });
+            .where(eq(expoPushTokens.id, invalidToken.id));
+          logger.info("Removed invalid push token for scope", {
+            userId,
+            tokenId: invalidToken.id,
+          });
         }
       } else {
         logger.info("Push notification sent", {

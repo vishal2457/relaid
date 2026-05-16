@@ -1646,6 +1646,12 @@ export default function ChatScreen() {
         )}
         <ChatComposer
           activeProject={Boolean(session.activeProject)}
+          activeProjectConnected={Boolean(
+            session.activeProject &&
+              session.projects?.some(
+                (project) => project.id === session.activeProject?.id,
+              ),
+          )}
           activeAgentName={
             session.activeAgent?.name ??
             (isCodexAgentProvider ? "Default mode" : "Default agent")
@@ -1783,15 +1789,32 @@ export default function ChatScreen() {
         visible={session.showBranchSheet}
         branches={session.sortedBranches}
         currentBranch={session.currentBranch}
+        warningMessage={session.branchSwitchWarningMessage}
         loading={session.branchesLoading}
         searchQuery={session.branchSearchQuery}
         onSearchChange={session.setBranchSearchQuery}
         onClose={session.handleCloseBranchSheet}
         onSelectBranch={async (item) => {
-          if (item.name !== session.currentBranch) {
-            await session.switchBranchMutation.mutateAsync(item.name);
+          if (item.name === session.currentBranch) {
+            session.handleCloseBranchSheet();
+            return;
           }
-          session.handleCloseBranchSheet();
+
+          if (session.branchSwitchWarningMessage) {
+            showError(session.branchSwitchWarningMessage);
+            return;
+          }
+
+          try {
+            await session.switchBranchMutation.mutateAsync(item.name);
+            session.handleCloseBranchSheet();
+          } catch (error) {
+            showError(
+              error instanceof Error
+                ? error.message
+                : "Failed to switch branches",
+            );
+          }
         }}
       />
 

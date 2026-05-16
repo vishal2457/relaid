@@ -18,6 +18,29 @@ interface MessageSummaryDiffsProps {
   textColor: string;
 }
 
+function splitDiffPath(path: string): {
+  filename: string;
+  directory: string | null;
+} {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/");
+  const trimmed = normalized.endsWith("/")
+    ? normalized.slice(0, -1)
+    : normalized;
+  const segments = trimmed.split("/").filter(Boolean);
+
+  if (segments.length === 0) {
+    return {
+      filename: path,
+      directory: null,
+    };
+  }
+
+  return {
+    filename: segments[segments.length - 1] ?? path,
+    directory: segments.length > 1 ? segments.slice(0, -1).join("/") : null,
+  };
+}
+
 const DiffCount = ({
   value,
   color,
@@ -114,7 +137,7 @@ const DiffFileRow = ({
   metaColor: string;
   textColor: string;
 }) => {
-  const directory = diff.file
+  const { filename, directory } = splitDiffPath(diff.file);
   const unifiedDiff =
     diff.patch ||
     (diff.before || diff.after
@@ -138,6 +161,12 @@ const DiffFileRow = ({
         }}
       >
         <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            variant="bodyMedium"
+            style={{ color: textColor, fontWeight: "600" }}
+          >
+            {filename}
+          </Text>
           {directory ? (
             <Text
               variant="labelSmall"
@@ -265,7 +294,11 @@ export function RawDiffViewer({ diff }: DiffViewerProps) {
   const toggleExpand = (id: string) => {
     setExpandedRanges((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   };
