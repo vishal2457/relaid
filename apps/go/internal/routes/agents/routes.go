@@ -176,23 +176,27 @@ func Register(api *echo.Group, registry RegistryProvider) {
 			return unsupported(provider, "sessions.run")
 		}
 		var body struct {
-			Prompt       string          `json:"prompt"`
-			WorkingDir   string          `json:"workingDir"`
-			ProjectID    string          `json:"projectId"`
-			SessionID    string          `json:"sessionId"`
-			SystemPrompt string          `json:"systemPrompt"`
-			Model        *agent.ModelRef `json:"model"`
+			Prompt         string          `json:"prompt"`
+			WorkingDir     string          `json:"workingDir"`
+			ProjectID      string          `json:"projectId"`
+			SessionID      string          `json:"sessionId"`
+			SystemPrompt   string          `json:"systemPrompt"`
+			ApprovalPolicy string          `json:"approvalPolicy"`
+			Effort         string          `json:"effort"`
+			Model          *agent.ModelRef `json:"model"`
 		}
 		if err := c.Bind(&body); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		result, err := provider.Sessions().Run(c.Request().Context(), agent.RunInput{
-			Prompt:       body.Prompt,
-			WorkingDir:   body.WorkingDir,
-			ProjectID:    body.ProjectID,
-			SessionID:    body.SessionID,
-			SystemPrompt: body.SystemPrompt,
-			Model:        body.Model,
+			Prompt:         body.Prompt,
+			WorkingDir:     body.WorkingDir,
+			ProjectID:      body.ProjectID,
+			SessionID:      body.SessionID,
+			SystemPrompt:   body.SystemPrompt,
+			ApprovalPolicy: body.ApprovalPolicy,
+			Effort:         body.Effort,
+			Model:          body.Model,
 		})
 		if err != nil {
 			return err

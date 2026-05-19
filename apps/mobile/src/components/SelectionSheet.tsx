@@ -147,7 +147,7 @@ export function SelectionSheet<T>({
         handleIndicatorStyle={{ backgroundColor: "#CBD5E1" }}
       >
         {children ? (
-          <BottomSheetView>
+          <BottomSheetView style={styles.sheetContent}>
             <View style={styles.header}>
               <View style={styles.headerRow}>
                 <Text
@@ -187,12 +187,7 @@ export function SelectionSheet<T>({
                 <View style={styles.headerContent}>{headerContent}</View>
               ) : null}
             </View>
-            <View
-              style={[
-                styles.childrenContainer,
-                { paddingBottom: listBottomPadding },
-              ]}
-            >
+            <View style={styles.childrenContainer}>
               {children}
             </View>
           </BottomSheetView>
@@ -318,6 +313,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
+  sheetContent: {
+    flex: 1,
+    minHeight: 0,
+  },
   loading: {
     padding: 32,
     alignItems: "center",
@@ -335,5 +334,7 @@ const styles = StyleSheet.create({
   },
   childrenContainer: {
     paddingHorizontal: 20,
+    flex: 1,
+    minHeight: 0,
   },
 });

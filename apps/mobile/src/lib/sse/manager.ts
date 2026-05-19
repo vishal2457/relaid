@@ -99,6 +99,9 @@ export async function sendPromptRequest(params: {
   projectId: string;
   prompt: string;
   agent?: string;
+  systemPrompt?: string;
+  approvalPolicy?: string;
+  effort?: string;
   appMentions?: Array<{ id: string; name: string }>;
   model?: { providerId: string; modelId: string };
 }): Promise<void> {
@@ -116,6 +119,9 @@ export async function sendPromptRequest(params: {
     sealedPayload: encryptForServer(session, {
       prompt: params.prompt,
       agent: params.agent,
+      systemPrompt: params.systemPrompt,
+      approvalPolicy: params.approvalPolicy,
+      effort: params.effort,
       appMentions: params.appMentions,
       model: params.model,
     }),

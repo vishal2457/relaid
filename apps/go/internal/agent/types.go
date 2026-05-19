@@ -125,14 +125,16 @@ type ModelRef struct {
 }
 
 type RunInput struct {
-	Prompt       string
-	WorkingDir   string
-	ProjectID    string
-	SessionID    string
-	Agent        string
-	SystemPrompt string
-	Model        *ModelRef
-	Items        []InputItem
+	Prompt         string
+	WorkingDir     string
+	ProjectID      string
+	SessionID      string
+	Agent          string
+	ApprovalPolicy string
+	Effort         string
+	SystemPrompt   string
+	Model          *ModelRef
+	Items          []InputItem
 }
 
 type InputItem struct {

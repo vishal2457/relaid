@@ -13,12 +13,15 @@ import { useGitFileStatus } from "@/src/lib/api/git";
 import { getActiveSessionStream } from "@/src/lib/active-session-stream";
 
 const LAST_SELECTED_PROJECT_ID = "LAST_SELECTED_PROJECT_ID";
+const FAVORITE_PROJECT_IDS = "FAVORITE_PROJECT_IDS";
 const LAST_SELECTED_AGENT_BY_PROJECT = "LAST_SELECTED_AGENT_BY_PROJECT";
 const LAST_SELECTED_AGENT_PROVIDER_ID = "LAST_SELECTED_AGENT_PROVIDER_ID";
 const LAST_SELECTED_MODELS_BY_AGENT_PROVIDER =
   "LAST_SELECTED_MODELS_BY_AGENT_PROVIDER";
 const LEGACY_LAST_SELECTED_MODEL = "LAST_SELECTED_MODEL";
 const LEGACY_AGENT_SELECTION_KEY = "__legacy__";
+const DEFAULT_CODEX_APPROVAL_POLICY = "on-request";
+const DEFAULT_CODEX_EFFORT = "default";
 
 type StoredModelPreference = {
   id?: string;
@@ -28,6 +31,30 @@ type StoredModelPreference = {
 };
 
 type StoredAgentSelectionsByProject = Record<string, Record<string, string>>;
+
+function parseStoredFavoriteProjectIds(raw: string | null): string[] {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        parsed.filter(
+          (projectId): projectId is string =>
+            typeof projectId === "string" && projectId.length > 0,
+        ),
+      ),
+    );
+  } catch {
+    return [];
+  }
+}
 
 function toStoredModelPreference(model: ActiveModel): StoredModelPreference {
   return {
@@ -243,6 +270,47 @@ function getDefaultAgent(agents: Agent[]): Agent | null {
   );
 }
 
+function normalizeBuiltInAgentName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replaceAll(" ", "_")
+    .replaceAll("-", "_");
+}
+
+function findMatchingAgent(
+  agents: Agent[],
+  agentName: string,
+  agentProviderId?: string | null,
+): Agent | null {
+  const trimmed = agentName.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const exact = agents.find((agent) => agent.name === trimmed);
+  if (exact) {
+    return exact;
+  }
+
+  const lower = trimmed.toLowerCase();
+  const caseInsensitive = agents.find((agent) => agent.name.toLowerCase() === lower);
+  if (caseInsensitive) {
+    return caseInsensitive;
+  }
+
+  if (agentProviderId === "codex" || agentProviderId === "claude") {
+    const normalized = normalizeBuiltInAgentName(trimmed);
+    return (
+      agents.find(
+        (agent) => normalizeBuiltInAgentName(agent.name) === normalized,
+      ) ?? null
+    );
+  }
+
+  return null;
+}
+
 export function getAgentSubtitle(agent: Agent): string {
   if (agent.model) {
     return `${agent.model.providerID} / ${agent.model.modelID}`;
@@ -281,6 +349,9 @@ export function useChatSession(deps: HydrationDeps) {
   const [activeProject, setActiveProject] = React.useState<Project | null>(
     null,
   );
+  const [favoriteProjectIds, setFavoriteProjectIds] = React.useState<string[]>(
+    [],
+  );
   const [activeModel, setActiveModel] = React.useState<ActiveModel | null>(
     null,
   );
@@ -299,6 +370,10 @@ export function useChatSession(deps: HydrationDeps) {
   const [showProviderSheet, setShowProviderSheet] = React.useState(false);
   const [showAgentSheet, setShowAgentSheet] = React.useState(false);
   const [showBranchSheet, setShowBranchSheet] = React.useState(false);
+  const [codexApprovalPolicy, setCodexApprovalPolicy] = React.useState(
+    DEFAULT_CODEX_APPROVAL_POLICY,
+  );
+  const [codexEffort, setCodexEffort] = React.useState(DEFAULT_CODEX_EFFORT);
 
   const activeProjectRef = React.useRef<Project | null>(null);
   const projectsRef = React.useRef<Project[] | undefined>(undefined);
@@ -395,10 +470,17 @@ export function useChatSession(deps: HydrationDeps) {
           }
         }
 
-        const savedId = await AsyncStorage.getItem(LAST_SELECTED_PROJECT_ID);
+        const [savedId, rawFavoriteProjectIds] = await Promise.all([
+          AsyncStorage.getItem(LAST_SELECTED_PROJECT_ID),
+          AsyncStorage.getItem(FAVORITE_PROJECT_IDS),
+        ]);
         if (cancelled || !deps.isMountedRef.current) {
           return;
         }
+
+        const storedFavoriteProjectIds =
+          parseStoredFavoriteProjectIds(rawFavoriteProjectIds);
+        setFavoriteProjectIds(storedFavoriteProjectIds);
 
         if (savedId) {
           if (projects) {
@@ -408,7 +490,11 @@ export function useChatSession(deps: HydrationDeps) {
             }
           }
         } else if (projects && projects.length > 0) {
-          setActiveProject(projects[0]);
+          const favoriteProjectIdSet = new Set(storedFavoriteProjectIds);
+          const defaultProject =
+            projects.find((project) => favoriteProjectIdSet.has(project.id)) ??
+            projects[0];
+          setActiveProject(defaultProject);
         }
       } catch {
       } finally {
@@ -434,6 +520,17 @@ export function useChatSession(deps: HydrationDeps) {
     }
   }, [activeProject, hydrated]);
 
+  React.useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    AsyncStorage.setItem(
+      FAVORITE_PROJECT_IDS,
+      JSON.stringify(favoriteProjectIds),
+    ).catch(() => {});
+  }, [favoriteProjectIds, hydrated]);
+
   // Restore agent from storage on project/agents change
   React.useEffect(() => {
     if (!hydrated || !activeProject || !effectiveAgentProviderId) {
@@ -455,8 +552,10 @@ export function useChatSession(deps: HydrationDeps) {
           return;
         }
 
-        const matchedAgent = agents.find(
-          (agent) => agent.name === savedAgentName,
+        const matchedAgent = findMatchingAgent(
+          agents,
+          savedAgentName,
+          effectiveAgentProviderId,
         );
         if (matchedAgent) {
           setActiveAgent((current: Agent | null) =>
@@ -477,7 +576,11 @@ export function useChatSession(deps: HydrationDeps) {
 
     setActiveAgent((current: Agent | null) => {
       if (current) {
-        const matched = agents.find((agent) => agent.name === current.name);
+        const matched = findMatchingAgent(
+          agents,
+          current.name,
+          effectiveAgentProviderId,
+        );
         if (matched) {
           return matched;
         }
@@ -485,7 +588,7 @@ export function useChatSession(deps: HydrationDeps) {
 
       return getDefaultAgent(agents);
     });
-  }, [agents]);
+  }, [agents, effectiveAgentProviderId]);
 
   // Persist agent selection
   React.useEffect(() => {
@@ -754,13 +857,37 @@ export function useChatSession(deps: HydrationDeps) {
   );
 
   const sortedProjects = React.useMemo(() => {
-    if (!activeProject) return projects ?? [];
-    const sorted = [...(projects ?? [])];
-    sorted.sort((a, b) =>
-      a.id === activeProject.id ? -1 : b.id === activeProject.id ? 1 : 0,
-    );
-    return sorted;
-  }, [projects, activeProject]);
+    const items = [...(projects ?? [])];
+    const favoriteProjectIdSet = new Set(favoriteProjectIds);
+
+    items.sort((a, b) => {
+      const aIsFavorite = favoriteProjectIdSet.has(a.id);
+      const bIsFavorite = favoriteProjectIdSet.has(b.id);
+
+      if (aIsFavorite !== bIsFavorite) {
+        return aIsFavorite ? -1 : 1;
+      }
+
+      if (activeProject) {
+        if (a.id === activeProject.id) return -1;
+        if (b.id === activeProject.id) return 1;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+
+    return items;
+  }, [projects, activeProject, favoriteProjectIds]);
+
+  const toggleFavoriteProject = React.useCallback((projectId: string) => {
+    setFavoriteProjectIds((current) => {
+      if (current.includes(projectId)) {
+        return current.filter((id) => id !== projectId);
+      }
+
+      return [...current, projectId];
+    });
+  }, []);
 
   const sortedAgents = React.useMemo(() => {
     const normalizedQuery = normalizeSearchValue(agentSearchQuery);
@@ -857,6 +984,8 @@ export function useChatSession(deps: HydrationDeps) {
     activeModel,
     selectedAgentProviderId,
     activeAgent,
+    codexApprovalPolicy,
+    codexEffort,
     hydrated,
     // Refs
     activeProjectRef,
@@ -893,12 +1022,15 @@ export function useChatSession(deps: HydrationDeps) {
     setAgentSearchQuery,
     branchSearchQuery,
     setBranchSearchQuery,
+    favoriteProjectIds,
     // Sheet handlers
     handleCloseProjectSheet,
     handleOpenProjectSheet,
     handleCloseProviderSheet,
     handleOpenProviderSheet,
     handleSelectAgentProvider,
+    setCodexApprovalPolicy,
+    setCodexEffort,
     handleCloseAgentSheet,
     handleOpenAgentSheet,
     handleCloseBranchSheet,
@@ -906,5 +1038,6 @@ export function useChatSession(deps: HydrationDeps) {
     ensureModelForAgentProvider,
     handleSelectModel,
     handleSelectAgent,
+    toggleFavoriteProject,
   };
 }

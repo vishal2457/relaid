@@ -23,7 +23,11 @@ import {
   requestNotificationPermissions,
   registerPushTokenWithServer,
 } from "@/src/lib/notifications";
-import { hasSeenOnboarding, markOnboardingSeen } from "@/src/lib/onboarding";
+import {
+  hasSeenOnboarding,
+  markOnboardingSeen,
+  subscribeToOnboardingSeen,
+} from "@/src/lib/onboarding";
 
 function StartupInit() {
   useEffect(() => {
@@ -83,6 +87,13 @@ function RootLayoutInner() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    return subscribeToOnboardingSeen((seen) => {
+      setOnboardingSeen(seen);
+      setOnboardingHydrated(true);
+    });
   }, []);
 
   useEffect(() => {

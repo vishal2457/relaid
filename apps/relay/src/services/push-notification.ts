@@ -69,11 +69,15 @@ export async function sendPushNotification(
   },
 ): Promise<void> {
   const db = getDb();
+console.log(body, "body");
 
   const tokens = await db
     .select()
     .from(expoPushTokens)
     .where(eq(expoPushTokens.userId, userId));
+
+    console.log(tokens, "tokens");
+    
 
   if (tokens.length === 0) {
     logger.debug("No push tokens found for scope", { userId });

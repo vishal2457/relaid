@@ -45,10 +45,13 @@ type deviceTarget struct {
 }
 
 type sessionPromptInnerPayload struct {
-	Prompt      string          `json:"prompt"`
-	Agent       string          `json:"agent,omitempty"`
-	Model       *agent.ModelRef `json:"model,omitempty"`
-	AppMentions []AppMention    `json:"appMentions,omitempty"`
+	Prompt         string          `json:"prompt"`
+	Agent          string          `json:"agent,omitempty"`
+	SystemPrompt   string          `json:"systemPrompt,omitempty"`
+	ApprovalPolicy string          `json:"approvalPolicy,omitempty"`
+	Effort         string          `json:"effort,omitempty"`
+	Model          *agent.ModelRef `json:"model,omitempty"`
+	AppMentions    []AppMention    `json:"appMentions,omitempty"`
 }
 
 type sessionPromptResponseInnerPayload struct {
@@ -1012,11 +1015,14 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 	}
 
 	runInput := agent.RunInput{
-		Prompt:     inner.Prompt,
-		SessionID:  req.SessionID,
-		ProjectID:  req.ProjectID,
-		WorkingDir: directory,
-		Agent:      inner.Agent,
+		Prompt:         inner.Prompt,
+		SessionID:      req.SessionID,
+		ProjectID:      req.ProjectID,
+		WorkingDir:     directory,
+		Agent:          inner.Agent,
+		SystemPrompt:   inner.SystemPrompt,
+		ApprovalPolicy: inner.ApprovalPolicy,
+		Effort:         inner.Effort,
 	}
 	if len(inner.AppMentions) > 0 {
 		runInput.Items = make([]agent.InputItem, 0, len(inner.AppMentions))

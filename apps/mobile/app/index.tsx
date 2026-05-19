@@ -124,8 +124,9 @@ function findRuntimeByRequestId(
   requestId: string,
 ): SessionRuntime | null {
   return (
-    Object.values(runtimes).find((runtime) => runtime.requestId === requestId) ??
-    null
+    Object.values(runtimes).find(
+      (runtime) => runtime.requestId === requestId,
+    ) ?? null
   );
 }
 
@@ -267,10 +268,9 @@ export default function ChatScreen() {
   // Draft selections drive new sessions; active sessions temporarily lock the provider.
   const draftAgentProviderId =
     session.selectedAgentProviderId ?? session.activeModel?.agentProviderId;
-  const activeLookupAgentProviderId =
-    activeSessionId
-      ? activeSessionAgentProviderId ?? draftAgentProviderId
-      : draftAgentProviderId;
+  const activeLookupAgentProviderId = activeSessionId
+    ? (activeSessionAgentProviderId ?? draftAgentProviderId)
+    : draftAgentProviderId;
   const selectedSessionKey = React.useMemo(
     () =>
       activeSessionId
@@ -311,7 +311,8 @@ export default function ChatScreen() {
       ) ?? null
     );
   }, [activeLookupAgentProviderId, availableAgentProviders]);
-  const isCodexAgentProvider = selectedAgentProvider?.agentProviderId === "codex";
+  const isCodexAgentProvider =
+    selectedAgentProvider?.agentProviderId === "codex";
   const visibleModelGroups = React.useMemo(() => {
     if (!activeLookupAgentProviderId) {
       return session.sortedModelGroups;
@@ -377,7 +378,7 @@ export default function ChatScreen() {
     notificationAgentProviderId,
   );
   const selectedRuntime = selectedSessionKey
-    ? runtimeBySessionKey[selectedSessionKey] ?? null
+    ? (runtimeBySessionKey[selectedSessionKey] ?? null)
     : null;
   const pendingPermission = selectedRuntime?.pendingPermission ?? null;
   const pendingQuestion = selectedRuntime?.pendingQuestion ?? null;
@@ -412,22 +413,19 @@ export default function ChatScreen() {
     [theme.dark],
   );
 
-  const persistRuntimeMap = React.useCallback(
-    (next: SessionRuntimeMap) => {
-      const nextPending = new Map<string, string>();
-      Object.values(next).forEach((runtime) => {
-        if (isActiveRuntimePhase(runtime.phase)) {
-          nextPending.set(runtime.sessionId, runtime.requestId);
-        }
-      });
-      runtimeBySessionKeyRef.current = next;
-      pendingRequestIdsRef.current = nextPending;
-      setRuntimeBySessionKey(next);
-      setPendingRequestIds(nextPending);
-      void saveActiveSessionRuntimeMap(next);
-    },
-    [],
-  );
+  const persistRuntimeMap = React.useCallback((next: SessionRuntimeMap) => {
+    const nextPending = new Map<string, string>();
+    Object.values(next).forEach((runtime) => {
+      if (isActiveRuntimePhase(runtime.phase)) {
+        nextPending.set(runtime.sessionId, runtime.requestId);
+      }
+    });
+    runtimeBySessionKeyRef.current = next;
+    pendingRequestIdsRef.current = nextPending;
+    setRuntimeBySessionKey(next);
+    setPendingRequestIds(nextPending);
+    void saveActiveSessionRuntimeMap(next);
+  }, []);
 
   const upsertRuntimeState = React.useCallback(
     (runtime: SessionRuntime) => {
@@ -454,8 +452,10 @@ export default function ChatScreen() {
       return;
     }
 
-    const availableProjects = sessionProjectsRef.current ?? sessionProjects ?? [];
-    const targetProjectId = notificationSession?.projectID ?? notificationProjectId;
+    const availableProjects =
+      sessionProjectsRef.current ?? sessionProjects ?? [];
+    const targetProjectId =
+      notificationSession?.projectID ?? notificationProjectId;
     const targetProject = availableProjects.find(
       (project) => project.id === targetProjectId,
     );
@@ -683,9 +683,8 @@ export default function ChatScreen() {
     }
 
     const selectedRuntime =
-      merged[
-        makeSessionKey(sessionId, activeAgentProviderIdRef.current)
-      ] ?? null;
+      merged[makeSessionKey(sessionId, activeAgentProviderIdRef.current)] ??
+      null;
     if (!selectedRuntime || !isActiveRuntimePhase(selectedRuntime.phase)) {
       return;
     }
@@ -709,7 +708,10 @@ export default function ChatScreen() {
 
     if (!isStreamingSessionStatus(recoveredStatus)) {
       flushStreamingContent();
-      clearPendingStreamState(selectedRuntime.sessionKey, selectedRuntime.requestId);
+      clearPendingStreamState(
+        selectedRuntime.sessionKey,
+        selectedRuntime.requestId,
+      );
     }
   }, [
     clearPendingStreamState,
@@ -824,7 +826,10 @@ export default function ChatScreen() {
       );
       const runtime =
         runtimeBySessionKeyRef.current[sessionKey] ??
-        findRuntimeByRequestId(runtimeBySessionKeyRef.current, payload.requestId);
+        findRuntimeByRequestId(
+          runtimeBySessionKeyRef.current,
+          payload.requestId,
+        );
       if (!runtime) {
         return;
       }
@@ -853,7 +858,10 @@ export default function ChatScreen() {
       );
       const current =
         runtimeBySessionKeyRef.current[sessionKey] ??
-        findRuntimeByRequestId(runtimeBySessionKeyRef.current, payload.requestId);
+        findRuntimeByRequestId(
+          runtimeBySessionKeyRef.current,
+          payload.requestId,
+        );
       const runtime: SessionRuntime = {
         sessionKey,
         sessionId: payload.sessionId,
@@ -940,8 +948,7 @@ export default function ChatScreen() {
           {
             projectId: payload.projectId,
             sessionId: responseSessionId,
-            agentProviderId:
-              payload.agentProviderId ?? runtime.agentProviderId,
+            agentProviderId: payload.agentProviderId ?? runtime.agentProviderId,
           },
         );
       }
@@ -1117,9 +1124,7 @@ export default function ChatScreen() {
     ? streamingThinkingContent
     : null;
   const footerBlocks = hasVisibleActiveStreamEvent ? streamingBlocks : [];
-  const footerPhase = hasVisibleActiveStreamEvent
-    ? streamingPhase
-    : "thinking";
+  const footerPhase = hasVisibleActiveStreamEvent ? streamingPhase : "thinking";
 
   const handleSend = React.useCallback(async () => {
     if (!session.activeProject || !composer.trimmedInput || isSessionSending) {
@@ -1201,9 +1206,7 @@ export default function ChatScreen() {
     clearRequestRecoveryTimeout();
     requestRecoveryTimeoutRef.current = setTimeout(() => {
       requestRecoveryTimeoutRef.current = null;
-      if (
-        runtimeBySessionKeyRef.current[sessionKey]?.requestId === requestId
-      ) {
+      if (runtimeBySessionKeyRef.current[sessionKey]?.requestId === requestId) {
         void recoverPendingStream();
       }
     }, 60_000);
@@ -1216,6 +1219,15 @@ export default function ChatScreen() {
         projectId: session.activeProject.id,
         prompt,
         agent: session.activeAgent?.name,
+        approvalPolicy:
+          requestAgentProviderId === "codex"
+            ? session.codexApprovalPolicy
+            : undefined,
+        effort:
+          requestAgentProviderId === "codex" &&
+          session.codexEffort !== "default"
+            ? session.codexEffort
+            : undefined,
         appMentions,
         model: session.activeModel
           ? {
@@ -1648,9 +1660,9 @@ export default function ChatScreen() {
           activeProject={Boolean(session.activeProject)}
           activeProjectConnected={Boolean(
             session.activeProject &&
-              session.projects?.some(
-                (project) => project.id === session.activeProject?.id,
-              ),
+            session.projects?.some(
+              (project) => project.id === session.activeProject?.id,
+            ),
           )}
           activeAgentName={
             session.activeAgent?.name ??
@@ -1715,12 +1727,16 @@ export default function ChatScreen() {
       <ProjectSelectionSheet
         visible={session.showProjectSheet}
         projects={session.sortedProjects}
+        favoriteProjectIds={session.favoriteProjectIds}
         activeProjectId={session.activeProject?.id}
         loading={session.projectsLoading}
         refreshing={session.projectsRefetching}
         onClose={session.handleCloseProjectSheet}
         onRefresh={() => {
           void session.refetchProjects();
+        }}
+        onToggleFavorite={(item) => {
+          session.toggleFavoriteProject(item.id);
         }}
         onSelectProject={(item) => {
           if (item.id !== session.activeProject?.id) {
@@ -1762,16 +1778,15 @@ export default function ChatScreen() {
         visible={session.showAgentSheet}
         agents={session.sortedAgents}
         activeAgentName={session.activeAgent?.name}
+        showCodexOptions={isCodexAgentProvider}
+        codexApprovalPolicy={session.codexApprovalPolicy}
+        codexEffort={session.codexEffort}
         loading={session.agentsLoading}
         title={
-          isCodexAgentProvider
-            ? "Select Collaboration Mode"
-            : "Select Agent"
+          isCodexAgentProvider ? "Select Collaboration Mode" : "Select Agent"
         }
         searchPlaceholder={
-          isCodexAgentProvider
-            ? "Search collaboration modes"
-            : "Search agents"
+          isCodexAgentProvider ? "Search collaboration modes" : "Search agents"
         }
         emptyText={
           isCodexAgentProvider
@@ -1782,6 +1797,8 @@ export default function ChatScreen() {
         onSearchChange={session.setAgentSearchQuery}
         onClose={session.handleCloseAgentSheet}
         onSelectAgent={session.handleSelectAgent}
+        onSelectCodexApprovalPolicy={session.setCodexApprovalPolicy}
+        onSelectCodexEffort={session.setCodexEffort}
         getAgentSubtitle={getAgentSubtitle}
       />
 

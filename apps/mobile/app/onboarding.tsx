@@ -48,10 +48,7 @@ export default function Onboarding() {
   const theme = useTheme();
   const scrollX = useRef(new Animated.Value(0)).current;
   const [index, setIndex] = useState(0);
-
-  React.useEffect(() => {
-    void markOnboardingSeen();
-  }, []);
+  const [isCompleting, setIsCompleting] = useState(false);
 
   const isLastSlide = index === DATA.length - 1;
 
@@ -151,9 +148,15 @@ export default function Onboarding() {
         >
           <Pressable
             style={styles.pressable}
+            disabled={isCompleting}
             onPress={() => {
               if (isLastSlide) {
-                router.push("/pair" as any);
+                setIsCompleting(true);
+                void (async () => {
+                  await markOnboardingSeen();
+                  router.replace("/pair" as any);
+                  setIsCompleting(false);
+                })();
                 return;
               }
               handleNext();

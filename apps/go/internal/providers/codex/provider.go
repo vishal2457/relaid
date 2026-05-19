@@ -26,6 +26,7 @@ import (
 )
 
 const defaultProviderTimeout = 20 * time.Second
+const defaultCodexApprovalPolicy = "on-request"
 
 // Provider implements agent.Provider for the Codex app-server backend.
 type Provider struct {
@@ -227,7 +228,7 @@ func (s *agentService) List(ctx context.Context, _ string) ([]agent.AgentConfig,
 			continue
 		}
 		result = append(result, agent.AgentConfig{
-			Name:        firstNonEmpty(strings.TrimSpace(item.Name), collaborationModeDisplayName(modeID)),
+			Name:        modeID,
 			Description: collaborationModeDescription(item),
 			Mode:        "primary",
 			BuiltIn:     true,
@@ -601,16 +602,10 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 			}
 
 		case "item/agentMessage/delta":
-			var p struct {
-				ItemID string `json:"itemId"`
-				Delta  string `json:"delta"`
-			}
-			if json.Unmarshal(n.Params, &p) == nil && p.Delta != "" {
-				output.WriteString(p.Delta)
-				if onChunk != nil {
-					onChunk(agent.StreamChunk{Type: "text", Content: p.Delta, MessageID: p.ItemID})
-				}
-			}
+			appendCodexTextDelta(n.Params, &output, onChunk)
+
+		case "item/plan/delta":
+			appendCodexTextDelta(n.Params, &output, onChunk)
 
 		case "item/reasoning/textDelta", "item/reasoning/summaryTextDelta":
 			var p struct {
@@ -636,6 +631,9 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 					onChunk(agent.StreamChunk{Type: "tool", Content: label})
 				}
 			}
+
+		case "turn/plan/updated":
+			emitCodexPlanUpdate(n.Params, onChunk)
 
 		case "turn/completed":
 			var p struct {
@@ -677,11 +675,15 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 	}
 
 	collaborationMode := buildCollaborationModeSelection(input.Agent, input.SystemPrompt)
+	approvalPolicy := codexApprovalPolicyValue(input.ApprovalPolicy)
+	effort := codexEffortToNil(input.Effort)
 	turnResult, err := conn.turnStart(runCtx, turnStartParams{
 		ThreadID:          threadID,
 		Input:             buildUserInputs(prompt, input.Items),
 		Cwd:               emptyToNil(input.WorkingDir),
 		Model:             modelToNil(input.Model),
+		ApprovalPolicy:    approvalPolicy,
+		Effort:            effort,
 		CollaborationMode: collaborationMode,
 	})
 	if err != nil && collaborationMode != nil && isTurnStartCollaborationModeRejected(err) {
@@ -691,10 +693,12 @@ func (s *sessionService) RunStream(ctx context.Context, input agent.RunInput, on
 			err,
 		)
 		turnResult, err = conn.turnStart(runCtx, turnStartParams{
-			ThreadID: threadID,
-			Input:    buildUserInputs(prompt, input.Items),
-			Cwd:      emptyToNil(input.WorkingDir),
-			Model:    modelToNil(input.Model),
+			ThreadID:       threadID,
+			Input:          buildUserInputs(prompt, input.Items),
+			Cwd:            emptyToNil(input.WorkingDir),
+			Model:          modelToNil(input.Model),
+			ApprovalPolicy: approvalPolicy,
+			Effort:         effort,
 		})
 	}
 	if err != nil {
@@ -748,6 +752,7 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 		// No existing session — start a brand new thread.
 		collaborationMode := buildCollaborationModeSelection(input.Agent, input.SystemPrompt)
 		developerInstructions := emptyToNil(input.SystemPrompt)
+		approvalPolicy := codexApprovalPolicyValue(input.ApprovalPolicy)
 		if collaborationMode != nil {
 			developerInstructions = nil
 		}
@@ -755,7 +760,7 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 			Model:                  modelToNil(input.Model),
 			ModelProvider:          modelProviderToNil(input.Model),
 			Cwd:                    emptyToNil(input.WorkingDir),
-			ApprovalPolicy:         "on-request",
+			ApprovalPolicy:         approvalPolicy,
 			ApprovalsReviewer:      "user",
 			Sandbox:                "workspace-write",
 			DeveloperInstructions:  developerInstructions,
@@ -774,7 +779,7 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 		Model:                  modelToNil(input.Model),
 		ModelProvider:          modelProviderToNil(input.Model),
 		Cwd:                    emptyToNil(input.WorkingDir),
-		ApprovalPolicy:         "on-request",
+		ApprovalPolicy:         codexApprovalPolicyValue(input.ApprovalPolicy),
 		ApprovalsReviewer:      "user",
 		Sandbox:                "workspace-write",
 		CollaborationMode:      buildCollaborationModeSelection(input.Agent, input.SystemPrompt),
@@ -793,6 +798,7 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 		s.logger.Printf("codex: no rollout for %s, starting fresh thread", input.SessionID)
 		collaborationMode := buildCollaborationModeSelection(input.Agent, input.SystemPrompt)
 		developerInstructions := emptyToNil(input.SystemPrompt)
+		approvalPolicy := codexApprovalPolicyValue(input.ApprovalPolicy)
 		if collaborationMode != nil {
 			developerInstructions = nil
 		}
@@ -800,7 +806,7 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 			Model:                  modelToNil(input.Model),
 			ModelProvider:          modelProviderToNil(input.Model),
 			Cwd:                    emptyToNil(input.WorkingDir),
-			ApprovalPolicy:         "on-request",
+			ApprovalPolicy:         approvalPolicy,
 			ApprovalsReviewer:      "user",
 			Sandbox:                "workspace-write",
 			DeveloperInstructions:  developerInstructions,
@@ -817,6 +823,7 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 	s.logger.Printf("codex: resume failed for %s (%v), starting replacement thread", input.SessionID, err)
 	collaborationMode := buildCollaborationModeSelection(input.Agent, input.SystemPrompt)
 	developerInstructions := emptyToNil(input.SystemPrompt)
+	approvalPolicy := codexApprovalPolicyValue(input.ApprovalPolicy)
 	if collaborationMode != nil {
 		developerInstructions = nil
 	}
@@ -824,7 +831,7 @@ func (s *sessionService) resolveThread(ctx context.Context, conn *appServerConn,
 		Model:                  modelToNil(input.Model),
 		ModelProvider:          modelProviderToNil(input.Model),
 		Cwd:                    emptyToNil(input.WorkingDir),
-		ApprovalPolicy:         "on-request",
+		ApprovalPolicy:         approvalPolicy,
 		ApprovalsReviewer:      "user",
 		Sandbox:                "workspace-write",
 		DeveloperInstructions:  developerInstructions,
@@ -1227,7 +1234,7 @@ func (c *appServerConn) handleServerRequest(rawID, rawMethod, rawParams json.Raw
 	case "item/permissions/requestApproval":
 		go c.handlePermissionsApproval(id, rawParams)
 	case "item/tool/requestUserInput":
-		c.sendResult(id, map[string]any{"answers": map[string]any{}})
+		go c.handleToolRequestUserInput(id, rawParams)
 	default:
 		c.sendError(id, &rpcError{Code: -32601, Message: "method not supported by client"})
 	}
@@ -1324,6 +1331,56 @@ func (c *appServerConn) handlePermissionsApproval(id int64, rawParams json.RawMe
 		return
 	}
 	c.sendError(id, &rpcError{Code: -32000, Message: "permission denied"})
+}
+
+func (c *appServerConn) handleToolRequestUserInput(id int64, rawParams json.RawMessage) {
+	req, err := decodeCodexQuestionRequest(rawParams)
+	if err != nil {
+		c.logf("codex: failed to parse tool/requestUserInput: %v", err)
+		c.sendResult(id, map[string]any{"answers": map[string]any{}})
+		return
+	}
+
+	answerMap := req.emptyAnswers()
+	if c.handler == nil {
+		c.sendResult(id, map[string]any{"answers": answerMap})
+		return
+	}
+
+	questions := make([]acp.ACPQuestion, 0, len(req.Questions))
+	for _, q := range req.Questions {
+		options := make([]acp.ACPQuestionOption, 0, len(q.Options))
+		for _, o := range q.Options {
+			options = append(options, acp.ACPQuestionOption{
+				Label:       o.Label,
+				Description: o.Description,
+			})
+		}
+		questions = append(questions, acp.ACPQuestion{
+			Question: q.Question,
+			Header:   q.Header,
+			Options:  options,
+			Multiple: q.Multiple,
+			Custom:   q.Custom,
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(c.ctx, 120*time.Second)
+	defer cancel()
+
+	resp, err := c.handler.HandleQuestion(ctx, acp.ACPQuestionRequest{
+		SessionID: req.ThreadID,
+		Method:    "item/tool/requestUserInput",
+		Questions: questions,
+		RawParams: rawParams,
+	})
+	if err != nil {
+		c.logf("codex: question handler error: %v", err)
+		c.sendResult(id, map[string]any{"answers": answerMap})
+		return
+	}
+
+	c.sendResult(id, map[string]any{"answers": req.answerMap(resp.Answers)})
 }
 
 func (c *appServerConn) requestPermission(req acp.ACPPermissionRequest) string {
@@ -1499,7 +1556,7 @@ func mapCodexMessages(sessionID string, turns []turn) []agent.SessionMessagesRes
 
 			case "plan":
 				if text := itemString(item, "text"); text != "" {
-					assistantParts = append(assistantParts, reasoningPart(itemID, assistantMsgID, sessionID, text, createdAt))
+					assistantParts = append(assistantParts, textPart(itemID, assistantMsgID, sessionID, text, createdAt))
 				}
 
 			default:
@@ -1806,6 +1863,55 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func appendCodexTextDelta(raw json.RawMessage, output *strings.Builder, onChunk func(agent.StreamChunk)) {
+	var p struct {
+		ItemID string `json:"itemId"`
+		Delta  string `json:"delta"`
+	}
+	if json.Unmarshal(raw, &p) != nil || p.Delta == "" {
+		return
+	}
+	if output != nil {
+		output.WriteString(p.Delta)
+	}
+	if onChunk != nil {
+		onChunk(agent.StreamChunk{Type: "text", Content: p.Delta, MessageID: p.ItemID})
+	}
+}
+
+func emitCodexPlanUpdate(raw json.RawMessage, onChunk func(agent.StreamChunk)) {
+	if onChunk == nil {
+		return
+	}
+
+	var p struct {
+		Explanation string `json:"explanation"`
+		Plan        []struct {
+			Step   string `json:"step"`
+			Status string `json:"status"`
+		} `json:"plan"`
+	}
+	if json.Unmarshal(raw, &p) != nil {
+		return
+	}
+
+	if explanation := strings.TrimSpace(p.Explanation); explanation != "" {
+		onChunk(agent.StreamChunk{Type: "status", Content: explanation})
+	}
+	for _, item := range p.Plan {
+		step := strings.TrimSpace(item.Step)
+		if step == "" {
+			continue
+		}
+		status := strings.TrimSpace(item.Status)
+		if status == "" {
+			onChunk(agent.StreamChunk{Type: "status", Content: step})
+			continue
+		}
+		onChunk(agent.StreamChunk{Type: "status", Content: fmt.Sprintf("%s: %s", status, step)})
+	}
+}
+
 func buildCollaborationModeSelection(agentName, developerInstructions string) *collaborationModeSelection {
 	mode := normalizeCollaborationMode(agentName)
 	if mode == "" {
@@ -1923,6 +2029,29 @@ func emptyToNil(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+func codexApprovalPolicyValue(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "default":
+		return defaultCodexApprovalPolicy
+	case "untrusted", "on-request", "on-failure", "never":
+		return strings.ToLower(strings.TrimSpace(v))
+	default:
+		return defaultCodexApprovalPolicy
+	}
+}
+
+func codexEffortToNil(v string) *string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "default":
+		return nil
+	case "minimal", "low", "medium", "high", "xhigh":
+		effort := strings.ToLower(strings.TrimSpace(v))
+		return &effort
+	default:
+		return nil
+	}
 }
 
 func positiveToNil(v int) *int {
@@ -2082,6 +2211,8 @@ type turnStartParams struct {
 	Input             []userInput                 `json:"input"`
 	Cwd               *string                     `json:"cwd,omitempty"`
 	Model             *string                     `json:"model,omitempty"`
+	ApprovalPolicy    string                      `json:"approvalPolicy,omitempty"`
+	Effort            *string                     `json:"effort,omitempty"`
 	CollaborationMode *collaborationModeSelection `json:"collaborationMode,omitempty"`
 }
 
@@ -2158,6 +2289,100 @@ type codexCollaborationMode struct {
 type collaborationModeSelection struct {
 	Mode     string         `json:"mode"`
 	Settings map[string]any `json:"settings,omitempty"`
+}
+
+type codexQuestionRequest struct {
+	ThreadID  string                `json:"threadId"`
+	Questions []codexQuestionPrompt `json:"questions"`
+}
+
+type codexQuestionPrompt struct {
+	ID       string                `json:"id"`
+	Header   string                `json:"header"`
+	Question string                `json:"question"`
+	Options  []codexQuestionOption `json:"options"`
+	Multiple bool                  `json:"multiple,omitempty"`
+	Custom   bool                  `json:"custom,omitempty"`
+}
+
+type codexQuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	IsOther     bool   `json:"isOther,omitempty"`
+}
+
+func decodeCodexQuestionRequest(raw json.RawMessage) (codexQuestionRequest, error) {
+	var req codexQuestionRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return codexQuestionRequest{}, err
+	}
+	for i := range req.Questions {
+		q := &req.Questions[i]
+		if strings.TrimSpace(q.ID) == "" {
+			q.ID = fmt.Sprintf("question_%d", i)
+		}
+		if strings.TrimSpace(q.Header) == "" {
+			q.Header = fmt.Sprintf("Question %d", i+1)
+		}
+		if q.Custom {
+			continue
+		}
+		for _, option := range q.Options {
+			if option.IsOther {
+				q.Custom = true
+				break
+			}
+		}
+	}
+	return req, nil
+}
+
+func (r codexQuestionRequest) emptyAnswers() map[string]any {
+	answers := make(map[string]any, len(r.Questions))
+	for _, q := range r.Questions {
+		if q.Multiple {
+			answers[q.ID] = []string{}
+		} else {
+			answers[q.ID] = ""
+		}
+	}
+	return answers
+}
+
+func (r codexQuestionRequest) answerMap(answerLists [][]string) map[string]any {
+	answers := r.emptyAnswers()
+	for i, q := range r.Questions {
+		if i >= len(answerLists) {
+			continue
+		}
+		list := compactAnswers(answerLists[i])
+		if q.Multiple {
+			answers[q.ID] = list
+			continue
+		}
+		switch len(list) {
+		case 0:
+			answers[q.ID] = ""
+		case 1:
+			answers[q.ID] = list[0]
+		default:
+			answers[q.ID] = list
+		}
+	}
+	return answers
+}
+
+func compactAnswers(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 type codexApp struct {
