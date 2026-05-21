@@ -28,6 +28,7 @@ import {
   markOnboardingSeen,
   subscribeToOnboardingSeen,
 } from "@/src/lib/onboarding";
+import { ForceUpdateBottomSheet } from "@/src/components/ForceUpdateBottomSheet";
 
 function StartupInit() {
   useEffect(() => {
@@ -141,9 +142,11 @@ function RootLayoutInner() {
     serverUrlHydrated,
   ]);
 
-  if (!pairingHydrated || !serverUrlHydrated || !onboardingHydrated) {
-    return (
-      <PaperProvider theme={currentTheme}>
+  const isHydrated = pairingHydrated && serverUrlHydrated && onboardingHydrated;
+
+  return (
+    <PaperProvider theme={currentTheme}>
+      {!isHydrated ? (
         <View
           style={{
             flex: 1,
@@ -154,14 +157,7 @@ function RootLayoutInner() {
         >
           <ActivityIndicator />
         </View>
-        <StatusBar style="auto" />
-      </PaperProvider>
-    );
-  }
-
-  return (
-    <PaperProvider theme={currentTheme}>
-      {isPaired ? (
+      ) : isPaired ? (
         <Stack>
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen
@@ -195,6 +191,8 @@ function RootLayoutInner() {
           />
         </Stack>
       )}
+      {/* ForceUpdateBottomSheet renders as an absolute overlay above all screens */}
+      <ForceUpdateBottomSheet />
       <StatusBar style="auto" />
     </PaperProvider>
   );
