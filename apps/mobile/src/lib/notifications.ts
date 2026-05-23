@@ -32,6 +32,7 @@ function getSessionRouteFromNotificationData(data: unknown): {
   projectId: string;
   sessionId: string;
   agentProviderId?: string;
+  notificationType?: string;
 } | null {
   if (!data || typeof data !== "object") {
     return null;
@@ -41,6 +42,7 @@ function getSessionRouteFromNotificationData(data: unknown): {
   const projectId = candidate.projectId;
   const sessionId = candidate.sessionId;
   const agentProviderId = candidate.agentProviderId;
+  const notificationType = candidate.type;
 
   if (typeof projectId !== "string" || typeof sessionId !== "string") {
     return null;
@@ -58,6 +60,8 @@ function getSessionRouteFromNotificationData(data: unknown): {
           typeof agentProviderId === "string" && agentProviderId
             ? agentProviderId
             : undefined,
+        notificationType:
+          typeof notificationType === "string" ? notificationType : undefined,
       };
     default:
       return null;
@@ -67,9 +71,7 @@ function getSessionRouteFromNotificationData(data: unknown): {
 function handleNotificationNavigation(
   response: Notifications.NotificationResponse,
 ): boolean {
-  if (
-    response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER
-  ) {
+  if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
     return false;
   }
 
@@ -127,11 +129,17 @@ export function initializeNotifications(): void {
   });
 
   processLastNotificationNavigationResponse().catch((err) => {
-    console.error("Failed to process last notification navigation response:", err);
+    console.error(
+      "Failed to process last notification navigation response:",
+      err,
+    );
   });
 
   processLastPermissionNotificationResponse().catch((err) => {
-    console.error("Failed to process last permission notification response:", err);
+    console.error(
+      "Failed to process last permission notification response:",
+      err,
+    );
   });
 
   AppState.addEventListener("change", (state: AppStateStatus) => {

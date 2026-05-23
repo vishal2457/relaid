@@ -56,6 +56,46 @@ function parseStoredFavoriteProjectIds(raw: string | null): string[] {
   }
 }
 
+function getPersistentProjectKey(
+  project: Pick<Project, "id" | "folder" | "localServerId">,
+): string {
+  const normalizedFolder = project.folder.trim().toLowerCase();
+
+  if (normalizedFolder) {
+    return [project.localServerId ?? "", normalizedFolder].join("::");
+  }
+
+  return project.id;
+}
+
+function resolveFavoriteProjectIds(
+  storedFavoriteProjectIds: string[],
+  projects?: Project[],
+): string[] {
+  if (!projects || projects.length === 0) {
+    return storedFavoriteProjectIds;
+  }
+
+  const favoriteIds = new Set<string>();
+  const projectsById = new Map(
+    projects.map((project) => [project.id, project]),
+  );
+  const projectsByPersistentKey = new Map(
+    projects.map((project) => [getPersistentProjectKey(project), project]),
+  );
+
+  for (const storedValue of storedFavoriteProjectIds) {
+    const matchedProject =
+      projectsById.get(storedValue) ?? projectsByPersistentKey.get(storedValue);
+
+    if (matchedProject) {
+      favoriteIds.add(matchedProject.id);
+    }
+  }
+
+  return Array.from(favoriteIds);
+}
+
 function toStoredModelPreference(model: ActiveModel): StoredModelPreference {
   return {
     id: model.id,
@@ -334,6 +374,7 @@ function getBranchSwitchWarningMessage(
 
 export type HydrationDeps = {
   activeAgentProviderIdOverride?: string;
+  skipActiveStreamHydration?: boolean;
   isMountedRef: React.MutableRefObject<boolean>;
   allowSessionChangeRecoveryRef: React.MutableRefObject<boolean>;
   activeSessionIdRef: React.MutableRefObject<string | null>;
@@ -443,31 +484,35 @@ export function useChatSession(deps: HydrationDeps) {
 
     void (async () => {
       try {
-        const activeStream = await getActiveSessionStream();
-        if (cancelled || !deps.isMountedRef.current) {
-          return;
-        }
-
-        if (activeStream && projects) {
-          const streamingProject = projects.find(
-            (project) => project.id === activeStream.projectId,
-          );
-          if (streamingProject) {
-            deps.allowSessionChangeRecoveryRef.current = true;
-            deps.activeSessionIdRef.current = activeStream.sessionId;
-            const newPending = new Map<string, string>();
-            newPending.set(activeStream.sessionId, activeStream.requestId);
-            deps.pendingRequestIdsRef.current = newPending;
-            setActiveProject(streamingProject);
-            deps.setActiveSessionAgentProviderId?.(
-              activeStream.agentProviderId,
-            );
-            deps.setActiveSessionId(activeStream.sessionId);
-            deps.setPendingRequestIds(newPending);
-            deps.setOptimisticMessage(null);
-            deps.resetStreamingContent();
+        if (!deps.skipActiveStreamHydration) {
+          const activeStream = await getActiveSessionStream();
+          if (cancelled || !deps.isMountedRef.current) {
             return;
           }
+
+          if (activeStream && projects) {
+            const streamingProject = projects.find(
+              (project) => project.id === activeStream.projectId,
+            );
+            if (streamingProject) {
+              deps.allowSessionChangeRecoveryRef.current = true;
+              deps.activeSessionIdRef.current = activeStream.sessionId;
+              const newPending = new Map<string, string>();
+              newPending.set(activeStream.sessionId, activeStream.requestId);
+              deps.pendingRequestIdsRef.current = newPending;
+              setActiveProject(streamingProject);
+              deps.setActiveSessionAgentProviderId?.(
+                activeStream.agentProviderId,
+              );
+              deps.setActiveSessionId(activeStream.sessionId);
+              deps.setPendingRequestIds(newPending);
+              deps.setOptimisticMessage(null);
+              deps.resetStreamingContent();
+              return;
+            }
+          }
+        } else if (cancelled || !deps.isMountedRef.current) {
+          return;
         }
 
         const [savedId, rawFavoriteProjectIds] = await Promise.all([
@@ -478,8 +523,10 @@ export function useChatSession(deps: HydrationDeps) {
           return;
         }
 
-        const storedFavoriteProjectIds =
-          parseStoredFavoriteProjectIds(rawFavoriteProjectIds);
+        const storedFavoriteProjectIds = resolveFavoriteProjectIds(
+          parseStoredFavoriteProjectIds(rawFavoriteProjectIds),
+          projects,
+        );
         setFavoriteProjectIds(storedFavoriteProjectIds);
 
         if (savedId) {
@@ -525,11 +572,20 @@ export function useChatSession(deps: HydrationDeps) {
       return;
     }
 
+    const storedFavoriteProjectIds = Array.from(
+      new Set(
+        favoriteProjectIds.map((projectId) => {
+          const project = projects?.find((item) => item.id === projectId);
+          return project ? getPersistentProjectKey(project) : projectId;
+        }),
+      ),
+    );
+
     AsyncStorage.setItem(
       FAVORITE_PROJECT_IDS,
-      JSON.stringify(favoriteProjectIds),
+      JSON.stringify(storedFavoriteProjectIds),
     ).catch(() => {});
-  }, [favoriteProjectIds, hydrated]);
+  }, [favoriteProjectIds, hydrated, projects]);
 
   // Restore agent from storage on project/agents change
   React.useEffect(() => {

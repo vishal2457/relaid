@@ -64,6 +64,9 @@ import {
 } from "../services/session-runtime-store";
 
 const PERMISSION_NOTIFICATION_CATEGORY = "PERMISSION_REQUEST";
+const MAX_NOTIFICATION_TITLE_LENGTH = 80;
+const MAX_NOTIFICATION_BODY_LENGTH = 180;
+const NOTIFICATION_CONTEXT_TIMEOUT_MS = 1500;
 
 export interface SocketData {
   userId: string;
@@ -117,6 +120,163 @@ type SessionCreateResponse = {
   requestId: string;
   error?: string;
 };
+
+function normalizeNotificationText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized ? normalized : null;
+}
+
+function truncateNotificationText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function getRecordString(value: unknown, keys: string[]): string | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const normalized = normalizeNotificationText(record[key]);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function getLastMessagePreview(
+  messages: SessionPromptResponseEvent["messages"],
+): string | null {
+  if (!messages?.length) {
+    return null;
+  }
+
+  const lastAssistant = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  const message = lastAssistant ?? messages[messages.length - 1];
+
+  return (
+    normalizeNotificationText(message.visibleContent) ??
+    normalizeNotificationText(message.content)
+  );
+}
+
+function getSessionNotificationTitle(
+  payload: SessionPromptResponseEvent,
+  session?: SessionPayload | null,
+): string {
+  const title =
+    normalizeNotificationText(payload.sessionTitle) ??
+    getRecordString(session, ["title", "prompt"]);
+
+  return truncateNotificationText(
+    title ?? "Relaid",
+    MAX_NOTIFICATION_TITLE_LENGTH,
+  );
+}
+
+function getSessionNotificationBody(
+  payload: SessionPromptResponseEvent,
+  session?: SessionPayload | null,
+): string {
+  if (!payload.success) {
+    const error =
+      normalizeNotificationText(payload.error) ??
+      getRecordString(session, ["error"]);
+    return truncateNotificationText(
+      error ?? "Request failed",
+      MAX_NOTIFICATION_BODY_LENGTH,
+    );
+  }
+
+  const body =
+    normalizeNotificationText(payload.output) ??
+    getLastMessagePreview(payload.messages) ??
+    getRecordString(session, ["output"]);
+
+  return truncateNotificationText(
+    body ?? "Response ready",
+    MAX_NOTIFICATION_BODY_LENGTH,
+  );
+}
+
+async function fetchNotificationSessionContext(
+  userId: string,
+  serverId: string,
+  payload: SessionPromptResponseEvent,
+): Promise<SessionPayload | null> {
+  try {
+    const result = await requestConnectedServer<SessionResponse>(
+      userId,
+      "session_get_request",
+      "session_get_response",
+      {
+        agentProviderId: payload.agentProviderId,
+        sessionId: payload.sessionId,
+      },
+      serverId,
+    );
+
+    return result.response.session ?? null;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.warn("Failed to load session context for push notification", {
+      userId,
+      serverId,
+      sessionId: payload.sessionId,
+      error: errMsg,
+    });
+    return null;
+  }
+}
+
+function waitForNotificationContextTimeout(): Promise<null> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(null), NOTIFICATION_CONTEXT_TIMEOUT_MS);
+  });
+}
+
+async function sendSessionPromptPushNotification(
+  userId: string,
+  serverId: string,
+  payload: SessionPromptResponseEvent,
+): Promise<void> {
+  const hasPayloadNotificationText =
+    Boolean(normalizeNotificationText(payload.sessionTitle)) &&
+    Boolean(
+      payload.success
+        ? (normalizeNotificationText(payload.output) ??
+            getLastMessagePreview(payload.messages))
+        : normalizeNotificationText(payload.error),
+    );
+  const session = hasPayloadNotificationText
+    ? null
+    : await Promise.race([
+        fetchNotificationSessionContext(userId, serverId, payload),
+        waitForNotificationContextTimeout(),
+      ]);
+  const title = getSessionNotificationTitle(payload, session);
+  const body = getSessionNotificationBody(payload, session);
+
+  await sendPushNotification(userId, title, body, {
+    type: "request_completed",
+    agentProviderId: payload.agentProviderId,
+    sessionId: payload.sessionId,
+    projectId: payload.projectId,
+    success: payload.success,
+  });
+}
 
 type SessionUpdateResponse = {
   session: SessionPayload | null;
@@ -341,24 +501,11 @@ async function handleLocalServerConnection(
       if (eventName === "session_prompt_response") {
         const responsePayload = payload as SessionPromptResponseEvent;
         markSessionPromptResponse(userId, responsePayload);
-        const title = "Relaid";
-        if (responsePayload.success) {
-          void sendPushNotification(userId, title, "Response ready", {
-            type: "request_completed",
-            agentProviderId: responsePayload.agentProviderId,
-            sessionId: responsePayload.sessionId,
-            projectId: responsePayload.projectId,
-            success: responsePayload.success,
-          });
-        } else if (!responsePayload.success) {
-          void sendPushNotification(userId, title, "Request failed", {
-            type: "request_completed",
-            agentProviderId: responsePayload.agentProviderId,
-            sessionId: responsePayload.sessionId,
-            projectId: responsePayload.projectId,
-            success: responsePayload.success,
-          });
-        }
+        void sendSessionPromptPushNotification(
+          userId,
+          serverId,
+          responsePayload,
+        );
       }
     });
   };

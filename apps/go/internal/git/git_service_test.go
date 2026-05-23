@@ -59,6 +59,7 @@ func TestServiceGetFileStatusListsIncludesNewFiles(t *testing.T) {
 	gitTest(t, repo, "commit", "-m", "initial")
 
 	writeFile(t, repo, "new-untracked.txt", "brand new\n")
+	writeFile(t, repo, "nested/new-untracked.txt", "nested brand new\n")
 	writeFile(t, repo, "new-staged.txt", "ready to stage\n")
 
 	svc := NewService(repo)
@@ -72,7 +73,35 @@ func TestServiceGetFileStatusListsIncludesNewFiles(t *testing.T) {
 	}
 
 	assertHasStatus(t, result.Data.Unstaged, "new-untracked.txt", "untracked")
+	assertHasStatus(t, result.Data.Unstaged, "nested/new-untracked.txt", "untracked")
+	assertMissingStatus(t, result.Data.Unstaged, "nested/")
 	assertHasStatus(t, result.Data.Staged, "new-staged.txt", "added")
+}
+
+func TestServiceDiffFileIncludesNestedUntrackedFiles(t *testing.T) {
+	repo := newTestRepo(t)
+	writeFile(t, repo, "tracked.txt", "hello\nworld\n")
+	gitTest(t, repo, "add", "tracked.txt")
+	gitTest(t, repo, "commit", "-m", "initial")
+
+	writeFile(t, repo, "nested/new-untracked.txt", "nested brand new\n")
+
+	svc := NewService(repo)
+	result := svc.DiffFile("")
+	if !result.Success {
+		t.Fatalf("expected diff to succeed: %s", result.Error)
+	}
+
+	diff := findFileDiff(result.Data, "nested/new-untracked.txt")
+	if diff == nil {
+		t.Fatalf("expected diff for nested untracked file, got %+v", result.Data)
+	}
+	if len(diff.Hunks) == 0 || len(diff.Hunks[0].Lines) == 0 {
+		t.Fatalf("expected nested untracked file diff to include added lines, got %+v", diff)
+	}
+	if diff.Hunks[0].Lines[0].Type != "add" || diff.Hunks[0].Lines[0].Content != "nested brand new" {
+		t.Fatalf("unexpected first diff line: %+v", diff.Hunks[0].Lines[0])
+	}
 }
 
 func TestServiceCommitCreatesCommitAndReturnsHash(t *testing.T) {
@@ -160,6 +189,15 @@ func TestServiceFetchHandlesRemoteUpdatesAndAlreadyUpToDate(t *testing.T) {
 	if !second.Success {
 		t.Fatalf("expected second fetch to succeed: %s", second.Error)
 	}
+}
+
+func findFileDiff(files []FileDiff, path string) *FileDiff {
+	for i := range files {
+		if files[i].FileName == path {
+			return &files[i]
+		}
+	}
+	return nil
 }
 
 func newTestRepo(t *testing.T) string {

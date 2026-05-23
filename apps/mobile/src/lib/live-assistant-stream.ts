@@ -21,6 +21,7 @@ type LiveAssistantState = {
 
 type LiveAssistantAction =
   | { type: "reset" }
+  | { type: "chunks"; chunks: SessionStreamChunkEvent[] }
   | { type: "text"; chunk: string }
   | { type: "status"; statusText: string }
   | { type: "complete" }
@@ -45,6 +46,12 @@ function reducer(
   switch (action.type) {
     case "reset":
       return initialState;
+    case "chunks": {
+      return action.chunks.reduce((next, chunk) => {
+        const chunkAction = getActionForStreamChunk(chunk);
+        return chunkAction ? reducer(next, chunkAction) : next;
+      }, state);
+    }
     case "text":
       if (!action.chunk) {
         return state;
@@ -165,47 +172,54 @@ function getActivityPartId(
   return payload.partId ?? payload.messageId ?? activity.id;
 }
 
+function getActionForStreamChunk(
+  payload: SessionStreamChunkEvent,
+): LiveAssistantAction | null {
+  switch (payload.type) {
+    case "text":
+      return { type: "text", chunk: payload.chunk };
+    case "reasoning":
+      return {
+        type: "reasoning",
+        partId: getReasoningPartId(payload),
+        content: payload.chunk,
+        append: !payload.partId,
+      };
+    case "tool":
+    case "step": {
+      const activity = adaptStreamActivity(payload.type, payload.chunk);
+      if (!activity) {
+        return null;
+      }
+
+      return {
+        type: "activity",
+        partId: getActivityPartId(payload, activity),
+        activity,
+      };
+    }
+    case "status":
+      return { type: "status", statusText: payload.chunk };
+    case "complete":
+      return { type: "complete" };
+  }
+}
+
 export function useLiveAssistantStream() {
   const [state, dispatch] = React.useReducer(reducer, initialState);
 
-  const applyChunk = React.useCallback(
-    (payload: SessionStreamChunkEvent) => {
-      switch (payload.type) {
-        case "text":
-          dispatch({ type: "text", chunk: payload.chunk });
-          return;
-        case "reasoning":
-          dispatch({
-            type: "reasoning",
-            partId: getReasoningPartId(payload),
-            content: payload.chunk,
-            append: !payload.partId,
-          });
-          return;
-        case "tool":
-        case "step": {
-          const activity = adaptStreamActivity(payload.type, payload.chunk);
-          if (!activity) {
-            return;
-          }
+  const applyChunk = React.useCallback((payload: SessionStreamChunkEvent) => {
+    const action = getActionForStreamChunk(payload);
+    if (action) {
+      dispatch(action);
+    }
+  }, []);
 
-          dispatch({
-            type: "activity",
-            partId: getActivityPartId(payload, activity),
-            activity,
-          });
-          return;
-        }
-        case "status":
-          dispatch({ type: "status", statusText: payload.chunk });
-          return;
-        case "complete":
-          dispatch({ type: "complete" });
-          return;
-      }
-    },
-    [],
-  );
+  const applyChunks = React.useCallback((chunks: SessionStreamChunkEvent[]) => {
+    if (chunks.length > 0) {
+      dispatch({ type: "chunks", chunks });
+    }
+  }, []);
 
   const reset = React.useCallback(() => {
     dispatch({ type: "reset" });
@@ -262,6 +276,7 @@ export function useLiveAssistantStream() {
       Boolean(thinkingContent) ||
       activities.length > 0,
     applyChunk,
+    applyChunks,
     flush,
     reset,
   };

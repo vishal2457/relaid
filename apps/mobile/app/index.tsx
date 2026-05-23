@@ -108,6 +108,12 @@ type ConnectionState = "connected" | "disconnected" | "connecting" | "error";
 
 type PermissionRequestEvent = PermissionRequest;
 type QuestionRequestEvent = QuestionRequest;
+type NotificationTarget = {
+  projectId: string;
+  sessionId: string;
+  agentProviderId?: string;
+  type?: string;
+};
 
 function upsertRuntime(
   runtimes: SessionRuntimeMap,
@@ -150,6 +156,31 @@ function getSingleSearchParam(
   return typeof value === "string" && value ? value : undefined;
 }
 
+function normalizeNotificationText(value?: string | null): string | null {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  return normalized ? normalized : null;
+}
+
+function truncateNotificationText(value: string, maxLength = 140): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function getResponseNotificationBody(
+  payload: SessionPromptResponseEvent,
+  lastMessage?: SessionMessage,
+): string {
+  const preview =
+    normalizeNotificationText(payload.output) ??
+    normalizeNotificationText(lastMessage?.visibleContent) ??
+    normalizeNotificationText(lastMessage?.content);
+
+  return truncateNotificationText(preview ?? "Response ready");
+}
+
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -158,12 +189,37 @@ export default function ChatScreen() {
     projectId?: string | string[];
     sessionId?: string | string[];
     agentProviderId?: string | string[];
+    notificationType?: string | string[];
   }>();
   const notificationProjectId = getSingleSearchParam(routeParams.projectId);
   const notificationSessionId = getSingleSearchParam(routeParams.sessionId);
   const notificationAgentProviderId = getSingleSearchParam(
     routeParams.agentProviderId,
   );
+  const notificationType = getSingleSearchParam(routeParams.notificationType);
+  const notificationTarget = React.useMemo<NotificationTarget | null>(() => {
+    if (!notificationProjectId || !notificationSessionId) {
+      return null;
+    }
+
+    return {
+      projectId: notificationProjectId,
+      sessionId: notificationSessionId,
+      agentProviderId: notificationAgentProviderId,
+      type: notificationType,
+    };
+  }, [
+    notificationAgentProviderId,
+    notificationProjectId,
+    notificationSessionId,
+    notificationType,
+  ]);
+  const notificationTargetRef = React.useRef<NotificationTarget | null>(
+    notificationTarget,
+  );
+  notificationTargetRef.current = notificationTarget;
+  const isCompletionNotificationTarget =
+    notificationTarget?.type === "request_completed";
 
   // --- Extracted hooks ---
   const keyboardHeight = useKeyboardHeight();
@@ -190,6 +246,7 @@ export default function ChatScreen() {
     phase: streamingPhase,
     revision: streamingRevision,
     applyChunk: applyStreamingChunk,
+    applyChunks: applyStreamingChunks,
     flush: flushStreamingContent,
     reset: resetStreamingContent,
   } = useLiveAssistantStream();
@@ -239,6 +296,7 @@ export default function ChatScreen() {
 
   const session = useChatSession({
     activeAgentProviderIdOverride: activeSessionAgentProviderId,
+    skipActiveStreamHydration: isCompletionNotificationTarget,
     isMountedRef: React.useRef(true),
     allowSessionChangeRecoveryRef,
     activeSessionIdRef,
@@ -445,6 +503,35 @@ export default function ChatScreen() {
     [persistRuntimeMap],
   );
 
+  const removeRuntimeStateForSession = React.useCallback(
+    (sessionId: string, agentProviderId?: string) => {
+      const next = { ...runtimeBySessionKeyRef.current };
+      let changed = false;
+
+      for (const [sessionKey, runtime] of Object.entries(next)) {
+        if (runtime.sessionId !== sessionId) {
+          continue;
+        }
+
+        if (
+          agentProviderId &&
+          makeSessionKey(sessionId, runtime.agentProviderId) !==
+            makeSessionKey(sessionId, agentProviderId)
+        ) {
+          continue;
+        }
+
+        delete next[sessionKey];
+        changed = true;
+      }
+
+      if (changed) {
+        persistRuntimeMap(next);
+      }
+    },
+    [persistRuntimeMap],
+  );
+
   const hasScrolledToBottom = React.useRef(false);
 
   React.useEffect(() => {
@@ -471,6 +558,27 @@ export default function ChatScreen() {
     const targetAgentProviderId =
       notificationSession?.agentProviderId ?? notificationAgentProviderId;
 
+    if (notificationType === "request_completed") {
+      removeRuntimeStateForSession(
+        notificationSessionId,
+        targetAgentProviderId,
+      );
+      setHasVisibleRuntimeStream(false);
+      resetStreamingContent();
+      void queryClient.invalidateQueries({
+        queryKey: messageKeys.list(
+          notificationSessionId,
+          targetAgentProviderId,
+        ),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: sessionsKeys.detail(
+          notificationSessionId,
+          targetAgentProviderId,
+        ),
+      });
+    }
+
     activeSessionIdRef.current = notificationSessionId;
     setActiveSessionId(notificationSessionId);
     syncSessionAgentProvider(targetAgentProviderId);
@@ -483,6 +591,9 @@ export default function ChatScreen() {
     notificationProjectId,
     notificationSession,
     notificationSessionId,
+    notificationType,
+    removeRuntimeStateForSession,
+    resetStreamingContent,
     sessionActiveProjectRef,
     sessionProjects,
     sessionProjectsRef,
@@ -639,16 +750,21 @@ export default function ChatScreen() {
       }
 
       upsertRuntimeState(runtimeDetail);
-      for (const chunk of runtimeDetail.bufferedChunks) {
-        applyStreamingChunk(chunk);
-      }
+      applyStreamingChunks(runtimeDetail.bufferedChunks);
       setHasVisibleRuntimeStream(runtimeDetail.bufferedChunks.length > 0);
       return runtimeDetail;
     },
-    [applyStreamingChunk, resetStreamingContent, upsertRuntimeState],
+    [applyStreamingChunks, resetStreamingContent, upsertRuntimeState],
   );
 
   React.useEffect(() => {
+    if (notificationTargetRef.current?.type === "request_completed") {
+      restoredRuntimeSignatureRef.current = null;
+      setHasVisibleRuntimeStream(false);
+      resetStreamingContent();
+      return;
+    }
+
     if (!selectedRuntime || !isActiveRuntimePhase(selectedRuntime.phase)) {
       restoredRuntimeSignatureRef.current = null;
       setHasVisibleRuntimeStream(false);
@@ -669,13 +785,40 @@ export default function ChatScreen() {
   }, [resetStreamingContent, restoreSelectedRuntimeStream, selectedRuntime]);
 
   const recoverPendingStream = React.useCallback(async () => {
+    const notificationTarget = notificationTargetRef.current;
     const persisted = await getActiveSessionRuntimeMap();
     const serverRuntimes = await fetchSessionRuntimes().catch(() => []);
     const merged: SessionRuntimeMap = { ...persisted };
     for (const runtime of serverRuntimes) {
       merged[runtime.sessionKey] = runtime;
     }
+
+    if (notificationTarget?.type === "request_completed") {
+      for (const [sessionKey, runtime] of Object.entries(merged)) {
+        if (runtime.sessionId !== notificationTarget.sessionId) {
+          continue;
+        }
+
+        if (
+          notificationTarget.agentProviderId &&
+          makeSessionKey(runtime.sessionId, runtime.agentProviderId) !==
+            makeSessionKey(
+              notificationTarget.sessionId,
+              notificationTarget.agentProviderId,
+            )
+        ) {
+          continue;
+        }
+
+        delete merged[sessionKey];
+      }
+    }
+
     persistRuntimeMap(merged);
+
+    if (notificationTarget?.type === "request_completed") {
+      return;
+    }
 
     const sessionId = activeSessionIdRef.current;
     if (!sessionId) {
@@ -757,8 +900,6 @@ export default function ChatScreen() {
             );
             break;
           case "session_stream_chunk":
-            console.log("handle stream", data);
-
             handleStreamChunkRef.current(
               data as unknown as SessionStreamChunkEvent,
             );
@@ -774,8 +915,6 @@ export default function ChatScreen() {
             );
             break;
           case "permission_request":
-            console.log(data, "permssion request");
-
             handlePermissionRequestRef.current(
               data as unknown as PermissionRequestEvent,
             );
@@ -938,13 +1077,12 @@ export default function ChatScreen() {
         showError(payload.error || "Failed to send message");
       } else if (
         !isAppInForeground() &&
-        payload.messages &&
-        payload.messages.length > 0
+        (payload.messages?.length || normalizeNotificationText(payload.output))
       ) {
-        const lastMessage = payload.messages[payload.messages.length - 1];
+        const lastMessage = payload.messages?.[payload.messages.length - 1];
         void showNewMessageNotification(
-          "New Message",
-          lastMessage.content.slice(0, 100),
+          normalizeNotificationText(payload.sessionTitle) ?? "New Message",
+          getResponseNotificationBody(payload, lastMessage),
           {
             projectId: payload.projectId,
             sessionId: responseSessionId,

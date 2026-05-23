@@ -246,7 +246,7 @@ func (s *Service) DeleteBranch(name string, force bool) Result[string] {
 // =====================
 
 func (s *Service) GetFileStatusLists() Result[StatusLists] {
-	out, err := runGitWithTimeout(s.cwd, statusGitTimeout, "status", "--porcelain=v1", "-b")
+	out, err := runGitWithTimeout(s.cwd, statusGitTimeout, "status", "--porcelain=v1", "-b", "--untracked-files=all")
 	if err != nil {
 		s.handleError("getFileStatusLists", err)
 		return fail[StatusLists](err.Error())

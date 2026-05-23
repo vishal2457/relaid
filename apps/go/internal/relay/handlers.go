@@ -980,6 +980,7 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 			Success:         false,
 			ExitCode:        -1,
 			Duration:        0,
+			Error:           err.Error(),
 		})
 		return
 	}
@@ -1003,6 +1004,7 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 			Success:         false,
 			ExitCode:        -1,
 			Duration:        0,
+			Error:           err.Error(),
 		})
 		return
 	}
@@ -1076,17 +1078,21 @@ func (h *Handler) handleSessionPromptRequest(args []json.RawMessage) {
 		response.Success = false
 		response.ExitCode = -1
 		response.Duration = 0
+		response.Error = err.Error()
 		responseInner.Error = err.Error()
 	} else {
 		response.Success = result.Success
 		response.ExitCode = result.ExitCode
 		response.Duration = int(result.Duration.Milliseconds())
 		response.SessionID = result.SessionID
+		response.Output = result.Output
+		response.Error = result.Error
 		responseInner.Output = result.Output
 		responseInner.Error = result.Error
 	}
 
 	if session, sessErr := provider.Sessions().Get(context.Background(), response.SessionID); sessErr == nil && session != nil {
+		response.SessionTitle = session.Title
 		responseInner.SessionTitle = session.Title
 		sealedResponse, sealErr := h.encryptEnvelope(target, responseInner)
 		if sealErr == nil {

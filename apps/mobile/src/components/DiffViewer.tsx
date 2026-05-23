@@ -102,6 +102,7 @@ interface DiffViewerProps {
 export default function DiffViewer({ projectId, filePath }: DiffViewerProps) {
   const theme = useTheme();
   const isDark = theme.dark;
+  const selectedFilePath = filePath?.trim();
   const { data, isLoading, error } = useFileDiff(projectId);
 
   if (isLoading) {
@@ -144,8 +145,9 @@ export default function DiffViewer({ projectId, filePath }: DiffViewerProps) {
     >
       {data.files.map((file, i) => {
         const isSelectedFile =
-          Boolean(filePath) &&
-          (file.fileName === filePath || file.fileName.endsWith(`/${filePath}`));
+          Boolean(selectedFilePath) &&
+          (file.fileName === selectedFilePath ||
+            file.fileName.endsWith(`/${selectedFilePath}`));
 
         return (
           <FileDiffItem

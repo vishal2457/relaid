@@ -16,6 +16,7 @@ export type SessionPromptResponseEvent = {
   success: boolean;
   output: string;
   error?: string;
+  sessionTitle?: string;
   exitCode: number;
   duration: number;
   messages?: SessionMessage[];

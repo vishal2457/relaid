@@ -362,6 +362,9 @@ type SessionPromptResponsePayload struct {
 	Success         bool               `json:"success"`
 	ExitCode        int                `json:"exitCode"`
 	Duration        int                `json:"duration"`
+	SessionTitle    string             `json:"sessionTitle,omitempty"`
+	Output          string             `json:"output,omitempty"`
+	Error           string             `json:"error,omitempty"`
 	SealedPayload   *EncryptedEnvelope `json:"sealedPayload,omitempty"`
 	Messages        []MessagePayload   `json:"messages,omitempty"`
 }
