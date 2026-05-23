@@ -14,9 +14,7 @@ import {
   // startGithubOAuth,
   // type GithubSession,
 } from "@/src/lib/api/github";
-import {
-  useConnectedLocalServers,
-} from "@/src/lib/api/local-servers";
+import { useConnectedLocalServers } from "@/src/lib/api/local-servers";
 import { disconnectSseClient } from "@/src/lib/sse";
 import Constants from "expo-constants";
 import { router } from "expo-router";
@@ -28,7 +26,7 @@ import {
   ScrollView,
   StyleSheet,
   TouchableWithoutFeedback,
-  View
+  View,
 } from "react-native";
 import {
   Button,
@@ -369,19 +367,22 @@ export default function SettingsScreen() {
                 return (
                   <View
                     key={server.id}
-                    style={[
-                      styles.connectedServerItem,
-                      { borderColor },
-                    ]}
+                    style={[styles.connectedServerItem, { borderColor }]}
                   >
-                    <Text variant="bodyMedium" style={styles.connectedServerName}>
+                    <Text
+                      variant="bodyMedium"
+                      style={styles.connectedServerName}
+                    >
                       {server.name}
                     </Text>
                     <Text variant="bodySmall" style={styles.settingDescription}>
                       Server ID: {server.id}
                     </Text>
                     {lastConnected ? (
-                      <Text variant="bodySmall" style={styles.settingDescription}>
+                      <Text
+                        variant="bodySmall"
+                        style={styles.settingDescription}
+                      >
                         Last connected: {lastConnected}
                       </Text>
                     ) : null}
@@ -438,9 +439,6 @@ export default function SettingsScreen() {
           value={urlInput}
           onChangeText={setUrlInput}
           placeholder="https://relaid.derived.dev"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
           style={styles.input}
           outlineStyle={styles.inputOutline}
         />
