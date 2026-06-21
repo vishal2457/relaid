@@ -2,13 +2,14 @@ import { Router } from "express";
 import { z } from "zod";
 import type { ClaudeAgent } from "../../agents/claude-agent.js";
 import type { CodexAgent } from "../../agents/codex-agent.js";
+import type { OpencodeAgent } from "../../agents/opencode-agent.js";
 import type { AgentRunInput, PermissionResponse } from "../../agents/types.js";
 import { broadcast } from "../sse-bus.js";
 
 const runSchema = z.object({
   requestId: z.string().min(1),
   cwd: z.string().min(1),
-  provider: z.enum(["claude", "codex"]),
+  provider: z.enum(["claude", "codex", "opencode"]),
   sessionId: z.string().optional(),
   prompt: z.string().min(1),
   systemPrompt: z.string().optional(),
@@ -20,7 +21,7 @@ const runSchema = z.object({
 
 const abortSchema = z.object({
   sessionId: z.string().min(1),
-  provider: z.enum(["claude", "codex"]),
+  provider: z.enum(["claude", "codex", "opencode"]),
 });
 
 const permissionSchema = z.object({
@@ -29,7 +30,11 @@ const permissionSchema = z.object({
   message: z.string().optional(),
 });
 
-export function createApiRouter(claude: ClaudeAgent, codex: CodexAgent): Router {
+export function createApiRouter(
+  claude: ClaudeAgent,
+  codex: CodexAgent,
+  opencode: OpencodeAgent,
+): Router {
   const router = Router();
 
   router.post("/run", async (req, res) => {
@@ -45,8 +50,11 @@ export function createApiRouter(claude: ClaudeAgent, codex: CodexAgent): Router 
       if (input.provider === "claude") {
         const result = await claude.run(input, broadcast);
         res.json(result);
-      } else {
+      } else if (input.provider === "codex") {
         const result = await codex.run(input, broadcast);
+        res.json(result);
+      } else {
+        const result = await opencode.run(input, broadcast);
         res.json(result);
       }
     } catch (err) {
@@ -63,9 +71,14 @@ export function createApiRouter(claude: ClaudeAgent, codex: CodexAgent): Router 
     }
 
     const { sessionId, provider } = parsed.data;
-    const ok = provider === "claude"
-      ? await claude.abort(sessionId)
-      : codex.abort(sessionId);
+    let ok: boolean;
+    if (provider === "claude") {
+      ok = await claude.abort(sessionId);
+    } else if (provider === "codex") {
+      ok = codex.abort(sessionId);
+    } else {
+      ok = opencode.abort(sessionId);
+    }
 
     res.json({ aborted: ok });
   });
@@ -93,7 +106,12 @@ export function createApiRouter(claude: ClaudeAgent, codex: CodexAgent): Router 
       provider: "codex" as const,
       status: "running" as const,
     }));
-    res.json({ sessions: [...claudeSessions, ...codexSessions] });
+    const opencodeSessions = opencode.getActiveSessionIds().map((id: string) => ({
+      id,
+      provider: "opencode" as const,
+      status: "running" as const,
+    }));
+    res.json({ sessions: [...claudeSessions, ...codexSessions, ...opencodeSessions] });
   });
 
   return router;

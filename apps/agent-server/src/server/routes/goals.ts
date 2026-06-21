@@ -18,7 +18,7 @@ const createGoalSchema = z.object({
   technicalInstructions: z.string().optional(),
   outOfScopeItems: z.array(z.string()).default([]),
   maxAgents: z.number().min(1).max(10).default(3),
-  provider: z.enum(["claude", "codex"]).default("claude"),
+  provider: z.enum(["claude", "codex", "opencode"]).default("claude"),
   maxRetries: z.number().min(0).max(10).default(3),
   autoRetry: z.boolean().default(true),
   autoMerge: z.boolean().default(false),
@@ -31,7 +31,7 @@ const updateStatusSchema = z.object({
 
 const executeSchema = z.object({
   maxAgents: z.number().min(1).max(10).default(3),
-  provider: z.enum(["claude", "codex"]).default("claude"),
+  provider: z.enum(["claude", "codex", "opencode"]).default("claude"),
   maxRetries: z.number().min(0).max(10).default(3),
   autoRetry: z.boolean().default(true),
   autoMerge: z.boolean().default(false),

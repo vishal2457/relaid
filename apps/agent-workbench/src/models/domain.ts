@@ -71,7 +71,7 @@ export interface Goal {
   outOfScopeItems: string[];
   ticketIds: string[];
   maxAgents: number;
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "opencode";
   maxRetries: number;
   autoRetry: boolean;
   autoMerge: boolean;
@@ -101,7 +101,7 @@ export interface AgentRun {
   id: string;
   goalId: string;
   ticketId: string;
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "opencode";
   status: "starting" | "running" | "waiting" | "completed" | "failed" | "aborted";
   worktreePath: string;
   branchName: string;

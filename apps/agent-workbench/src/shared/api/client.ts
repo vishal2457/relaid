@@ -14,6 +14,19 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface Harness {
+  id: string;
+  name: string;
+  label: string;
+  available: boolean;
+  version?: string;
+}
+
+// Harness API
+export async function listHarnesses(): Promise<{ harnesses: Harness[] }> {
+  return request("/harnesses");
+}
+
 // Project API
 export async function listProjects(): Promise<Project[]> {
   return request("/projects");
@@ -73,7 +86,7 @@ export async function updateTicketStatus(
 // Execution API
 export async function startExecution(goalId: string, config: {
   maxAgents: number;
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "opencode";
   maxRetries: number;
   autoRetry: boolean;
   autoMerge: boolean;

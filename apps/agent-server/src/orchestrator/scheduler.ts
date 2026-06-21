@@ -13,19 +13,27 @@ import {
 import type { SsePayload } from "../events/event-types.js";
 import type { ClaudeAgent } from "../agents/claude-agent.js";
 import type { CodexAgent } from "../agents/codex-agent.js";
+import type { OpencodeAgent } from "../agents/opencode-agent.js";
 import { broadcast } from "../server/sse-bus.js";
 
 let claudeAgent: ClaudeAgent | null = null;
 let codexAgent: CodexAgent | null = null;
+let opencodeAgent: OpencodeAgent | null = null;
 
-export function setAgentInstances(claude: ClaudeAgent, codex: CodexAgent): void {
+export function setAgentInstances(
+  claude: ClaudeAgent,
+  codex: CodexAgent,
+  opencode: OpencodeAgent,
+): void {
   claudeAgent = claude;
   codexAgent = codex;
+  opencodeAgent = opencode;
 }
 
-function getAgent(provider: "claude" | "codex"): ClaudeAgent | CodexAgent | null {
+function getAgent(provider: "claude" | "codex" | "opencode"): ClaudeAgent | CodexAgent | OpencodeAgent | null {
   if (provider === "claude") return claudeAgent;
-  return codexAgent;
+  if (provider === "codex") return codexAgent;
+  return opencodeAgent;
 }
 
 // Checks if all dependencies of a ticket are completed
@@ -211,13 +219,22 @@ async function executeTicket(goal: Goal, ticket: Ticket): Promise<void> {
         prompt,
         systemPrompt: buildSystemPrompt(goal, project),
       }, broadcastFn);
-    } else {
+    } else if (provider === "codex") {
       result = await (agent as CodexAgent).run({
         requestId: agentRun.id,
         cwd: wtPath,
         provider: "codex",
         sessionId: ticket.id,
         prompt,
+      }, broadcastFn);
+    } else {
+      // opencode
+      result = await (agent as OpencodeAgent).run({
+        requestId: agentRun.id,
+        cwd: wtPath,
+        provider: "opencode",
+        sessionId: ticket.id,
+        prompt: prompt + "\n\n" + buildSystemPrompt(goal, project),
       }, broadcastFn);
     }
 
