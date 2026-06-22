@@ -1,0 +1,6 @@
+{
+  "name": "AI Agent Ticket Desk",
+  "description": "Real-time dashboard showing the progress of tickets being worked on by AI agents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

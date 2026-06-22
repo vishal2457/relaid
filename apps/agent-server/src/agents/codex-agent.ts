@@ -4,7 +4,7 @@ import type { SsePayload } from "../events/event-types.js";
 import type { AgentRunInput, AgentRunResult } from "./types.js";
 
 interface ActiveRun {
-  abort: () => void;
+  abortController: AbortController;
   startedAt: number;
 }
 
@@ -18,27 +18,28 @@ export class CodexAgent {
     const startedAt = Date.now();
     const sessionId = input.sessionId?.trim() || randomUUID();
 
-    let aborted = false;
+    const abortController = new AbortController();
     const active: ActiveRun = {
-      abort: () => {
-        aborted = true;
-      },
+      abortController,
       startedAt,
     };
     this.activeRuns.set(sessionId, active);
 
     let output = "";
+    const commandOutputLengths = new Map<string, number>();
     try {
       const thread = this.codex.startThread({
         workingDirectory: input.cwd,
         skipGitRepoCheck: true,
+        model: input.model,
       });
 
-      const { events } = await thread.runStreamed(input.prompt);
+      const prompt = input.systemPrompt?.trim()
+        ? `${input.systemPrompt.trim()}\n\n${input.prompt.trim()}`
+        : input.prompt;
+      const { events } = await thread.runStreamed(prompt, { signal: abortController.signal });
 
       for await (const event of events) {
-        if (aborted) break;
-
         const evt = event as unknown as Record<string, unknown>;
 
         if (evt.type === "item.completed") {
@@ -48,30 +49,53 @@ export class CodexAgent {
           const itemType = String(item.type ?? "");
 
           if (itemType === "agent_message") {
-            const parts = item.parts as Array<Record<string, unknown>> | undefined;
-            if (parts) {
-              for (const part of parts) {
-                if (part.type === "text" && typeof part.text === "string") {
-                  output += part.text;
-                  emit({
-                    type: "text_delta",
-                    provider: "codex",
-                    data: { sessionId, content: part.text },
-                  });
-                }
-                if (part.type === "tool_call") {
-                  emit({
-                    type: "tool_use",
-                    provider: "codex",
-                    data: {
-                      sessionId,
-                      toolName: String(part.name ?? "tool"),
-                      toolInput: (part.arguments as Record<string, unknown>) ?? {},
-                    },
-                  });
-                }
-              }
+            const text = item.text;
+            if (typeof text === "string") {
+              output = text;
+              emit({
+                type: "text_delta",
+                provider: "codex",
+                data: { sessionId, content: text },
+              });
             }
+          }
+
+          if (itemType === "reasoning" && typeof item.text === "string") {
+            emit({
+              type: "reasoning_delta",
+              provider: "codex",
+              data: { sessionId, content: item.text, messageId: String(item.id ?? "reasoning") },
+            });
+          }
+
+          if (itemType === "command_execution") {
+            emitRemainingCommandOutput(item, sessionId, emit, commandOutputLengths);
+          }
+
+          if (itemType === "mcp_tool_call") {
+            emit({
+              type: "tool_result",
+              provider: "codex",
+              data: {
+                sessionId,
+                toolName: `${String(item.server ?? "mcp")}/${String(item.tool ?? "tool")}`,
+                content: JSON.stringify(item.result ?? item.error ?? {}),
+                isError: String(item.status ?? "") === "failed",
+              },
+            });
+          }
+
+          if (itemType === "file_change") {
+            emit({
+              type: "tool_result",
+              provider: "codex",
+              data: {
+                sessionId,
+                toolName: "file_change",
+                content: JSON.stringify(item.changes ?? []),
+                isError: String(item.status ?? "") === "failed",
+              },
+            });
           }
 
           if (itemType === "tool_result") {
@@ -90,51 +114,91 @@ export class CodexAgent {
 
         if (evt.type === "item.started") {
           const item = evt.item as Record<string, unknown> | undefined;
-          if (item && String(item.type ?? "") === "tool_call") {
+          if (!item) continue;
+          const itemType = String(item.type ?? "");
+          if (itemType === "command_execution") {
+            commandOutputLengths.set(String(item.id ?? "command"), 0);
             emit({
-              type: "status",
+              type: "tool_use",
               provider: "codex",
               data: {
                 sessionId,
-                content: `Running ${String(item.name ?? "tool")}...`,
+                toolName: "command_execution",
+                toolInput: { command: String(item.command ?? "") },
               },
             });
+          } else if (itemType === "mcp_tool_call") {
+            emit({
+              type: "tool_use",
+              provider: "codex",
+              data: {
+                sessionId,
+                toolName: `${String(item.server ?? "mcp")}/${String(item.tool ?? "tool")}`,
+                toolInput: isRecord(item.arguments) ? item.arguments : { arguments: item.arguments },
+              },
+            });
+          } else if (itemType === "web_search") {
+            emit({
+              type: "tool_use",
+              provider: "codex",
+              data: { sessionId, toolName: "web_search", toolInput: { query: String(item.query ?? "") } },
+            });
+          }
+        }
+
+        if (evt.type === "item.updated") {
+          const item = evt.item as Record<string, unknown> | undefined;
+          if (item && String(item.type ?? "") === "command_execution") {
+            emitRemainingCommandOutput(item, sessionId, emit, commandOutputLengths);
           }
         }
 
         if (evt.type === "turn.completed") {
           const durationMs = Date.now() - startedAt;
-          const success = evt.status !== "error";
           emit({
             type: "turn_complete",
             provider: "codex",
             data: {
               sessionId,
-              success,
+              success: true,
               output,
-              error: success ? undefined : (String(evt.message || "Codex run failed")),
               durationMs,
-              exitCode: success ? 0 : -1,
+              exitCode: 0,
             },
           });
           return {
-            success,
+            success: true,
             output,
-            error: success ? undefined : String(evt.message || "Codex run failed"),
-            exitCode: success ? 0 : -1,
+            exitCode: 0,
             durationMs,
+            sessionId,
+          };
+        }
+
+        if (evt.type === "turn.failed" || evt.type === "error") {
+          const error = evt.error as Record<string, unknown> | undefined;
+          const message = String(error?.message ?? evt.message ?? "Codex run failed");
+          emit({ type: "error", provider: "codex", data: { sessionId, message } });
+          return {
+            success: false,
+            output,
+            error: message,
+            exitCode: -1,
+            durationMs: Date.now() - startedAt,
             sessionId,
           };
         }
       }
 
       const durationMs = Date.now() - startedAt;
+      const success = !abortController.signal.aborted;
+      const error = success ? undefined : "Codex run aborted";
       emit({
         type: "turn_complete",
         provider: "codex",
-        data: { sessionId, success: true, output, durationMs, exitCode: 0 },
+        data: { sessionId, success, output, error, durationMs, exitCode: success ? 0 : -1 },
       });
-      return { success: true, output, exitCode: 0, durationMs, sessionId };
+      return { success, output, error, exitCode: success ? 0 : -1, durationMs, sessionId };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       emit({
@@ -158,11 +222,38 @@ export class CodexAgent {
   abort(sessionId: string): boolean {
     const active = this.activeRuns.get(sessionId);
     if (!active) return false;
-    active.abort();
+    active.abortController.abort();
     return true;
   }
 
   getActiveSessionIds(): string[] {
     return [...this.activeRuns.keys()];
   }
+}
+
+function emitRemainingCommandOutput(
+  item: Record<string, unknown>,
+  sessionId: string,
+  emit: EmitFn,
+  outputLengths: Map<string, number>,
+): void {
+  const id = String(item.id ?? "command");
+  const output = String(item.aggregated_output ?? "");
+  const previousLength = outputLengths.get(id) ?? 0;
+  if (output.length <= previousLength) return;
+  outputLengths.set(id, output.length);
+  emit({
+    type: "tool_result",
+    provider: "codex",
+    data: {
+      sessionId,
+      toolName: "command_execution",
+      content: output.slice(previousLength),
+      isError: String(item.status ?? "") === "failed",
+    },
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

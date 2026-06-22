@@ -7,6 +7,8 @@ import {
 } from "react-native-paper";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { Stack, useLocalSearchParams, router } from "expo-router";
+import { File, Paths } from "expo-file-system";
+import { shareAsync } from "expo-sharing";
 import { useFileContent } from "@/src/lib/api/git";
 
 const TOKENS = [
@@ -78,6 +80,24 @@ export default function FileViewerScreen() {
     projectId ?? "",
     filePath ?? "",
   );
+  const [isDownloading, setIsDownloading] = React.useState(false);
+
+  const handleDownload = async () => {
+    if (!data?.content || !displayFileName) return;
+    setIsDownloading(true);
+    try {
+      const file = new File(Paths.cache, displayFileName);
+      file.create({ overwrite: true });
+      file.write(data.content);
+      await shareAsync(file.uri, {
+        dialogTitle: `Save ${displayFileName}`,
+      });
+    } catch (error) {
+      console.error("Failed to download file:", error);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   const metaColor = theme.dark ? "#B8C2D1" : "#526277";
   const lineNumberColor = theme.dark ? "#6B7280" : "#94A3B8";
@@ -100,11 +120,20 @@ export default function FileViewerScreen() {
             />
           ),
           headerRight: () => (
-            <IconButton
-              icon="refresh"
-              iconColor={theme.colors.onSurface}
-              onPress={() => refetch()}
-            />
+            <View style={styles.headerActions}>
+              <IconButton
+                icon="download"
+                iconColor={theme.colors.onSurface}
+                onPress={handleDownload}
+                disabled={isLoading || !data || isDownloading}
+                loading={isDownloading}
+              />
+              <IconButton
+                icon="refresh"
+                iconColor={theme.colors.onSurface}
+                onPress={() => refetch()}
+              />
+            </View>
           ),
         }}
       />
@@ -199,6 +228,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
   codeBlock: {
     fontFamily: "monospace",

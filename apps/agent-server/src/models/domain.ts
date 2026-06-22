@@ -13,6 +13,21 @@ export type GoalStatus =
   | "blocked" | "verifying" | "completed" | "failed" | "cancelled";
 
 export type TicketPriority = "low" | "medium" | "high" | "critical";
+export type HarnessProvider = "claude" | "codex" | "opencode";
+
+export interface AgentProfile {
+  id: string;
+  name: string;
+  description?: string;
+  role: "manager" | "worker";
+  provider: HarnessProvider;
+  model: string;
+  systemPrompt: string;
+  permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface Project {
   id: string;
@@ -21,6 +36,7 @@ export interface Project {
   description?: string;
   techPreferences: string[];
   baseBranch: string;
+  executionMode?: "direct" | "worktree";
   testCommand?: string;
   lintCommand?: string;
   typeCheckCommand?: string;
@@ -42,7 +58,7 @@ export interface Goal {
   outOfScopeItems: string[];
   ticketIds: string[];
   maxAgents: number;
-  provider: "claude" | "codex" | "opencode";
+  managerAgentId: string;
   maxRetries: number;
   autoRetry: boolean;
   autoMerge: boolean;
@@ -51,6 +67,12 @@ export interface Goal {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  lastError?: {
+    phase: "planning" | "execution" | "verification" | "review";
+    message: string;
+    details?: string;
+    occurredAt: string;
+  };
 }
 
 export interface Ticket {
@@ -67,6 +89,9 @@ export interface Ticket {
   relevantFiles: string[];
   dependencyIds: string[];
   blockingTicketIds: string[];
+  requestedAgentName?: string;
+  requestedProvider?: HarnessProvider;
+  requestedModel?: string;
   assignedAgentId?: string;
   worktreePath?: string;
   branchName?: string;
@@ -84,7 +109,9 @@ export interface AgentRun {
   id: string;
   goalId: string;
   ticketId: string;
-  provider: "claude" | "codex" | "opencode";
+  agentProfileId: string;
+  provider: HarnessProvider;
+  model: string;
   sessionId?: string;
   status: "starting" | "running" | "waiting" | "completed" | "failed" | "aborted";
   worktreePath: string;
@@ -116,7 +143,7 @@ export interface OrchestrationEvent {
 
 const VALID_TICKET_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   backlog: ["ready", "blocked", "cancelled"],
-  ready: ["in_progress", "cancelled"],
+  ready: ["blocked", "in_progress", "cancelled"],
   blocked: ["ready", "cancelled"],
   in_progress: ["review", "failed", "cancelled"],
   review: ["completed", "ready", "failed", "cancelled"],
@@ -135,7 +162,7 @@ const VALID_GOAL_TRANSITIONS: Record<GoalStatus, GoalStatus[]> = {
   verifying: ["completed", "running", "failed", "cancelled"],
   completed: [],
   failed: [],
-  cancelled: [],
+  cancelled: ["running"],
 };
 
 export function validateTicketTransition(from: TicketStatus, to: TicketStatus): boolean {

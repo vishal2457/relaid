@@ -1,5 +1,12 @@
 export type AgentProvider = "claude" | "codex" | "opencode";
 
+export interface AgentStreamContext {
+  runId?: string;
+  goalId?: string;
+  ticketId?: string;
+  agentProfileId?: string;
+}
+
 export type SseEventType =
   | `${AgentProvider}:text_delta`
   | `${AgentProvider}:reasoning_delta`
@@ -10,33 +17,33 @@ export type SseEventType =
   | `${AgentProvider}:turn_complete`
   | `${AgentProvider}:error`;
 
-export interface TextDeltaPayload {
+export interface TextDeltaPayload extends AgentStreamContext {
   sessionId: string;
   content: string;
   messageId?: string;
 }
 
-export interface ReasoningDeltaPayload {
+export interface ReasoningDeltaPayload extends AgentStreamContext {
   sessionId: string;
   content: string;
   messageId?: string;
 }
 
-export interface ToolUsePayload {
+export interface ToolUsePayload extends AgentStreamContext {
   sessionId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
   messageId?: string;
 }
 
-export interface ToolResultPayload {
+export interface ToolResultPayload extends AgentStreamContext {
   sessionId: string;
   toolName: string;
   content: string;
   isError?: boolean;
 }
 
-export interface PermissionRequestPayload {
+export interface PermissionRequestPayload extends AgentStreamContext {
   sessionId: string;
   requestId: string;
   toolName: string;
@@ -44,13 +51,13 @@ export interface PermissionRequestPayload {
   description: string;
 }
 
-export interface StatusPayload {
+export interface StatusPayload extends AgentStreamContext {
   sessionId: string;
   content: string;
   messageId?: string;
 }
 
-export interface TurnCompletePayload {
+export interface TurnCompletePayload extends AgentStreamContext {
   sessionId: string;
   success: boolean;
   output: string;
@@ -59,7 +66,7 @@ export interface TurnCompletePayload {
   exitCode: number;
 }
 
-export interface ErrorPayload {
+export interface ErrorPayload extends AgentStreamContext {
   sessionId: string;
   message: string;
   code?: string;

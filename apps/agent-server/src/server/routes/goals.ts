@@ -4,7 +4,9 @@ import type { Goal, Ticket } from "../../models/domain.js";
 import { validateGoalTransition, validateTicketTransition } from "../../models/domain.js";
 import { broadcastOrchestration } from "../sse-orchestration.js";
 import { getStore, createId, now, markDirty } from "../store.js";
-import { scheduleAndExecute } from "../../orchestrator/scheduler.js";
+import { recoverInterruptedGoal, scheduleAndExecute } from "../../orchestrator/scheduler.js";
+import { planAndExecuteGoal } from "../../orchestrator/scheduler.js";
+import { ensureOrchestrator } from "../../orchestrator/orchestrator-profile.js";
 
 const router = Router();
 
@@ -18,7 +20,6 @@ const createGoalSchema = z.object({
   technicalInstructions: z.string().optional(),
   outOfScopeItems: z.array(z.string()).default([]),
   maxAgents: z.number().min(1).max(10).default(3),
-  provider: z.enum(["claude", "codex", "opencode"]).default("claude"),
   maxRetries: z.number().min(0).max(10).default(3),
   autoRetry: z.boolean().default(true),
   autoMerge: z.boolean().default(false),
@@ -31,26 +32,10 @@ const updateStatusSchema = z.object({
 
 const executeSchema = z.object({
   maxAgents: z.number().min(1).max(10).default(3),
-  provider: z.enum(["claude", "codex", "opencode"]).default("claude"),
   maxRetries: z.number().min(0).max(10).default(3),
   autoRetry: z.boolean().default(true),
   autoMerge: z.boolean().default(false),
   requireReview: z.boolean().default(true),
-});
-
-const createTicketSchema = z.object({
-  tickets: z.array(z.object({
-    title: z.string().min(1),
-    description: z.string().default(""),
-    type: z.enum(["research", "test", "implementation", "refactor", "integration", "verification", "documentation"]),
-    priority: z.enum(["low", "medium", "high", "critical"]),
-    acceptanceCriteria: z.array(z.string()).default([]),
-    technicalNotes: z.array(z.string()).default([]),
-    relevantFiles: z.array(z.string()).default([]),
-    dependencyIds: z.array(z.string()).default([]),
-    testPlan: z.array(z.string()).default([]),
-    verificationCommands: z.array(z.string()).default([]),
-  })),
 });
 
 export function createGoalRoutes(): Router {
@@ -73,8 +58,10 @@ export function createGoalRoutes(): Router {
     }
     const id = createId();
     const timestamp = now();
+    const manager = ensureOrchestrator();
+    if (!manager.enabled) { res.status(400).json({ error: "Enable the orchestrator before creating a goal" }); return; }
     const goal: Goal = {
-      ...parsed.data, id, status: "draft", ticketIds: [],
+      ...parsed.data, id, managerAgentId: manager.id, status: "draft", ticketIds: [],
       createdAt: timestamp, updatedAt: timestamp,
     };
     store.goals.set(id, goal);
@@ -116,12 +103,15 @@ export function createGoalRoutes(): Router {
 
     const timestamp = now();
     goal.maxAgents = parsed.data.maxAgents;
-    goal.provider = parsed.data.provider;
     goal.maxRetries = parsed.data.maxRetries;
     goal.autoRetry = parsed.data.autoRetry;
     goal.autoMerge = parsed.data.autoMerge;
     goal.requireReview = parsed.data.requireReview;
-    goal.status = "running";
+    goal.lastError = undefined;
+    goal.completedAt = undefined;
+    const manager = store.agents.get(goal.managerAgentId);
+    if (!manager || !manager.enabled) { res.status(400).json({ error: "Goal manager is missing or disabled" }); return; }
+    goal.status = goal.ticketIds.length === 0 ? "planning" : "running";
     goal.startedAt = timestamp;
     goal.updatedAt = timestamp;
     markDirty();
@@ -132,7 +122,7 @@ export function createGoalRoutes(): Router {
     });
 
     // Kick off the scheduler
-    setImmediate(() => scheduleAndExecute(goal));
+    setImmediate(() => goal.ticketIds.length === 0 ? planAndExecuteGoal(goal) : scheduleAndExecute(goal));
 
     res.json({ goalId: goal.id, status: goal.status });
   });
@@ -149,9 +139,15 @@ export function createGoalRoutes(): Router {
   router.post("/:id/resume", (req, res) => {
     const goal = store.goals.get(req.params.id);
     if (!goal) { res.status(404).json({ error: "Goal not found" }); return; }
-    if (goal.status !== "paused") { res.status(400).json({ error: "Goal is not paused" }); return; }
-    goal.status = "running"; goal.updatedAt = now(); markDirty();
-    broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, type: "goal.resumed", payload: {}, sequence: 0, occurredAt: now() });
+    if (goal.status !== "paused" && goal.status !== "cancelled") { res.status(400).json({ error: "Goal is not paused or cancelled" }); return; }
+    const wasCancelled = goal.status === "cancelled";
+    const recoveredRuns = recoverInterruptedGoal(goal);
+    goal.status = "running";
+    goal.updatedAt = now();
+    if (wasCancelled) goal.completedAt = undefined;
+    markDirty();
+    broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, type: "goal.resumed", payload: { recoveredRuns }, sequence: 0, occurredAt: now() });
+    setImmediate(() => scheduleAndExecute(goal));
     res.json({ status: goal.status });
   });
 
@@ -163,47 +159,32 @@ export function createGoalRoutes(): Router {
     res.json({ status: goal.status });
   });
 
+  router.post("/:id/reset", (req, res) => {
+    const goal = store.goals.get(req.params.id);
+    if (!goal) { res.status(404).json({ error: "Goal not found" }); return; }
+    const ticketIds = new Set(goal.ticketIds);
+    for (const ticketId of ticketIds) store.tickets.delete(ticketId);
+    for (const [runId, run] of store.agentRuns) {
+      if (run.goalId === goal.id) store.agentRuns.delete(runId);
+    }
+    for (const [ticketId, evidence] of store.tddEvidence) {
+      if (ticketIds.has(ticketId) || evidence.ticketId && ticketIds.has(evidence.ticketId)) store.tddEvidence.delete(ticketId);
+    }
+    const timestamp = now();
+    goal.ticketIds = [];
+    goal.status = "draft";
+    goal.startedAt = undefined;
+    goal.completedAt = undefined;
+    goal.lastError = undefined;
+    goal.updatedAt = timestamp;
+    markDirty();
+    broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, type: "goal.reset", payload: {}, sequence: 0, occurredAt: timestamp });
+    res.json(goal);
+  });
+
   router.get("/:id/tickets", (req, res) => {
     const goalTickets = [...store.tickets.values()].filter((t) => t.goalId === req.params.id);
     res.json(goalTickets);
-  });
-
-  router.post("/:id/tickets", (req, res) => {
-    const goal = store.goals.get(req.params.id);
-    if (!goal) { res.status(404).json({ error: "Goal not found" }); return; }
-    const parsed = createTicketSchema.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-
-    const timestamp = now();
-    const created: Ticket[] = [];
-
-    for (const t of parsed.data.tickets) {
-      const id = createId();
-      const ticket: Ticket = {
-        id, projectId: goal.projectId, goalId: goal.id,
-        title: t.title, description: t.description, type: t.type,
-        status: "backlog", priority: t.priority,
-        acceptanceCriteria: t.acceptanceCriteria, technicalNotes: t.technicalNotes,
-        relevantFiles: t.relevantFiles, dependencyIds: t.dependencyIds,
-        blockingTicketIds: [], testPlan: t.testPlan,
-        verificationCommands: t.verificationCommands,
-        retryCount: 0, maximumRetries: goal.maxRetries,
-        createdAt: timestamp, updatedAt: timestamp,
-      };
-      store.tickets.set(id, ticket);
-      created.push(ticket);
-      goal.ticketIds.push(id);
-    }
-
-    goal.status = "ready";
-    goal.updatedAt = timestamp;
-    markDirty();
-
-    broadcastOrchestration({
-      id: createId(), projectId: goal.projectId, goalId: goal.id,
-      type: "goal.tickets_created", payload: { count: created.length }, sequence: 0, occurredAt: timestamp,
-    });
-    res.status(201).json(created);
   });
 
   router.get("/:goalId/tickets/:ticketId", (req, res) => {
@@ -235,6 +216,8 @@ export function createGoalRoutes(): Router {
       id: createId(), projectId: ticket.projectId, goalId: ticket.goalId, ticketId: ticket.id,
       type: "ticket.status_changed", payload: { status: ticket.status }, sequence: 0, occurredAt: timestamp,
     });
+    const goal = store.goals.get(ticket.goalId);
+    if (goal?.status === "running") setImmediate(() => scheduleAndExecute(goal));
     res.json(ticket);
   });
 

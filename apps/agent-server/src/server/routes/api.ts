@@ -77,7 +77,7 @@ export function createApiRouter(
     } else if (provider === "codex") {
       ok = codex.abort(sessionId);
     } else {
-      ok = opencode.abort(sessionId);
+      ok = await opencode.abort(sessionId);
     }
 
     res.json({ aborted: ok });

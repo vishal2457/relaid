@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -23,9 +23,8 @@ export interface GitDiff {
 }
 
 function run(cwd: string, args: string[], timeoutMs = 30_000): GitResult {
-  const cmd = ["git", ...args].join(" ");
   try {
-    const output = execSync(cmd, {
+    const output = execFileSync("git", args, {
       cwd,
       timeout: timeoutMs,
       encoding: "utf-8",
@@ -41,6 +40,37 @@ function run(cwd: string, args: string[], timeoutMs = 30_000): GitResult {
       error: (e.stderr || e.message || "").trim(),
     };
   }
+}
+
+export async function ensureGitRepository(repoPath: string, baseBranch: string): Promise<GitResult> {
+  try {
+    await fs.mkdir(repoPath, { recursive: true });
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : String(error) };
+  }
+
+  const existing = run(repoPath, ["rev-parse", "--is-inside-work-tree"]);
+  if (!existing.ok) {
+    let initialized = run(repoPath, ["init", "-b", baseBranch]);
+    if (!initialized.ok) {
+      initialized = run(repoPath, ["init"]);
+      if (!initialized.ok) return initialized;
+      const branchResult = run(repoPath, ["checkout", "-b", baseBranch]);
+      if (!branchResult.ok) return branchResult;
+    }
+  }
+
+  const head = run(repoPath, ["rev-parse", "--verify", "HEAD"]);
+  if (!head.ok) {
+    const commit = run(repoPath, [
+      "-c", "user.name=Agent Workbench",
+      "-c", "user.email=agent-workbench@local",
+      "commit", "--allow-empty", "-m", "chore: initialize repository",
+    ]);
+    if (!commit.ok) return commit;
+  }
+
+  return { ok: true, output: repoPath };
 }
 
 function sanitizeBranch(name: string): string {

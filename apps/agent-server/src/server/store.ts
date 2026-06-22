@@ -7,6 +7,7 @@ import type {
   Ticket,
   AgentRun,
   TddEvidence,
+  AgentProfile,
 } from "../models/domain.js";
 
 interface SerializableStore {
@@ -15,6 +16,7 @@ interface SerializableStore {
   tickets: Record<string, Ticket>;
   agentRuns: Record<string, AgentRun>;
   tddEvidence: Record<string, TddEvidence>;
+  agents: Record<string, AgentProfile>;
 }
 
 interface Store {
@@ -23,6 +25,7 @@ interface Store {
   tickets: Map<string, Ticket>;
   agentRuns: Map<string, AgentRun>;
   tddEvidence: Map<string, TddEvidence>;
+  agents: Map<string, AgentProfile>;
 }
 
 function makeStore(): Store {
@@ -32,6 +35,7 @@ function makeStore(): Store {
     tickets: new Map(),
     agentRuns: new Map(),
     tddEvidence: new Map(),
+    agents: new Map(),
   };
 }
 
@@ -42,6 +46,7 @@ function toSerializable(store: Store): SerializableStore {
     tickets: Object.fromEntries(store.tickets),
     agentRuns: Object.fromEntries(store.agentRuns),
     tddEvidence: Object.fromEntries(store.tddEvidence),
+    agents: Object.fromEntries(store.agents),
   };
 }
 
@@ -51,7 +56,8 @@ function fromSerializable(data: SerializableStore): Store {
     goals: new Map(Object.entries(data.goals)),
     tickets: new Map(Object.entries(data.tickets)),
     agentRuns: new Map(Object.entries(data.agentRuns)),
-    tddEvidence: new Map(Object.entries(data.tddEvidence)),
+    tddEvidence: new Map(Object.entries(data.tddEvidence || {})),
+    agents: new Map(Object.entries(data.agents || {})),
   };
 }
 
@@ -106,6 +112,7 @@ async function loadStore(): Promise<void> {
       for (const [k, v] of loaded.tickets) store.tickets.set(k, v);
       for (const [k, v] of loaded.agentRuns) store.agentRuns.set(k, v);
       for (const [k, v] of loaded.tddEvidence) store.tddEvidence.set(k, v);
+      for (const [k, v] of loaded.agents) store.agents.set(k, v);
     }
     console.log(`Store loaded from ${STORE_FILE}`);
   } catch (err) {

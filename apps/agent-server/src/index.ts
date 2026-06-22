@@ -1,5 +1,8 @@
 import { createServer } from "./server/http-server.js";
 import { isStoreLoaded, waitForSave } from "./server/store.js";
+import { detectHarnesses } from "./server/routes/harnesses.js";
+import { initializeModelCatalog } from "./harnesses/model-catalog.js";
+import { ensureOrchestrator } from "./orchestrator/orchestrator-profile.js";
 
 interface ParsedArgs {
   port: number;
@@ -32,8 +35,21 @@ async function main() {
   await isStoreLoaded();
   console.log(`Store: ${process.env.WORKBENCH_STORE_PATH || "~/.agent-workbench/store.json"}`);
 
+  console.log("Loading harness model catalogs...");
+  await initializeModelCatalog();
+  ensureOrchestrator();
+  const harnesses = detectHarnesses();
+  console.log("Available harnesses:");
+  for (const h of harnesses) {
+    const status = h.available ? `✓ available` : `✗ not found`;
+    const version = h.version ? ` (${h.version})` : "";
+    const models = h.models.length ? `${h.models.length} models via ${h.modelSource}` : "no models";
+    console.log(`  ${status} — ${h.label}${version}; ${models}`);
+    if (h.modelError) console.warn(`    Model discovery fallback: ${h.modelError}`);
+  }
+
   const { port, host } = parseArgs(process.argv.slice(2));
-  const { app } = createServer();
+  const { app, opencode } = createServer();
 
   const server = app.listen(port, host, () => {
     console.log(`Agent server running at http://${host}:${port}`);
@@ -43,11 +59,13 @@ async function main() {
 
   process.on("SIGINT", async () => {
     console.log("\nShutting down, saving store...");
+    opencode.destroy();
     await waitForSave();
     server.close(() => process.exit(0));
   });
   process.on("SIGTERM", async () => {
     console.log("Shutting down, saving store...");
+    opencode.destroy();
     await waitForSave();
     server.close(() => process.exit(0));
   });
