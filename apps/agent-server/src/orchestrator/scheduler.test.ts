@@ -69,10 +69,19 @@ test("orchestrator ticket plans normalize common ticket type aliases", () => {
 });
 
 test("orchestrator ticket plans normalize scalar test instructions", () => {
-  const item = { key: "test", title: "Add test", description: "Prove behavior", type: "test", priority: "high", acceptanceCriteria: ["Fails first"], dependencyKeys: [], testPlan: "Run the focused test", verificationCommands: "pnpm test" };
-  const plan = parseTicketPlan(JSON.stringify([item]));
+  const item = { key: "test", title: "Add test", description: "Prove behavior", type: "test", priority: "high", acceptanceCriteria: "Fails first", technicalNotes: "Use renderHook", relevantFiles: "src/test.ts", dependencyKeys: [], testPlan: "Run the focused test", verificationCommands: "pnpm test" };
+  const implementation = { ...item, key: "implementation", title: "Implement behavior", dependencyKeys: "test" };
+  const plan = parseTicketPlan(JSON.stringify([item, implementation]));
+  assert.deepEqual(plan[0]?.acceptanceCriteria, ["Fails first"]);
+  assert.deepEqual(plan[0]?.technicalNotes, ["Use renderHook"]);
+  assert.deepEqual(plan[0]?.relevantFiles, ["src/test.ts"]);
   assert.deepEqual(plan[0]?.testPlan, ["Run the focused test"]);
   assert.deepEqual(plan[0]?.verificationCommands, ["pnpm test"]);
+  assert.deepEqual(plan[1]?.dependencyKeys, ["test"]);
+});
+
+test("orchestrator ticket plan errors identify the invalid field", () => {
+  assert.throws(() => parseTicketPlan(JSON.stringify([{ key: "broken" }])), /0\.title/);
 });
 
 test("orchestrator ticket plans preserve meaningful agent and harness assignments", () => {

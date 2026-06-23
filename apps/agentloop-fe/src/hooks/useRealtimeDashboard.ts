@@ -127,6 +127,9 @@ export function useRealtimeDashboard() {
       if (
         event.type === "project.created" ||
         event.type === "goal.created" ||
+        event.type === "goal.execution_started" ||
+        event.type === "goal.paused" ||
+        event.type === "goal.resumed" ||
         event.type === "goal.status_changed" ||
         event.type === "goal.tickets_created" ||
         event.type === "goal.completed" ||

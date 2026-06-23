@@ -10,6 +10,7 @@ export interface AgentRunInput {
   systemPrompt?: string;
   model?: string;
   permissionMode?: PermissionMode;
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface AgentRunResult {

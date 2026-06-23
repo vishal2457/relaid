@@ -425,9 +425,28 @@ export function Dashboard() {
   const goalAgentRuns = selectedGoalId
     ? agentRuns.filter((r) => r.goalId === selectedGoalId)
     : [];
+  const planningOrchestratorRun: AgentRun | null = selectedGoal?.status === "planning" && orchestrator
+    ? {
+        id: `plan-${selectedGoal.id}`,
+        goalId: selectedGoal.id,
+        ticketId: "",
+        agentProfileId: orchestrator.id,
+        provider: orchestrator.provider,
+        model: orchestrator.model,
+        status: "running",
+        worktreePath: projects.find((project) => project.id === selectedGoal.projectId)?.location || "",
+        branchName: "",
+        startedAt: selectedGoal.startedAt || selectedGoal.updatedAt,
+      }
+    : null;
   const activeAgentRuns = goalAgentRuns.filter((run) => run.status === "starting" || run.status === "running");
+  const workingAgentRuns = planningOrchestratorRun
+    ? [planningOrchestratorRun, ...activeAgentRuns]
+    : activeAgentRuns;
   const selectedAgentRun = viewingAgentRun
-    ? goalAgentRuns.find((run) => run.id === viewingAgentRun.id) || viewingAgentRun
+    ? viewingAgentRun.id.startsWith("plan-")
+      ? { ...viewingAgentRun, status: selectedGoal?.status === "planning" ? "running" as const : "completed" as const }
+      : goalAgentRuns.find((run) => run.id === viewingAgentRun.id) || viewingAgentRun
     : null;
   const projectAgents = agents;
   const selectedHarness = harnesses.find((harness) => harness.id === newAgentProvider);
@@ -649,20 +668,22 @@ export function Dashboard() {
                 </Badge>
               </div>
               <div className="flex items-center gap-2">
-                {activeAgentRuns.length > 0 && (
+                {workingAgentRuns.length > 0 && (
                   <div className="flex items-center rounded-full border bg-muted/30 p-1">
                     {!isAgentTrayCollapsed && (
                       <div className="flex -space-x-2 px-1">
-                        {activeAgentRuns.map((run) => {
+                        {workingAgentRuns.map((run) => {
                           const profile = agents.find((agent) => agent.id === run.agentProfileId) || (run.agentProfileId === orchestrator?.id ? orchestrator : undefined);
+                          const isPlanningOrchestrator = run.id.startsWith("plan-");
                           return (
-                            <button key={run.id} type="button" title={`${profile?.name || "Agent"} · ${run.provider}`} className="relative rounded-full focus:outline-none focus:ring-2 focus:ring-ring" onClick={() => setViewingAgentRun(run)}>
+                            <button key={run.id} type="button" title={`${profile?.name || "Agent"} · ${isPlanningOrchestrator ? "planning" : run.provider}`} className="relative rounded-full focus:outline-none focus:ring-2 focus:ring-ring" onClick={() => setViewingAgentRun(run)}>
                               <Avatar className="h-8 w-8 border-2 border-card">
                                 <AvatarFallback className={`text-[10px] font-semibold ${HARNESS_COLORS[run.provider] || ""}`}>
                                   {(profile?.name || run.provider).split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}
                                 </AvatarFallback>
                               </Avatar>
                               <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-card bg-green-500" />
+                              {isPlanningOrchestrator && <span className="absolute -top-1 -right-1 rounded bg-primary px-1 text-[7px] font-bold uppercase text-primary-foreground">M</span>}
                             </button>
                           );
                         })}
@@ -960,7 +981,7 @@ export function Dashboard() {
                   >
                     {selectedAgentRun.provider}
                   </Badge>
-                  Agent Run
+                  {selectedAgentRun.id.startsWith("plan-") ? "Orchestrator Stream" : "Agent Run"}
                 </DialogTitle>
               </DialogHeader>
               <div className="py-4 flex flex-col gap-4">
@@ -973,18 +994,18 @@ export function Dashboard() {
                     <Label className="text-xs text-muted-foreground">Status</Label>
                     <p className="text-sm font-medium capitalize">{selectedAgentRun.status}</p>
                   </div>
-                  <div>
+                  {selectedAgentRun.ticketId && <div>
                     <Label className="text-xs text-muted-foreground">Ticket</Label>
                     <p className="text-sm font-mono">{selectedAgentRun.ticketId}</p>
-                  </div>
+                  </div>}
                   <div>
                     <Label className="text-xs text-muted-foreground">Goal</Label>
                     <p className="text-sm font-mono">{selectedAgentRun.goalId}</p>
                   </div>
-                  <div>
+                  {selectedAgentRun.branchName && <div>
                     <Label className="text-xs text-muted-foreground">Branch</Label>
                     <p className="text-sm font-mono truncate">{selectedAgentRun.branchName}</p>
-                  </div>
+                  </div>}
                   <div>
                     <Label className="text-xs text-muted-foreground">Started</Label>
                     <p className="text-sm">{new Date(selectedAgentRun.startedAt).toLocaleString()}</p>

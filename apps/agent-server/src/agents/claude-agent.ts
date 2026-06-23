@@ -77,6 +77,7 @@ export class ClaudeAgent {
         persistSession: true,
         includePartialMessages: true,
         canUseTool,
+        outputFormat: input.outputSchema ? { type: "json_schema", schema: input.outputSchema } : undefined,
       },
     });
 
@@ -148,13 +149,16 @@ export class ClaudeAgent {
         if (message.type === "result") {
           const durationMs = message.duration_ms ?? Date.now() - startedAt;
           const success = message.subtype === "success";
+          const resultOutput = success && message.structured_output !== undefined
+            ? JSON.stringify(message.structured_output)
+            : success ? (message.result || output) : output;
           emit({
             type: "turn_complete",
             provider: "claude",
             data: {
               sessionId,
               success,
-              output: success ? (message.result || output) : output,
+              output: resultOutput,
               error: success ? undefined : (message.errors?.join("\n") || "Claude run failed"),
               durationMs,
               exitCode: success ? 0 : -1,
@@ -162,7 +166,7 @@ export class ClaudeAgent {
           });
           return {
             success,
-            output: success ? (message.result || output) : output,
+            output: resultOutput,
             error: success ? undefined : (message.errors?.join("\n") || "Claude run failed"),
             exitCode: success ? 0 : -1,
             durationMs,

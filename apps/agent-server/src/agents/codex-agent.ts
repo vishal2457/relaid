@@ -37,7 +37,10 @@ export class CodexAgent {
       const prompt = input.systemPrompt?.trim()
         ? `${input.systemPrompt.trim()}\n\n${input.prompt.trim()}`
         : input.prompt;
-      const { events } = await thread.runStreamed(prompt, { signal: abortController.signal });
+      const { events } = await thread.runStreamed(prompt, {
+        signal: abortController.signal,
+        outputSchema: input.outputSchema,
+      });
 
       for await (const event of events) {
         const evt = event as unknown as Record<string, unknown>;

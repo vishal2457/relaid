@@ -68,18 +68,64 @@ const ticketPrioritySchema = z.preprocess((value) => {
   return aliases[normalized] || normalized;
 }, z.enum(["low", "medium", "high", "critical"]));
 
+const stringListSchema = z.preprocess(
+  (value) => typeof value === "string" ? [value] : value,
+  z.array(z.string()),
+);
+const nonEmptyStringListSchema = z.preprocess(
+  (value) => typeof value === "string" ? [value] : value,
+  z.array(z.string()).min(1),
+);
+
 const plannedTicketSchema = z.object({
   key: z.string().min(1), title: z.string().min(1), description: z.string().min(1),
   type: ticketTypeSchema,
   priority: ticketPrioritySchema,
-  acceptanceCriteria: z.array(z.string()).min(1), technicalNotes: z.array(z.string()).default([]),
-  relevantFiles: z.array(z.string()).default([]), dependencyKeys: z.array(z.string()).default([]),
+  acceptanceCriteria: nonEmptyStringListSchema, technicalNotes: stringListSchema.default([]),
+  relevantFiles: stringListSchema.default([]), dependencyKeys: stringListSchema.default([]),
   agentName: z.string().default(""),
   provider: z.enum(["claude", "codex", "opencode"]).optional(),
   model: z.string().optional(),
-  testPlan: z.preprocess((value) => typeof value === "string" ? [value] : value, z.array(z.string()).min(1)),
-  verificationCommands: z.preprocess((value) => typeof value === "string" ? [value] : value, z.array(z.string()).min(1)),
+  testPlan: nonEmptyStringListSchema,
+  verificationCommands: nonEmptyStringListSchema,
 });
+
+const ticketPlanOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["tickets"],
+  properties: {
+    tickets: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "key", "title", "description", "type", "priority", "acceptanceCriteria",
+          "technicalNotes", "relevantFiles", "dependencyKeys", "testPlan",
+          "verificationCommands", "agentName", "provider", "model",
+        ],
+        properties: {
+          key: { type: "string", minLength: 1 },
+          title: { type: "string", minLength: 1 },
+          description: { type: "string", minLength: 1 },
+          type: { type: "string", enum: ["research", "test", "implementation", "refactor", "integration", "verification", "documentation"] },
+          priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
+          acceptanceCriteria: { type: "array", minItems: 1, items: { type: "string" } },
+          technicalNotes: { type: "array", items: { type: "string" } },
+          relevantFiles: { type: "array", items: { type: "string" } },
+          dependencyKeys: { type: "array", items: { type: "string" } },
+          testPlan: { type: "array", minItems: 1, items: { type: "string" } },
+          verificationCommands: { type: "array", minItems: 1, items: { type: "string" } },
+          agentName: { type: "string" },
+          provider: { type: "string", enum: ["claude", "codex", "opencode"] },
+          model: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
 
 export function parseTicketPlan(output: string): z.infer<typeof plannedTicketSchema>[] {
   const candidates = [output.trim()];
@@ -91,6 +137,7 @@ export function parseTicketPlan(output: string): z.infer<typeof plannedTicketSch
   if (start >= 0 && end > start) candidates.push(output.slice(start, end + 1));
 
   let tickets: z.infer<typeof plannedTicketSchema>[] | undefined;
+  let validationError: z.ZodError | undefined;
   for (const candidate of candidates) {
     try {
       const parsed: unknown = JSON.parse(candidate);
@@ -102,11 +149,16 @@ export function parseTicketPlan(output: string): z.infer<typeof plannedTicketSch
         tickets = validated.data;
         break;
       }
+      validationError = validated.error;
     } catch {
       // Try the next candidate so fenced or prefixed JSON remains supported.
     }
   }
-  if (!tickets) throw new Error("Orchestrator did not return a valid JSON ticket array");
+  if (!tickets) {
+    const issue = validationError?.issues[0];
+    const detail = issue ? `: ${issue.path.join(".") || "plan"} ${issue.message}` : "";
+    throw new Error(`Orchestrator did not return a valid JSON ticket array${detail}`);
+  }
   const keys = new Set(tickets.map((ticket) => ticket.key));
   if (keys.size !== tickets.length) throw new Error("Orchestrator returned duplicate ticket keys");
   for (const ticket of tickets) {
@@ -156,8 +208,9 @@ export async function planAndExecuteGoal(goal: Goal): Promise<void> {
     const result = await agent.run({
       requestId: `plan-${goal.id}`, cwd: project.location, provider: manager.provider,
       sessionId: `plan-${goal.id}`, model: manager.model, permissionMode: "plan",
+      outputSchema: ticketPlanOutputSchema,
       systemPrompt: `${manager.systemPrompt}\n\nYou are the only orchestrator. Inspect the repository without editing it. Produce the complete execution plan as valid JSON only.`,
-      prompt: `Plan this goal into small dependency-aware tickets. Prioritize useful parallel work and keep dependencies only where an actual review gate is required. A dependent ticket may begin when its dependency enters review; it will be stopped automatically if that review fails. Every implementation ticket must require a failing test first and every ticket must have concrete verification commands.\n\nAvailable harnesses and models:\n${harnessCatalog || "No available harnesses were detected; omit provider and model."}\n\nChoose the best available provider and model for every ticket and give its agent a short, meaningful role-based name (for example, API Contract Reviewer or Mobile Auth Engineer).\n\nGoal: ${goal.title}\n${goal.description}\n\nAcceptance criteria:\n${goal.acceptanceCriteria.join("\n") || "Infer them from the goal."}\n\nConstraints:\n${goal.constraints.join("\n") || "None"}\n\nProject verification commands:\n${verification}\n\nReturn a JSON array. Each item must contain: key, title, description, type, priority, acceptanceCriteria, technicalNotes, relevantFiles, dependencyKeys, testPlan, verificationCommands, agentName, provider, model. dependencyKeys must reference keys in the same array.`,
+      prompt: `Plan this goal into small dependency-aware tickets. Prioritize useful parallel work and keep dependencies only where an actual review gate is required. A dependent ticket may begin when its dependency enters review; it will be stopped automatically if that review fails. Every implementation ticket must require a failing test first and every ticket must have concrete verification commands.\n\nAvailable harnesses and models:\n${harnessCatalog || "No available harnesses were detected; omit provider and model."}\n\nChoose the best available provider and model for every ticket and give its agent a short, meaningful role-based name (for example, API Contract Reviewer or Mobile Auth Engineer).\n\nGoal: ${goal.title}\n${goal.description}\n\nAcceptance criteria:\n${goal.acceptanceCriteria.join("\n") || "Infer them from the goal."}\n\nConstraints:\n${goal.constraints.join("\n") || "None"}\n\nProject verification commands:\n${verification}\n\nReturn a JSON object with a tickets array. Each item must contain: key, title, description, type, priority, acceptanceCriteria, technicalNotes, relevantFiles, dependencyKeys, testPlan, verificationCommands, agentName, provider, model. All list fields must be JSON arrays, even when they contain one item. dependencyKeys must reference keys in the same array.`,
     }, (payload) => broadcastAgentStream(payload, {
       runId: `plan-${goal.id}`,
       goalId: goal.id,
@@ -165,7 +218,31 @@ export async function planAndExecuteGoal(goal: Goal): Promise<void> {
     }));
     planningOutput = result.output;
     if (!result.success) throw new Error(result.error || "Orchestrator planning failed");
-    const plan = await parseTicketPlanWithArtifact(result.output, project.location);
+    let plan: z.infer<typeof plannedTicketSchema>[];
+    try {
+      plan = await parseTicketPlanWithArtifact(result.output, project.location);
+    } catch (firstError) {
+      const validationMessage = firstError instanceof Error ? firstError.message : String(firstError);
+      const retry = await agent.run({
+        requestId: `plan-${goal.id}-repair`, cwd: project.location, provider: manager.provider,
+        sessionId: `plan-${goal.id}-repair`, model: manager.model, permissionMode: "plan",
+        outputSchema: ticketPlanOutputSchema,
+        systemPrompt: `${manager.systemPrompt}\n\nYour response is machine-consumed. Return only JSON matching the supplied schema, with no Markdown or commentary.`,
+        prompt: `Regenerate the complete ticket plan for this goal. The previous response failed validation with: ${validationMessage}\n\nGoal: ${goal.title}\n${goal.description}\n\nAcceptance criteria:\n${goal.acceptanceCriteria.join("\n") || "Infer them from the goal."}\n\nConstraints:\n${goal.constraints.join("\n") || "None"}\n\nAvailable harnesses and models:\n${harnessCatalog || "No available harnesses were detected."}\n\nProject verification commands:\n${verification}`,
+      }, (payload) => broadcastAgentStream(payload, {
+        runId: `plan-${goal.id}`,
+        goalId: goal.id,
+        agentProfileId: manager.id,
+      }));
+      planningOutput = `Automatic retry output:\n${retry.output}\n\nInitial output:\n${result.output}`;
+      if (!retry.success) throw new Error(retry.error || "Orchestrator JSON repair attempt failed");
+      try {
+        plan = await parseTicketPlanWithArtifact(retry.output, project.location);
+      } catch (retryError) {
+        const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
+        throw new Error(`${retryMessage} (automatic regeneration also failed)`);
+      }
+    }
     const availableModels = new Map(harnesses.map((harness) => [harness.id, new Set(harness.models)]));
     for (const item of plan) {
       if (!item.provider || !item.model) continue;
