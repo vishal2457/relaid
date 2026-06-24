@@ -128,3 +128,36 @@
     @apply font-sans;
     }
 }
+
+@layer utilities {
+  .theme-scrollbar,
+  .theme-scrollbar * {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .theme-scrollbar:hover,
+  .theme-scrollbar *:hover {
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 48%, transparent) transparent;
+  }
+
+  .theme-scrollbar::-webkit-scrollbar,
+  .theme-scrollbar *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .theme-scrollbar::-webkit-scrollbar-thumb,
+  .theme-scrollbar *::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    background-clip: padding-box;
+  }
+
+  .theme-scrollbar:hover::-webkit-scrollbar-thumb,
+  .theme-scrollbar *:hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--muted-foreground) 48%, transparent);
+  }
+}

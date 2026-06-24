@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { useRealtimeDashboard } from "../hooks/useRealtimeDashboard";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { Progress } from "./ui/progress";
 import { ScrollArea } from "./ui/scroll-area";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import {
@@ -20,33 +19,23 @@ import {
   DialogFooter,
 } from "./ui/dialog";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import type { Ticket, AgentRun, AgentStreamEvent, Goal, Project } from "../types";
+import type { Ticket, AgentRun, AgentStreamEvent, BoardStep } from "../types";
 import {
-  Bot,
   LayoutGrid,
-  Plus,
   FolderOpen,
   Target,
-  Cpu,
   Play,
   Pause,
   RotateCcw,
   XCircle,
-  PanelRight,
   Clock,
   FileCode,
   History,
-  Monitor,
-  Wrench,
   CheckCircle2,
   XCircle as XCircleIcon,
   Loader2,
-  Settings,
-  TerminalSquare,
-  ChevronDown,
   ChevronRight,
   ListTree,
 } from "lucide-react";
@@ -60,6 +49,16 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "Failed",
   blocked: "Blocked",
   cancelled: "Cancelled",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  ready: "border-blue-500/50 text-blue-600",
+  in_progress: "border-blue-500 bg-blue-500/10 text-blue-700",
+  review: "border-amber-500/50 text-amber-700",
+  completed: "border-green-500 bg-green-500/10 text-green-700",
+  failed: "border-red-500 bg-red-500/10 text-red-700",
+  blocked: "border-amber-500/50 text-amber-700",
+  cancelled: "border-muted-foreground/30 text-muted-foreground",
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -76,27 +75,25 @@ const HARNESS_COLORS: Record<string, string> = {
   gemini: "bg-purple-500/10 text-purple-500 border-purple-500/20",
 };
 
-function groupByStatus(tickets: Ticket[], statuses: string[]): Ticket[] {
-  return tickets.filter((t) => statuses.includes(t.status));
-}
-
 function KanbanColumn({
   title,
   tickets,
   agentRuns,
-  statuses,
+  stepIds,
+  color = "slate",
   onTicketClick,
 }: {
   title: string;
   tickets: Ticket[];
   agentRuns: AgentRun[];
-  statuses: string[];
+  stepIds: string[];
+  color?: BoardStep["color"];
   onTicketClick?: (ticket: Ticket) => void;
 }) {
-  const columnTickets = groupByStatus(tickets, statuses);
+  const columnTickets = tickets.filter((ticket) => stepIds.includes(ticket.currentStepId));
 
   return (
-    <div className="flex flex-col flex-1 gap-3 min-w-[230px] bg-muted/30 p-3 rounded-lg border">
+    <div className={`flex flex-col flex-1 gap-3 min-w-[230px] bg-muted/30 p-3 rounded-lg border-t-2 ${color === "blue" ? "border-t-blue-500" : color === "amber" ? "border-t-amber-500" : color === "green" ? "border-t-green-500" : color === "red" ? "border-t-red-500" : "border-t-muted-foreground/40"}`}>
       <div className="flex items-center justify-between px-1">
         <h3 className="font-semibold text-sm">{title}</h3>
         <Badge variant="secondary" className="text-xs">
@@ -128,11 +125,16 @@ function KanbanColumn({
                   {ticket.type}
                 </Badge>
               )}
-              {ticket.status === "blocked" && (
-                <Badge variant="outline" className="text-[10px] w-fit border-amber-500/50 text-amber-600">
-                  Blocked by {ticket.blockingTicketIds.join(", ") || "dependency"}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant="outline" className={`w-fit text-[10px] ${STATUS_COLORS[ticket.status] || ""}`}>
+                  {STATUS_LABELS[ticket.status] || ticket.status}
                 </Badge>
-              )}
+                {ticket.stepStatus && ticket.stepStatus !== "completed" && (
+                  <Badge variant="secondary" className="w-fit text-[10px] capitalize">
+                    Step: {ticket.stepStatus.replace("_", " ")}
+                  </Badge>
+                )}
+              </div>
 
               {ticket.relevantFiles.length > 0 && (
                 <div className="flex flex-col gap-1">
@@ -185,33 +187,6 @@ function KanbanColumn({
         </div>
       </ScrollArea>
     </div>
-  );
-}
-
-function HarnessCard({ id, label, available, version, models, modelSource }: { id: string; name: string; label: string; available: boolean; version?: string; models: string[]; modelSource: string; modelError?: string }) {
-  const colors = HARNESS_COLORS[id] || "bg-muted text-muted-foreground border-muted";
-  return (
-    <details className={`group rounded-lg border ${colors}`}>
-      <summary className="flex cursor-pointer list-none items-center gap-3 p-2.5 [&::-webkit-details-marker]:hidden">
-        <Wrench className="h-4 w-4 shrink-0" />
-        <div className="flex flex-col flex-1 min-w-0">
-          <span className="text-sm font-medium leading-none">{label}</span>
-          <span className="text-[10px] opacity-70 mt-0.5">
-            {available && version ? `v${version}` : available ? "available" : "not detected"} · {models.length} models ({modelSource})
-          </span>
-        </div>
-        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${available ? "border-green-500/50 text-green-500" : "border-red-500/50 text-red-500"}`}>
-          {available ? "Ready" : "Offline"}
-        </Badge>
-        <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="border-t border-current/10 px-2.5 py-2">
-        <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
-          {models.map((model) => <code key={model} className="block truncate rounded bg-background/60 px-2 py-1 text-[10px]">{model}</code>)}
-          {models.length === 0 && <span className="text-[10px] opacity-70">No models reported</span>}
-        </div>
-      </div>
-    </details>
   );
 }
 
@@ -299,47 +274,26 @@ export function Dashboard() {
     tickets,
     agentRuns,
     agentStreams,
-    harnesses,
     agents,
     orchestrator,
+    planningAgent,
+    boardSteps,
     loading,
     error,
     selectedProjectId,
     setSelectedProjectId,
     selectedGoalId,
     setSelectedGoalId,
-    addProject,
-    addGoal,
-    addAgent,
-    updateOrchestrator,
     executeGoal,
     pauseGoal,
     resumeGoal,
     cancelGoal,
   } = useRealtimeDashboard();
 
-  const [newProjectName, setNewProjectName] = useState("");
-  const [newProjectLocation, setNewProjectLocation] = useState("");
-  const [newProjectExecutionMode, setNewProjectExecutionMode] = useState<"direct" | "worktree">("direct");
-  const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false);
-  const [newGoalTitle, setNewGoalTitle] = useState("");
-  const [newGoalDescription, setNewGoalDescription] = useState("");
-  const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
-  const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false);
-  const [newAgentName, setNewAgentName] = useState("");
-  const [newAgentProvider, setNewAgentProvider] = useState<"claude" | "codex" | "opencode">("codex");
-  const [newAgentModel, setNewAgentModel] = useState("");
-  const [newAgentPrompt, setNewAgentPrompt] = useState("You are a senior software engineer. Work only on assigned tickets, use strict TDD, and verify every change.");
-  const [isOrchestratorDialogOpen, setIsOrchestratorDialogOpen] = useState(false);
-  const [orchestratorProvider, setOrchestratorProvider] = useState<"claude" | "codex" | "opencode">("codex");
-  const [orchestratorModel, setOrchestratorModel] = useState("");
-  const [orchestratorPrompt, setOrchestratorPrompt] = useState("");
-
   const [viewingTicketDetails, setViewingTicketDetails] = useState<Ticket | null>(null);
   const [viewingAgentRun, setViewingAgentRun] = useState<AgentRun | null>(null);
   const [isAgentRunsDialogOpen, setIsAgentRunsDialogOpen] = useState(false);
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isAgentTrayCollapsed, setIsAgentTrayCollapsed] = useState(false);
 
   const handleProjectSelect = (pid: string) => {
@@ -352,48 +306,6 @@ export function Dashboard() {
     } else {
       setSelectedGoalId("");
     }
-  };
-
-  const handleCreateProject = async () => {
-    if (!newProjectName.trim() || !newProjectLocation.trim()) return;
-    const p = await addProject(newProjectName, newProjectLocation, newProjectExecutionMode);
-    if (p) {
-      setSelectedProjectId(p.id);
-      setSelectedGoalId("");
-    }
-    setNewProjectName("");
-    setNewProjectLocation("");
-    setNewProjectExecutionMode("direct");
-    setIsProjectDialogOpen(false);
-  };
-
-  const handleCreateGoal = async () => {
-    if (!newGoalTitle.trim() || !selectedProjectId) return;
-    const g = await addGoal(selectedProjectId, newGoalTitle, newGoalDescription);
-    if (g) {
-      setSelectedGoalId(g.id);
-    }
-    setNewGoalTitle("");
-    setNewGoalDescription("");
-    setIsGoalDialogOpen(false);
-  };
-
-  const handleCreateAgent = async () => {
-    if (!newAgentName.trim() || !newAgentModel || !newAgentPrompt.trim()) return;
-    await addAgent({ name: newAgentName.trim(),
-      provider: newAgentProvider, model: newAgentModel, systemPrompt: newAgentPrompt.trim(),
-      permissionMode: "bypassPermissions", enabled: true });
-    setNewAgentName(""); setIsAgentDialogOpen(false);
-  };
-
-  const openOrchestratorEditor = () => {
-    if (!orchestrator) return;
-    setOrchestratorProvider(orchestrator.provider); setOrchestratorModel(orchestrator.model);
-    setOrchestratorPrompt(orchestrator.systemPrompt); setIsOrchestratorDialogOpen(true);
-  };
-  const handleUpdateOrchestrator = async () => {
-    await updateOrchestrator({ provider: orchestratorProvider, model: orchestratorModel, systemPrompt: orchestratorPrompt });
-    setIsOrchestratorDialogOpen(false);
   };
 
   const handleExecuteGoal = async () => {
@@ -422,17 +334,20 @@ export function Dashboard() {
   const displayTickets = selectedGoalId
     ? tickets.filter((t) => t.goalId === selectedGoalId)
     : [];
+  const mappedStepIds = new Set(boardSteps.map((step) => step.id));
+  const unmappedStepIds = [...new Set(displayTickets.map((ticket) => ticket.currentStepId).filter((id) => !mappedStepIds.has(id)))];
   const goalAgentRuns = selectedGoalId
     ? agentRuns.filter((r) => r.goalId === selectedGoalId)
     : [];
-  const planningOrchestratorRun: AgentRun | null = selectedGoal?.status === "planning" && orchestrator
+  const planningOrchestratorRun: AgentRun | null = selectedGoal?.status === "planning" && planningAgent
     ? {
         id: `plan-${selectedGoal.id}`,
         goalId: selectedGoal.id,
         ticketId: "",
-        agentProfileId: orchestrator.id,
-        provider: orchestrator.provider,
-        model: orchestrator.model,
+        agentProfileId: planningAgent.id,
+        provider: planningAgent.provider,
+        model: planningAgent.model,
+        kind: "planning",
         status: "running",
         worktreePath: projects.find((project) => project.id === selectedGoal.projectId)?.location || "",
         branchName: "",
@@ -448,10 +363,6 @@ export function Dashboard() {
       ? { ...viewingAgentRun, status: selectedGoal?.status === "planning" ? "running" as const : "completed" as const }
       : goalAgentRuns.find((run) => run.id === viewingAgentRun.id) || viewingAgentRun
     : null;
-  const projectAgents = agents;
-  const selectedHarness = harnesses.find((harness) => harness.id === newAgentProvider);
-  const orchestratorHarness = harnesses.find((harness) => harness.id === orchestratorProvider);
-
   const projectItems = React.useMemo(
     () => projects.map((p) => ({ value: p.id, label: p.name })),
     [projects],
@@ -498,24 +409,7 @@ export function Dashboard() {
   } : null);
 
   return (
-    <div className="flex h-screen w-full flex-col bg-background text-foreground overflow-hidden">
-      <header className="flex h-16 items-center justify-between border-b px-6 shrink-0">
-        <div className="flex items-center gap-2">
-          <Bot className="h-6 w-6 text-primary" />
-          <h1 className="text-xl font-semibold tracking-tight">
-            Agent Workbench
-          </h1>
-        </div>
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          {error && (
-            <span className="text-red-500 text-xs">{error}</span>
-          )}
-          <span className="flex items-center gap-1.5">
-            <div className={`h-2 w-2 rounded-full animate-pulse ${error ? "bg-red-500" : "bg-green-500"}`} />
-            {error ? "Connection Issue" : "Agent Server Online"}
-          </span>
-        </div>
-      </header>
+    <div className="flex h-full w-full flex-col bg-background text-foreground overflow-hidden">
 
       {/* Project & Goal Selectors */}
       <div className="flex items-center gap-4 border-b px-6 py-3 bg-muted/10 shrink-0 flex-wrap">
@@ -538,14 +432,6 @@ export function Dashboard() {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => setIsProjectDialogOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
         </div>
 
         {selectedProject && (
@@ -577,15 +463,6 @@ export function Dashboard() {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            disabled={!selectedProjectId}
-            onClick={() => setIsGoalDialogOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
         </div>
 
         {selectedGoal && (
@@ -673,7 +550,7 @@ export function Dashboard() {
                     {!isAgentTrayCollapsed && (
                       <div className="flex -space-x-2 px-1">
                         {workingAgentRuns.map((run) => {
-                          const profile = agents.find((agent) => agent.id === run.agentProfileId) || (run.agentProfileId === orchestrator?.id ? orchestrator : undefined);
+                          const profile = agents.find((agent) => agent.id === run.agentProfileId) || (run.agentProfileId === orchestrator?.id ? orchestrator : run.agentProfileId === planningAgent?.id ? planningAgent : undefined);
                           const isPlanningOrchestrator = run.id.startsWith("plan-");
                           return (
                             <button key={run.id} type="button" title={`${profile?.name || "Agent"} · ${isPlanningOrchestrator ? "planning" : run.provider}`} className="relative rounded-full focus:outline-none focus:ring-2 focus:ring-ring" onClick={() => setViewingAgentRun(run)}>
@@ -694,256 +571,21 @@ export function Dashboard() {
                     </Button>
                   </div>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                >
-                  <PanelRight className="h-5 w-5" />
-                </Button>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setIsAgentRunsDialogOpen(true)}><ListTree className="h-3.5 w-3.5" />Runs</Button>
               </div>
             </div>
 
             <div className="flex-1 p-4 overflow-hidden">
-              <div className="flex gap-4 h-full overflow-x-auto pb-2">
-                <KanbanColumn
-                  title="Ready / Blocked"
-                  tickets={displayTickets}
-                  agentRuns={goalAgentRuns}
-                  statuses={["backlog", "ready", "blocked"]}
-                  onTicketClick={setViewingTicketDetails}
-                />
-                <KanbanColumn
-                  title="In Progress"
-                  tickets={displayTickets}
-                  agentRuns={goalAgentRuns}
-                  statuses={["in_progress"]}
-                  onTicketClick={setViewingTicketDetails}
-                />
-                <KanbanColumn
-                  title="Review"
-                  tickets={displayTickets}
-                  agentRuns={goalAgentRuns}
-                  statuses={["review"]}
-                  onTicketClick={setViewingTicketDetails}
-                />
-                <KanbanColumn
-                  title="Done / Failed"
-                  tickets={displayTickets}
-                  agentRuns={goalAgentRuns}
-                  statuses={["completed", "failed"]}
-                  onTicketClick={setViewingTicketDetails}
-                />
+              <div className="theme-scrollbar flex gap-4 h-full overflow-x-auto pb-2">
+                {boardSteps.map((step) => <KanbanColumn key={step.id} title={step.name} color={step.color} tickets={displayTickets} agentRuns={goalAgentRuns} stepIds={[step.id]} onTicketClick={setViewingTicketDetails} />)}
+                {unmappedStepIds.length > 0 && <KanbanColumn title="Unmapped" color="red" tickets={displayTickets} agentRuns={goalAgentRuns} stepIds={unmappedStepIds} onTicketClick={setViewingTicketDetails} />}
+                {boardSteps.length === 0 && <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Create a board step in Settings to render the kanban.</div>}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Sidebar */}
-        <div
-          className={`transition-all duration-300 ease-in-out flex flex-col gap-6 overflow-hidden ${isSidebarOpen ? "w-[320px] opacity-100" : "w-0 opacity-0"}`}
-        >
-          <div className="w-[320px] flex flex-col gap-4 overflow-hidden h-full">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold flex items-center gap-2">
-                <Cpu className="h-5 w-5 text-primary" />
-                Harnesses & Agents
-              </h2>
-              <div className="flex items-center gap-1.5">
-                <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => setIsAgentRunsDialogOpen(true)}><ListTree className="h-3 w-3" /> Runs</Button>
-                <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => {
-                  const harness = harnesses.find((item) => item.available) || harnesses[0];
-                  if (harness) { setNewAgentProvider(harness.id as "claude" | "codex" | "opencode"); setNewAgentModel(harness.models[0] || ""); }
-                  setIsAgentDialogOpen(true);
-                }}><Plus className="h-3 w-3" /> Agent</Button>
-              </div>
-            </div>
-
-            {/* Harnesses */}
-            <details className="group flex flex-col rounded-lg border bg-muted/10" open>
-              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
-                <Monitor className="h-3.5 w-3.5" />
-                Available Harnesses
-                <span className="ml-auto">{harnesses.filter((harness) => harness.available).length}/{harnesses.length}</span>
-                <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
-              </summary>
-              <div className="flex flex-col gap-2 border-t p-2">
-                {harnesses.map((h) => <HarnessCard key={h.id} {...h} />)}
-                {harnesses.length === 0 && <span className="text-xs text-muted-foreground italic">No harnesses detected</span>}
-              </div>
-            </details>
-
-            <div className="flex flex-col gap-2">
-              <h3 className="text-xs font-medium text-muted-foreground">Configured Agents</h3>
-              {projectAgents.map((agent) => (
-                <div key={agent.id} className="rounded-lg border bg-card p-2.5 flex items-center justify-between gap-2">
-                  <div className="min-w-0"><div className="text-sm font-medium truncate">{agent.name}</div><div className="text-[10px] text-muted-foreground truncate">{agent.model}</div></div>
-                  <Badge variant="outline" className={`text-[10px] ${HARNESS_COLORS[agent.provider] || ""}`}>{agent.provider}</Badge>
-                </div>
-              ))}
-              {projectAgents.length === 0 && <span className="text-xs text-muted-foreground italic">No reusable worker agents configured. The orchestrator can generate them when needed.</span>}
-            </div>
-
-            {/* Orchestrator Config */}
-            <details className="group mt-2 rounded-lg border bg-muted/10" open>
-              <summary className="flex cursor-pointer list-none items-center px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden"><TerminalSquare className="mr-2 h-3.5 w-3.5" />Orchestrator config<ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform group-open:rotate-180" /></summary>
-              <div className="flex flex-col gap-2 border-t p-2">
-              <div className="flex items-center justify-end"><Button size="sm" variant="ghost" className="h-6 text-xs" onClick={openOrchestratorEditor}>Edit</Button></div>
-              {selectedGoal ? (
-                <div className="flex flex-col gap-1.5 p-2.5 rounded-lg border bg-card">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Manager</span>
-                    <span className="text-xs font-medium truncate max-w-[170px]">{orchestrator?.name || "Missing"}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Harness / Model</span>
-                    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${HARNESS_COLORS[orchestrator?.provider || ""] || ""}`}>
-                      {orchestrator ? `${orchestrator.provider} · ${orchestrator.model}` : "unconfigured"}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Max Agents</span>
-                    <span className="text-xs font-medium">{selectedGoal.maxAgents}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Max Retries</span>
-                    <span className="text-xs font-medium">{selectedGoal.maxRetries}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Auto Retry</span>
-                    <Badge variant="outline" className={`text-[10px] px-1 py-0 ${selectedGoal.autoRetry ? "border-green-500/50 text-green-500" : "border-muted-foreground/30 text-muted-foreground"}`}>
-                      {selectedGoal.autoRetry ? "On" : "Off"}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Auto Merge</span>
-                    <Badge variant="outline" className={`text-[10px] px-1 py-0 ${selectedGoal.autoMerge ? "border-green-500/50 text-green-500" : "border-muted-foreground/30 text-muted-foreground"}`}>
-                      {selectedGoal.autoMerge ? "On" : "Off"}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Require Review</span>
-                    <Badge variant="outline" className={`text-[10px] px-1 py-0 ${selectedGoal.requireReview ? "border-blue-500/50 text-blue-500" : "border-muted-foreground/30 text-muted-foreground"}`}>
-                      {selectedGoal.requireReview ? "On" : "Off"}
-                    </Badge>
-                  </div>
-                </div>
-              ) : (
-                <span className="text-xs text-muted-foreground italic py-1">
-                  Select a goal to view orchestrator config
-                </span>
-              )}
-              </div>
-            </details>
-          </div>
-        </div>
       </div>
-
-      {/* Create Project Dialog */}
-      <Dialog open={isProjectDialogOpen} onOpenChange={setIsProjectDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create New Project</DialogTitle>
-          </DialogHeader>
-          <div className="py-4 flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label>Project Name</Label>
-              <Input
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-                placeholder="e.g. Core Platform v2"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Repository Path</Label>
-              <Input
-                value={newProjectLocation}
-                onChange={(e) => setNewProjectLocation(e.target.value)}
-                placeholder="e.g. /Users/me/projects/my-repo"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Execution Mode</Label>
-              <select className="h-10 rounded-md border bg-background px-3 text-sm" value={newProjectExecutionMode} onChange={(event) => setNewProjectExecutionMode(event.target.value as "direct" | "worktree")}>
-                <option value="direct">Direct — agents work in this exact path</option>
-                <option value="worktree">Worktree — isolated Git branch per ticket</option>
-              </select>
-              <span className="text-xs text-muted-foreground">Worktree mode requires the path to be a Git repository.</span>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={handleCreateProject}
-              disabled={!newProjectName.trim() || !newProjectLocation.trim()}
-            >
-              Create Project
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Goal Dialog */}
-      <Dialog open={isGoalDialogOpen} onOpenChange={setIsGoalDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Goal to Project</DialogTitle>
-          </DialogHeader>
-          <div className="py-4 flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label>Goal Title</Label>
-              <Input
-                value={newGoalTitle}
-                onChange={(e) => setNewGoalTitle(e.target.value)}
-                placeholder="e.g. Refactor Auth Flow"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Description</Label>
-              <textarea
-                className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                value={newGoalDescription}
-                onChange={(e) => setNewGoalDescription(e.target.value)}
-                placeholder="Describe what this goal aims to achieve..."
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={handleCreateGoal} disabled={!newGoalTitle.trim()}>
-              Create Goal
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isAgentDialogOpen} onOpenChange={setIsAgentDialogOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader><DialogTitle>Create Global Agent</DialogTitle></DialogHeader>
-          <div className="py-4 grid gap-4">
-            <div className="flex flex-col gap-2"><Label>Name</Label><Input value={newAgentName} onChange={(event) => setNewAgentName(event.target.value)} placeholder="Backend specialist" /></div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2"><Label>Harness</Label><select className="h-10 rounded-md border bg-background px-3 text-sm" value={newAgentProvider} onChange={(event) => { const provider = event.target.value as "claude" | "codex" | "opencode"; setNewAgentProvider(provider); setNewAgentModel(harnesses.find((item) => item.id === provider)?.models[0] || ""); }}>{harnesses.map((harness) => <option key={harness.id} value={harness.id} disabled={!harness.available}>{harness.label}{harness.available ? "" : " (offline)"}</option>)}</select></div>
-              <div className="flex flex-col gap-2"><Label>Model</Label><select className="h-10 rounded-md border bg-background px-3 text-sm" value={newAgentModel} onChange={(event) => setNewAgentModel(event.target.value)}><option value="">Select model</option>{selectedHarness?.models.map((model) => <option key={model} value={model}>{model}</option>)}</select></div>
-            </div>
-            <div className="flex flex-col gap-2"><Label>System Prompt</Label><textarea className="min-h-[130px] rounded-md border bg-background px-3 py-2 text-sm" value={newAgentPrompt} onChange={(event) => setNewAgentPrompt(event.target.value)} /></div>
-          </div>
-          <DialogFooter><Button onClick={handleCreateAgent} disabled={!newAgentName.trim() || !newAgentModel || !newAgentPrompt.trim()}>Create Agent</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isOrchestratorDialogOpen} onOpenChange={setIsOrchestratorDialogOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader><DialogTitle>Edit Orchestrator</DialogTitle></DialogHeader>
-          <div className="py-4 grid gap-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2"><Label>Harness</Label><select className="h-10 rounded-md border bg-background px-3 text-sm" value={orchestratorProvider} onChange={(event) => { const provider = event.target.value as "claude" | "codex" | "opencode"; setOrchestratorProvider(provider); setOrchestratorModel(harnesses.find((item) => item.id === provider)?.models[0] || ""); }}>{harnesses.map((harness) => <option key={harness.id} value={harness.id} disabled={!harness.available}>{harness.label}</option>)}</select></div>
-              <div className="flex flex-col gap-2"><Label>Model</Label><select className="h-10 rounded-md border bg-background px-3 text-sm" value={orchestratorModel} onChange={(event) => setOrchestratorModel(event.target.value)}>{orchestratorHarness?.models.map((model) => <option key={model} value={model}>{model}</option>)}</select></div>
-            </div>
-            <div className="flex flex-col gap-2"><Label>System Prompt</Label><textarea className="min-h-[180px] rounded-md border bg-background px-3 py-2 text-sm" value={orchestratorPrompt} onChange={(event) => setOrchestratorPrompt(event.target.value)} /></div>
-          </div>
-          <DialogFooter><Button onClick={handleUpdateOrchestrator} disabled={!orchestratorModel || !orchestratorPrompt.trim()}>Save Orchestrator</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Agent Runs List Dialog */}
       <Dialog open={isAgentRunsDialogOpen} onOpenChange={setIsAgentRunsDialogOpen}>
@@ -955,7 +597,7 @@ export function Dashboard() {
             <div className="flex flex-col gap-2 pr-4">
               {goalAgentRuns.map((run) => (
                 <button key={run.id} type="button" className="cursor-pointer text-left" onClick={() => { setIsAgentRunsDialogOpen(false); setViewingAgentRun(run); }}>
-                  <AgentRunCard run={run} ticket={displayTickets.find((ticket) => ticket.id === run.ticketId)} agentName={agents.find((agent) => agent.id === run.agentProfileId)?.name || (run.agentProfileId === orchestrator?.id ? orchestrator.name : undefined)} />
+                  <AgentRunCard run={run} ticket={displayTickets.find((ticket) => ticket.id === run.ticketId)} agentName={agents.find((agent) => agent.id === run.agentProfileId)?.name || (run.agentProfileId === orchestrator?.id ? orchestrator.name : run.agentProfileId === planningAgent?.id ? planningAgent.name : undefined)} />
                 </button>
               ))}
               {goalAgentRuns.length === 0 && <span className="py-10 text-center text-xs italic text-muted-foreground">{selectedGoalId ? "No agent runs for this goal" : "Select a goal to see agent runs"}</span>}
@@ -981,7 +623,7 @@ export function Dashboard() {
                   >
                     {selectedAgentRun.provider}
                   </Badge>
-                  {selectedAgentRun.id.startsWith("plan-") ? "Orchestrator Stream" : "Agent Run"}
+                  {selectedAgentRun.id.startsWith("plan-") ? "Planning Agent Stream" : selectedAgentRun.kind === "orchestration" ? "Orchestrator Analysis" : "Agent Run"}
                 </DialogTitle>
               </DialogHeader>
               <div className="py-4 flex flex-col gap-4">
@@ -1097,6 +739,11 @@ export function Dashboard() {
                     <ScrollArea className="flex-1 h-full px-6 py-6">
                       <div className="flex gap-8">
                         <div className="flex-1 flex flex-col gap-8">
+                          <div>
+                            <Label className="text-sm font-semibold mb-2 block text-foreground">Workflow</Label>
+                            <div className="flex items-center gap-2"><Badge variant="secondary">{boardSteps.find((step) => step.id === viewingTicketDetails.currentStepId)?.name || viewingTicketDetails.currentStepId}</Badge><Badge variant="outline" className="capitalize">{viewingTicketDetails.stepStatus?.replace("_", " ") || "waiting"}</Badge></div>
+                            {!!viewingTicketDetails.stepHistory?.length && <div className="mt-3 space-y-2">{viewingTicketDetails.stepHistory.map((execution) => <div key={execution.id} className="flex items-center rounded-md border bg-background px-3 py-2 text-xs"><span>{boardSteps.find((step) => step.id === execution.stepId)?.name || execution.stepId}</span><Badge variant="outline" className="ml-auto capitalize">{execution.status.replace("_", " ")}</Badge></div>)}</div>}
+                          </div>
                           <div>
                             <Label className="text-sm font-semibold mb-2 block text-foreground">
                               Description

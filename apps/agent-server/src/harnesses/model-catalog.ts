@@ -46,7 +46,7 @@ async function discoverClaudeModels(): Promise<string[]> {
 }
 
 async function discoverOpencodeModels(): Promise<string[]> {
-  const instance = await withTimeout(createOpencode(), 12_000, "OpenCode startup timed out");
+  const instance = await withTimeout(createOpencode({ port: 0 }), 12_000, "OpenCode startup timed out");
   try {
     const response = await withTimeout(instance.client.config.providers(), 12_000, "OpenCode model discovery timed out");
     return flattenOpencodeModels(response.data?.providers ?? []);

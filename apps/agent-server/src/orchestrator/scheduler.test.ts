@@ -1,35 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Ticket } from "../models/domain.js";
-import { isInterruptedRun, resolveDependencyStatus, selectAgentForTicket } from "./scheduling.js";
-import { parseTicketPlan } from "./scheduler.js";
-
-const ticket = (id: string, dependencyIds: string[] = []): Ticket => ({
-  id, projectId: "project", goalId: "goal", title: id, description: "",
-  type: "implementation", status: "backlog", priority: "medium",
-  acceptanceCriteria: [], technicalNotes: [], relevantFiles: [], dependencyIds,
-  blockingTicketIds: [], testPlan: [], verificationCommands: [], retryCount: 0,
-  maximumRetries: 1, createdAt: "now", updatedAt: "now",
-});
-
-test("dependency resolution blocks a ticket until every dependency completes", () => {
-  const dependency = { ...ticket("dep"), status: "in_progress" as const };
-  const candidate = ticket("candidate", [dependency.id]);
-  const result = resolveDependencyStatus(candidate, new Map([[dependency.id, dependency]]));
-  assert.deepEqual(result, { ready: false, blockingTicketIds: ["dep"], invalidDependencyIds: [] });
-});
-
-test("dependency resolution allows speculative work while a dependency is in review", () => {
-  const dependency = { ...ticket("dep"), status: "review" as const };
-  const candidate = ticket("candidate", [dependency.id]);
-  const result = resolveDependencyStatus(candidate, new Map([[dependency.id, dependency]]));
-  assert.deepEqual(result, { ready: true, blockingTicketIds: [], invalidDependencyIds: [] });
-});
-
-test("dependency resolution reports references outside the goal", () => {
-  const result = resolveDependencyStatus(ticket("candidate", ["missing"]), new Map());
-  assert.deepEqual(result, { ready: false, blockingTicketIds: [], invalidDependencyIds: ["missing"] });
-});
+import { isInterruptedRun, selectAgentForTicket } from "./scheduling.js";
+import { parseBoardDecision, parseTicketPlan } from "./scheduler.js";
+import { DEFAULT_BOARD_STEPS } from "./workflow-constants.js";
 
 test("agent selection skips managers, disabled agents, and busy agents", () => {
   const agents = [
@@ -84,15 +57,47 @@ test("orchestrator ticket plan errors identify the invalid field", () => {
   assert.throws(() => parseTicketPlan(JSON.stringify([{ key: "broken" }])), /0\.title/);
 });
 
-test("orchestrator ticket plans preserve meaningful agent and harness assignments", () => {
-  const item = {
-    key: "api-review", title: "Review API contract", description: "Check compatibility",
-    type: "research", priority: "high", acceptanceCriteria: ["Contract is compatible"],
-    dependencyKeys: [], testPlan: ["Inspect contract tests"], verificationCommands: ["pnpm test"],
-    agentName: "API Contract Reviewer", provider: "claude", model: "sonnet",
-  };
-  const [planned] = parseTicketPlan(JSON.stringify([item]));
-  assert.equal(planned?.agentName, "API Contract Reviewer");
-  assert.equal(planned?.provider, "claude");
-  assert.equal(planned?.model, "sonnet");
+test("orchestrator board decisions preserve step and agent assignments", () => {
+  const [action] = parseBoardDecision(JSON.stringify({ actions: [{
+    action: "move", ticketId: "ticket-1", targetStepId: "review", agentId: "reviewer",
+    agentName: "", provider: "codex", model: "gpt-5", reason: "Implementation completed",
+  }] }));
+  assert.equal(action?.targetStepId, "review");
+  assert.equal(action?.agentId, "reviewer");
+});
+
+test("orchestrator board decisions accept fenced JSON with common action aliases", () => {
+  const [action] = parseBoardDecision(`Only one ticket is runnable.\n\n\`\`\`json
+  {"actions":[{"action":"dispatch","ticketId":"ticket-1","agentId":null,"agentName":"Worker","provider":"opencode","model":"model","instructions":"Start implementation"}]}
+  \`\`\``);
+  assert.equal(action?.action, "run");
+  assert.equal(action?.targetStepId, "");
+  assert.equal(action?.agentId, "");
+  assert.equal(action?.reason, "Start implementation");
+});
+
+test("orchestrator board decisions infer run from an agent assignment", () => {
+  const [action] = parseBoardDecision(JSON.stringify({ actions: [{
+    ticketId: "ticket-1", targetStepId: "implementation", agentId: null,
+    agentName: "Worker", agentProvider: "opencode", agentModel: "model", reason: "Ready",
+  }] }));
+  assert.equal(action?.action, "run");
+  assert.equal(action?.provider, "opencode");
+  assert.equal(action?.model, "model");
+});
+
+test("orchestrator board decisions normalize a moves wrapper", () => {
+  const [action] = parseBoardDecision(`\`\`\`json
+  {"moves":[{"ticketId":"ticket-1","fromStepId":"implementation","toStepId":"implementation","stepStatus":"in_progress","agentId":"worker-1"}],"reasoning":"Ready to start"}
+  \`\`\``);
+  assert.equal(action?.action, "run");
+  assert.equal(action?.ticketId, "ticket-1");
+  assert.equal(action?.agentId, "worker-1");
+  assert.equal(action?.reason, "Ready to start");
+});
+
+test("default workflow follows the software delivery lifecycle", () => {
+  assert.deepEqual(DEFAULT_BOARD_STEPS.map((step) => step.id), ["implementation", "review", "verification", "done"]);
+  assert.deepEqual(DEFAULT_BOARD_STEPS.map((step) => step.allowedNextStepIds), [["review"], ["verification"], ["done"], []]);
+  assert.equal(DEFAULT_BOARD_STEPS.at(-1)?.isTerminal, true);
 });

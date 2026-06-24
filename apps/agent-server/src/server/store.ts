@@ -6,8 +6,8 @@ import type {
   Goal,
   Ticket,
   AgentRun,
-  TddEvidence,
   AgentProfile,
+  BoardStep,
 } from "../models/domain.js";
 
 interface SerializableStore {
@@ -15,8 +15,8 @@ interface SerializableStore {
   goals: Record<string, Goal>;
   tickets: Record<string, Ticket>;
   agentRuns: Record<string, AgentRun>;
-  tddEvidence: Record<string, TddEvidence>;
   agents: Record<string, AgentProfile>;
+  boardSteps: Record<string, BoardStep>;
 }
 
 interface Store {
@@ -24,8 +24,8 @@ interface Store {
   goals: Map<string, Goal>;
   tickets: Map<string, Ticket>;
   agentRuns: Map<string, AgentRun>;
-  tddEvidence: Map<string, TddEvidence>;
   agents: Map<string, AgentProfile>;
+  boardSteps: Map<string, BoardStep>;
 }
 
 function makeStore(): Store {
@@ -34,8 +34,8 @@ function makeStore(): Store {
     goals: new Map(),
     tickets: new Map(),
     agentRuns: new Map(),
-    tddEvidence: new Map(),
     agents: new Map(),
+    boardSteps: new Map(),
   };
 }
 
@@ -45,8 +45,8 @@ function toSerializable(store: Store): SerializableStore {
     goals: Object.fromEntries(store.goals),
     tickets: Object.fromEntries(store.tickets),
     agentRuns: Object.fromEntries(store.agentRuns),
-    tddEvidence: Object.fromEntries(store.tddEvidence),
     agents: Object.fromEntries(store.agents),
+    boardSteps: Object.fromEntries(store.boardSteps),
   };
 }
 
@@ -56,8 +56,8 @@ function fromSerializable(data: SerializableStore): Store {
     goals: new Map(Object.entries(data.goals)),
     tickets: new Map(Object.entries(data.tickets)),
     agentRuns: new Map(Object.entries(data.agentRuns)),
-    tddEvidence: new Map(Object.entries(data.tddEvidence || {})),
     agents: new Map(Object.entries(data.agents || {})),
+    boardSteps: new Map(Object.entries(data.boardSteps || {})),
   };
 }
 
@@ -111,8 +111,8 @@ async function loadStore(): Promise<void> {
       for (const [k, v] of loaded.goals) store.goals.set(k, v);
       for (const [k, v] of loaded.tickets) store.tickets.set(k, v);
       for (const [k, v] of loaded.agentRuns) store.agentRuns.set(k, v);
-      for (const [k, v] of loaded.tddEvidence) store.tddEvidence.set(k, v);
       for (const [k, v] of loaded.agents) store.agents.set(k, v);
+      for (const [k, v] of loaded.boardSteps) store.boardSteps.set(k, v);
     }
     console.log(`Store loaded from ${STORE_FILE}`);
   } catch (err) {
@@ -146,28 +146,4 @@ export function createId(): string {
 
 export function now(): string {
   return new Date().toISOString();
-}
-
-export function findProject(id: string): Project | undefined {
-  return store.projects.get(id);
-}
-
-export function findGoal(id: string): Goal | undefined {
-  return store.goals.get(id);
-}
-
-export function findTicket(id: string): Ticket | undefined {
-  return store.tickets.get(id);
-}
-
-export function findTicketsByGoal(goalId: string): Ticket[] {
-  return [...store.tickets.values()].filter((t) => t.goalId === goalId);
-}
-
-export function findAgentRun(id: string): AgentRun | undefined {
-  return store.agentRuns.get(id);
-}
-
-export function findAgentRunsByGoal(goalId: string): AgentRun[] {
-  return [...store.agentRuns.values()].filter((r) => r.goalId === goalId);
 }

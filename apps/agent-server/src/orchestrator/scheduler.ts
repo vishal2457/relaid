@@ -1,26 +1,40 @@
-import { execSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { Ticket, Goal, AgentRun, AgentProfile, Project } from "../models/domain.js";
-import { validateTicketTransition } from "../models/domain.js";
+import type { Ticket, Goal, AgentRun, AgentProfile, BoardStep, TicketStepExecution } from "../models/domain.js";
 import { getStore, createId, now, markDirty } from "../server/store.js";
 import { broadcastOrchestration } from "../server/sse-orchestration.js";
 import {
   createWorktree,
   commitChanges,
-  getDiff,
   createBranchName,
-  createWorktreePath,
   ensureGitRepository,
 } from "../git/worktree.js";
-import { isInterruptedRun, resolveDependencyStatus, selectAgentForTicket } from "./scheduling.js";
+import { isInterruptedRun, selectAgentForTicket } from "./scheduling.js";
 import type { AgentStreamContext, SsePayload } from "../events/event-types.js";
 import type { ClaudeAgent } from "../agents/claude-agent.js";
 import type { CodexAgent } from "../agents/codex-agent.js";
 import type { OpencodeAgent } from "../agents/opencode-agent.js";
 import { broadcast } from "../server/sse-bus.js";
-import { detectHarnesses } from "../server/routes/harnesses.js";
+import { ensureSeedSteps } from "../server/routes/board-steps.js";
+import { ensurePlanningAgent } from "./orchestrator-profile.js";
+import {
+  BOARD_STATE_CHANGED_TRIGGER,
+  DELEGATED_WORKER_SYSTEM_INSTRUCTIONS,
+  ORCHESTRATOR_ANALYSIS_FAILED_MESSAGE,
+  ORCHESTRATOR_BOARD_REPAIR_SYSTEM_INSTRUCTIONS,
+  ORCHESTRATOR_BOARD_SYSTEM_INSTRUCTIONS,
+  PLANNING_REPAIR_SYSTEM_INSTRUCTIONS,
+  PLANNING_SYSTEM_INSTRUCTIONS,
+  WORKFLOW_ACTIONS,
+  WORKFLOW_EVENTS,
+  buildAgentSystemPrompt,
+  buildBoardAnalysisPrompt,
+  buildBoardRepairPrompt,
+  buildPlanningPrompt,
+  buildPlanningRepairPrompt,
+  buildStepExecutionPrompt,
+} from "./workflow-constants.js";
 
 let claudeAgent: ClaudeAgent | null = null;
 let codexAgent: CodexAgent | null = null;
@@ -83,9 +97,6 @@ const plannedTicketSchema = z.object({
   priority: ticketPrioritySchema,
   acceptanceCriteria: nonEmptyStringListSchema, technicalNotes: stringListSchema.default([]),
   relevantFiles: stringListSchema.default([]), dependencyKeys: stringListSchema.default([]),
-  agentName: z.string().default(""),
-  provider: z.enum(["claude", "codex", "opencode"]).optional(),
-  model: z.string().optional(),
   testPlan: nonEmptyStringListSchema,
   verificationCommands: nonEmptyStringListSchema,
 });
@@ -104,7 +115,7 @@ const ticketPlanOutputSchema = {
         required: [
           "key", "title", "description", "type", "priority", "acceptanceCriteria",
           "technicalNotes", "relevantFiles", "dependencyKeys", "testPlan",
-          "verificationCommands", "agentName", "provider", "model",
+          "verificationCommands",
         ],
         properties: {
           key: { type: "string", minLength: 1 },
@@ -118,9 +129,6 @@ const ticketPlanOutputSchema = {
           dependencyKeys: { type: "array", items: { type: "string" } },
           testPlan: { type: "array", minItems: 1, items: { type: "string" } },
           verificationCommands: { type: "array", minItems: 1, items: { type: "string" } },
-          agentName: { type: "string" },
-          provider: { type: "string", enum: ["claude", "codex", "opencode"] },
-          model: { type: "string" },
         },
       },
     },
@@ -191,30 +199,30 @@ async function parseTicketPlanWithArtifact(output: string, projectLocation: stri
 export async function planAndExecuteGoal(goal: Goal): Promise<void> {
   const store = getStore();
   const project = store.projects.get(goal.projectId);
-  const manager = store.agents.get(goal.managerAgentId);
-  const agent = manager ? getAgent(manager.provider) : null;
-  if (!project || !manager || !agent) {
-    failPlanning(goal, "Project, orchestrator, or harness is unavailable"); return;
+  const planner = store.agents.get(goal.plannerAgentId) || ensurePlanningAgent();
+  goal.plannerAgentId = planner.id;
+  const agent = getAgent(planner.provider);
+  if (!project || !planner.enabled || !agent) {
+    failPlanning(goal, "Project, planning agent, or planning harness is unavailable"); return;
   }
   const git = await ensureGitRepository(project.location, project.baseBranch);
   if (!git.ok) {
     failPlanning(goal, `Could not initialize project repository: ${git.error}`); return;
   }
   const verification = [project.testCommand, project.lintCommand, project.typeCheckCommand, project.buildCommand].filter(Boolean).join("\n") || "Infer the repository's real test and type-check commands.";
-  const harnesses = detectHarnesses().filter((harness) => harness.available && harness.models.length > 0);
-  const harnessCatalog = harnesses.map((harness) => `${harness.id}: ${harness.models.join(", ")}`).join("\n");
   let planningOutput = "";
   try {
     const result = await agent.run({
-      requestId: `plan-${goal.id}`, cwd: project.location, provider: manager.provider,
-      sessionId: `plan-${goal.id}`, model: manager.model, permissionMode: "plan",
+      requestId: `plan-${goal.id}`, cwd: project.location, provider: planner.provider,
+      sessionId: `plan-${goal.id}`, model: planner.model, permissionMode: "plan",
+      readOnly: true,
       outputSchema: ticketPlanOutputSchema,
-      systemPrompt: `${manager.systemPrompt}\n\nYou are the only orchestrator. Inspect the repository without editing it. Produce the complete execution plan as valid JSON only.`,
-      prompt: `Plan this goal into small dependency-aware tickets. Prioritize useful parallel work and keep dependencies only where an actual review gate is required. A dependent ticket may begin when its dependency enters review; it will be stopped automatically if that review fails. Every implementation ticket must require a failing test first and every ticket must have concrete verification commands.\n\nAvailable harnesses and models:\n${harnessCatalog || "No available harnesses were detected; omit provider and model."}\n\nChoose the best available provider and model for every ticket and give its agent a short, meaningful role-based name (for example, API Contract Reviewer or Mobile Auth Engineer).\n\nGoal: ${goal.title}\n${goal.description}\n\nAcceptance criteria:\n${goal.acceptanceCriteria.join("\n") || "Infer them from the goal."}\n\nConstraints:\n${goal.constraints.join("\n") || "None"}\n\nProject verification commands:\n${verification}\n\nReturn a JSON object with a tickets array. Each item must contain: key, title, description, type, priority, acceptanceCriteria, technicalNotes, relevantFiles, dependencyKeys, testPlan, verificationCommands, agentName, provider, model. All list fields must be JSON arrays, even when they contain one item. dependencyKeys must reference keys in the same array.`,
+      systemPrompt: `${planner.systemPrompt}\n\n${PLANNING_SYSTEM_INSTRUCTIONS}`,
+      prompt: buildPlanningPrompt(goal, verification),
     }, (payload) => broadcastAgentStream(payload, {
       runId: `plan-${goal.id}`,
       goalId: goal.id,
-      agentProfileId: manager.id,
+      agentProfileId: planner.id,
     }));
     planningOutput = result.output;
     if (!result.success) throw new Error(result.error || "Orchestrator planning failed");
@@ -224,15 +232,16 @@ export async function planAndExecuteGoal(goal: Goal): Promise<void> {
     } catch (firstError) {
       const validationMessage = firstError instanceof Error ? firstError.message : String(firstError);
       const retry = await agent.run({
-        requestId: `plan-${goal.id}-repair`, cwd: project.location, provider: manager.provider,
-        sessionId: `plan-${goal.id}-repair`, model: manager.model, permissionMode: "plan",
+        requestId: `plan-${goal.id}-repair`, cwd: project.location, provider: planner.provider,
+        sessionId: `plan-${goal.id}-repair`, model: planner.model, permissionMode: "plan",
+        readOnly: true,
         outputSchema: ticketPlanOutputSchema,
-        systemPrompt: `${manager.systemPrompt}\n\nYour response is machine-consumed. Return only JSON matching the supplied schema, with no Markdown or commentary.`,
-        prompt: `Regenerate the complete ticket plan for this goal. The previous response failed validation with: ${validationMessage}\n\nGoal: ${goal.title}\n${goal.description}\n\nAcceptance criteria:\n${goal.acceptanceCriteria.join("\n") || "Infer them from the goal."}\n\nConstraints:\n${goal.constraints.join("\n") || "None"}\n\nAvailable harnesses and models:\n${harnessCatalog || "No available harnesses were detected."}\n\nProject verification commands:\n${verification}`,
+        systemPrompt: `${planner.systemPrompt}\n\n${PLANNING_REPAIR_SYSTEM_INSTRUCTIONS}`,
+        prompt: buildPlanningRepairPrompt(goal, verification, validationMessage),
       }, (payload) => broadcastAgentStream(payload, {
         runId: `plan-${goal.id}`,
         goalId: goal.id,
-        agentProfileId: manager.id,
+        agentProfileId: planner.id,
       }));
       planningOutput = `Automatic retry output:\n${retry.output}\n\nInitial output:\n${result.output}`;
       if (!retry.success) throw new Error(retry.error || "Orchestrator JSON repair attempt failed");
@@ -243,14 +252,10 @@ export async function planAndExecuteGoal(goal: Goal): Promise<void> {
         throw new Error(`${retryMessage} (automatic regeneration also failed)`);
       }
     }
-    const availableModels = new Map(harnesses.map((harness) => [harness.id, new Set(harness.models)]));
-    for (const item of plan) {
-      if (!item.provider || !item.model) continue;
-      if (!availableModels.get(item.provider)?.has(item.model)) {
-        throw new Error(`Orchestrator selected unavailable harness/model for ${item.key}: ${item.provider}/${item.model}`);
-      }
-    }
     const timestamp = now();
+    const steps = ensureSeedSteps();
+    const firstStep = steps.find((step) => !step.isTerminal) || steps[0];
+    if (!firstStep) throw new Error("No workflow steps are configured");
     const ids = new Map(plan.map((ticket) => [ticket.key, createId()]));
     for (const item of plan) {
       const id = ids.get(item.key)!;
@@ -258,17 +263,16 @@ export async function planAndExecuteGoal(goal: Goal): Promise<void> {
       const ticket: Ticket = {
         id, projectId: goal.projectId, goalId: goal.id, title: item.title, description: item.description,
         type: item.type, status: dependencyIds.length ? "blocked" : "ready", priority: item.priority,
+        currentStepId: firstStep.id, stepStatus: null, stepHistory: [],
         acceptanceCriteria: item.acceptanceCriteria, technicalNotes: item.technicalNotes,
-        relevantFiles: item.relevantFiles, dependencyIds, blockingTicketIds: [...dependencyIds],
-        requestedAgentName: item.agentName.trim() || `${item.title} ${item.type} agent`,
-        requestedProvider: item.provider, requestedModel: item.model,
+        relevantFiles: item.relevantFiles, dependencyIds,
         testPlan: item.testPlan, verificationCommands: item.verificationCommands,
         retryCount: 0, maximumRetries: goal.maxRetries, createdAt: timestamp, updatedAt: timestamp,
       };
       store.tickets.set(id, ticket); goal.ticketIds.push(id);
     }
     goal.status = "running"; goal.updatedAt = timestamp; markDirty();
-    broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, type: "goal.tickets_created", payload: { count: plan.length, source: "orchestrator" }, sequence: 0, occurredAt: timestamp });
+    broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, type: "goal.tickets_created", payload: { count: plan.length, source: "planning-agent" }, sequence: 0, occurredAt: timestamp });
     await scheduleAndExecute(goal);
   } catch (error) {
     failPlanning(goal, error instanceof Error ? error.message : String(error), planningOutput);
@@ -283,120 +287,272 @@ function failPlanning(goal: Goal, error: string, output?: string): void {
   broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, type: "goal.failed", payload: goal.lastError, sequence: 0, occurredAt: timestamp });
 }
 
-// Checks if all dependencies of a ticket are completed
-function isTicketReady(ticket: Ticket, allTickets: Map<string, Ticket>): boolean {
-  if (ticket.status !== "ready" && ticket.status !== "backlog") return false;
-  return resolveDependencyStatus(ticket, allTickets).ready;
+export async function scheduleAndExecute(goal: Goal): Promise<void> {
+  if (orchestrationLocks.has(goal.id)) {
+    orchestrationPending.add(goal.id);
+    return;
+  }
+  orchestrationLocks.add(goal.id);
+  try {
+    do {
+      orchestrationPending.delete(goal.id);
+      await analyzeBoard(goal, BOARD_STATE_CHANGED_TRIGGER);
+    } while (orchestrationPending.has(goal.id) && goal.status === "running");
+  } finally {
+    orchestrationLocks.delete(goal.id);
+  }
 }
 
-// Sort tickets by priority + dependency impact
-function sortTickets(tickets: Ticket[], allTickets: Map<string, Ticket>): Ticket[] {
-  const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+const orchestrationLocks = new Set<string>();
+const orchestrationPending = new Set<string>();
 
-  const blockingCount = new Map<string, number>();
-  for (const t of tickets) {
-    for (const depId of t.dependencyIds) {
-      blockingCount.set(depId, (blockingCount.get(depId) ?? 0) + 1);
+const decisionActionSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const action = { ...(value as Record<string, unknown>) };
+  if (action.action === "dispatch" || action.action === "start") action.action = "run";
+  if (action.action == null && (action.agentId != null || action.agentName != null || action.agentProvider != null)) action.action = "run";
+  action.provider ??= action.agentProvider;
+  action.model ??= action.agentModel;
+  action.targetStepId ??= "";
+  action.agentId ??= "";
+  action.agentName ??= "";
+  action.model ??= "";
+  action.reason ??= action.instructions ?? "Orchestrator requested this action";
+  return action;
+}, z.object({
+  action: z.enum(WORKFLOW_ACTIONS),
+  ticketId: z.string().min(1),
+  targetStepId: z.string().default(""),
+  agentId: z.string().default(""),
+  agentName: z.string().default(""),
+  provider: z.enum(["claude", "codex", "opencode"]).optional(),
+  model: z.string().default(""),
+  reason: z.string().min(1),
+}));
+
+const boardDecisionOutputSchema = {
+  type: "object", additionalProperties: false, required: ["actions"],
+  properties: { actions: { type: "array", items: { type: "object", additionalProperties: false,
+    required: ["action", "ticketId", "targetStepId", "agentId", "agentName", "provider", "model", "reason"],
+    properties: {
+      action: { type: "string", enum: WORKFLOW_ACTIONS },
+      ticketId: { type: "string" }, targetStepId: { type: "string" }, agentId: { type: "string" },
+      agentName: { type: "string" }, provider: { type: "string", enum: ["claude", "codex", "opencode"] },
+      model: { type: "string" }, reason: { type: "string" },
+    },
+  } } },
+} as const;
+
+export function parseBoardDecision(output: string) {
+  const candidates = [output.trim()];
+  for (const match of output.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    if (match[1]) candidates.push(match[1].trim());
+  }
+  let parseError: unknown;
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as { actions?: unknown; moves?: unknown; reasoning?: unknown };
+      let actions = parsed.actions;
+      if (actions == null && Array.isArray(parsed.moves)) {
+        actions = parsed.moves.map((value) => {
+          if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+          const move = value as Record<string, unknown>;
+          const sameStep = move.fromStepId === move.toStepId;
+          return {
+            ...move,
+            action: sameStep && move.stepStatus === "in_progress" ? "run" : "move",
+            targetStepId: move.toStepId,
+            reason: parsed.reasoning || "Orchestrator requested this move",
+          };
+        });
+      }
+      return z.array(decisionActionSchema).parse(actions);
+    } catch (error) {
+      parseError = error;
     }
   }
+  throw parseError instanceof Error ? parseError : new Error("Orchestrator did not return valid board actions");
+}
 
-  return [...tickets].sort((a, b) => {
-    const pa = priorityOrder[a.priority] ?? 4;
-    const pb = priorityOrder[b.priority] ?? 4;
-    if (pa !== pb) return pa - pb;
+async function analyzeBoard(goal: Goal, trigger: string): Promise<void> {
+  const store = getStore();
+  const project = store.projects.get(goal.projectId);
+  const orchestrator = store.agents.get(goal.managerAgentId);
+  const agent = orchestrator ? getAgent(orchestrator.provider) : null;
+  if (!project || !orchestrator?.enabled || !agent || goal.status !== "running") return;
+  const steps = ensureSeedSteps();
+  migrateGoalTickets(goal, steps);
+  syncDependencyStatuses(goal, steps);
+  finishGoalIfComplete(goal, steps);
+  if (goal.status !== "running") return;
+  const tickets = [...store.tickets.values()].filter((ticket) => ticket.goalId === goal.id);
+  const running = [...store.agentRuns.values()].filter((run) => run.goalId === goal.id && run.kind === "step" && (run.status === "starting" || run.status === "running"));
+  const agents = [...store.agents.values()].filter((profile) => profile.role === "worker" && profile.enabled);
+  const run: AgentRun = {
+    id: createId(), goalId: goal.id, ticketId: "", agentProfileId: orchestrator.id,
+    provider: orchestrator.provider, model: orchestrator.model, kind: "orchestration", status: "running",
+    worktreePath: project.location, branchName: project.baseBranch, startedAt: now(),
+  };
+  run.sessionId = `orchestrate-${goal.id}-${run.id}`;
+  store.agentRuns.set(run.id, run); markDirty();
+  broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, agentId: orchestrator.id, type: WORKFLOW_EVENTS.orchestratorAnalysisStarted, payload: { runId: run.id, trigger }, sequence: 0, occurredAt: now() });
+  const board = {
+    trigger,
+    capacity: { maxAgents: goal.maxAgents, runningStepRuns: running.length, available: Math.max(0, goal.maxAgents - running.length) },
+    steps: steps.map((step) => ({ id: step.id, position: step.position, name: step.name, instructions: step.instructions, allowedNextStepIds: step.allowedNextStepIds, allowedPreviousStepIds: step.allowedPreviousStepIds, isTerminal: step.isTerminal })),
+    tickets: tickets.map((ticket) => ({ id: ticket.id, title: ticket.title, description: ticket.description, type: ticket.type, priority: ticket.priority, acceptanceCriteria: ticket.acceptanceCriteria, relevantFiles: ticket.relevantFiles, currentStepId: ticket.currentStepId, stepStatus: ticket.stepStatus, retryCount: ticket.retryCount, maximumRetries: ticket.maximumRetries, dependencies: ticket.dependencyIds.map((id) => { const dependency = store.tickets.get(id); return { id, stepId: dependency?.currentStepId, stepStatus: dependency?.stepStatus, ticketStatus: dependency?.status }; }), assignedAgentId: ticket.assignedAgentId, lastStepResult: ticket.stepHistory.at(-1) })),
+    running: running.map((active) => ({ runId: active.id, ticketId: active.ticketId, stepId: active.stepId, agentProfileId: active.agentProfileId })),
+    agents: agents.map((profile) => ({ id: profile.id, name: profile.name, provider: profile.provider, model: profile.model })),
+  };
+  try {
+    const result = await agent.run({
+      requestId: run.id, cwd: project.location, provider: orchestrator.provider, sessionId: run.sessionId,
+      model: orchestrator.model, permissionMode: "plan", outputSchema: boardDecisionOutputSchema,
+      readOnly: true,
+      systemPrompt: `${orchestrator.systemPrompt}\n\n${ORCHESTRATOR_BOARD_SYSTEM_INSTRUCTIONS}`,
+      prompt: buildBoardAnalysisPrompt(board),
+    }, (payload) => broadcastAgentStream(payload, { runId: run.id, goalId: goal.id, agentProfileId: orchestrator.id }));
+    run.output = result.output; run.error = result.error; run.status = result.success ? "completed" : "failed"; run.completedAt = now(); markDirty();
+    if (!result.success) throw new Error(result.error || "Orchestrator analysis failed");
+    let actions: ReturnType<typeof parseBoardDecision>;
+    try {
+      actions = parseBoardDecision(result.output);
+    } catch (firstError) {
+      const validationMessage = firstError instanceof Error ? firstError.message : String(firstError);
+      const retry = await agent.run({
+        requestId: `${run.id}-repair`, cwd: project.location, provider: orchestrator.provider,
+        sessionId: `${run.sessionId}-repair`, model: orchestrator.model, permissionMode: "plan",
+        readOnly: true,
+        outputSchema: boardDecisionOutputSchema,
+        systemPrompt: `${orchestrator.systemPrompt}\n\n${ORCHESTRATOR_BOARD_REPAIR_SYSTEM_INSTRUCTIONS}`,
+        prompt: buildBoardRepairPrompt(board, validationMessage, result.output),
+      }, (payload) => broadcastAgentStream(payload, { runId: run.id, goalId: goal.id, agentProfileId: orchestrator.id }));
+      run.output = `Automatic retry output:\n${retry.output}\n\nInitial output:\n${result.output}`;
+      if (!retry.success) throw new Error(retry.error || "Orchestrator JSON repair attempt failed");
+      actions = parseBoardDecision(retry.output);
+    }
+    await applyBoardActions(goal, actions, steps);
+    finishGoalIfComplete(goal, steps);
+    broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, agentId: orchestrator.id, type: WORKFLOW_EVENTS.orchestratorAnalysisCompleted, payload: { runId: run.id, actions }, sequence: 0, occurredAt: now() });
+  } catch (error) {
+    run.status = "failed"; run.error = error instanceof Error ? error.message : String(error); run.completedAt = now();
+    goal.status = "blocked"; goal.updatedAt = now();
+    goal.lastError = { phase: "execution", message: ORCHESTRATOR_ANALYSIS_FAILED_MESSAGE, details: run.error, occurredAt: now() };
+    markDirty();
+    broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, agentId: orchestrator.id, type: WORKFLOW_EVENTS.orchestratorAnalysisFailed, payload: { runId: run.id, error: run.error }, sequence: 0, occurredAt: now() });
+  }
+}
 
-    const ba = blockingCount.get(a.id) ?? 0;
-    const bb = blockingCount.get(b.id) ?? 0;
-    return bb - ba;
+function migrateGoalTickets(goal: Goal, steps: BoardStep[]): void {
+  const store = getStore();
+  const first = steps.find((step) => !step.isTerminal) || steps[0];
+  if (!first) return;
+  for (const ticket of store.tickets.values()) {
+    if (ticket.goalId !== goal.id) continue;
+    ticket.currentStepId ||= first.id;
+    ticket.stepHistory ||= [];
+    if ((ticket as unknown as { stepStatus?: string }).stepStatus === undefined) ticket.stepStatus = ticket.status === "failed" ? "failed" : ticket.status === "in_progress" ? "in_progress" : null;
+  }
+  markDirty();
+}
+
+function dependenciesComplete(ticket: Ticket, steps: BoardStep[]): boolean {
+  const store = getStore();
+  const terminalIds = new Set(steps.filter((step) => step.isTerminal).map((step) => step.id));
+  return ticket.dependencyIds.every((id) => {
+    const dependency = store.tickets.get(id);
+    return dependency && terminalIds.has(dependency.currentStepId) && dependency.stepStatus === "completed";
   });
 }
 
-export async function scheduleAndExecute(goal: Goal): Promise<void> {
+function syncDependencyStatuses(goal: Goal, steps: BoardStep[]): void {
   const store = getStore();
-  const goalTickets = [...store.tickets.values()].filter(t => t.goalId === goal.id);
+  for (const ticket of store.tickets.values()) {
+    if (ticket.goalId !== goal.id || ticket.status === "completed" || ticket.status === "failed" || ticket.status === "cancelled" || ticket.stepStatus === "in_progress") continue;
+    const ready = dependenciesComplete(ticket, steps);
+    if (!ready && ticket.stepStatus == null) ticket.status = "blocked";
+    if (ready && ticket.status === "blocked" && ticket.stepStatus == null) ticket.status = "ready";
+  }
+  markDirty();
+}
 
-  // Keep dependency flags and board state current before assigning work.
-  for (const ticket of goalTickets) {
-    if (!["backlog", "ready", "blocked"].includes(ticket.status)) continue;
-    const dependency = resolveDependencyStatus(ticket, store.tickets);
-    ticket.blockingTicketIds = [...dependency.blockingTicketIds, ...dependency.invalidDependencyIds];
-    const nextStatus = dependency.ready ? "ready" : "blocked";
-    if (ticket.status !== nextStatus) {
-      ticket.status = nextStatus;
+async function applyBoardActions(goal: Goal, actions: z.infer<typeof decisionActionSchema>[], steps: BoardStep[]): Promise<void> {
+  const store = getStore();
+  const stepMap = new Map(steps.map((step) => [step.id, step]));
+  const activeRuns = [...store.agentRuns.values()].filter((run) => run.goalId === goal.id && run.kind === "step" && (run.status === "starting" || run.status === "running"));
+  let capacity = Math.max(0, goal.maxAgents - activeRuns.length);
+  const busyAgentIds = new Set(activeRuns.map((run) => run.agentProfileId));
+  const actedTicketIds = new Set<string>();
+  for (const action of actions) {
+    const ticket = store.tickets.get(action.ticketId);
+    if (!ticket || ticket.goalId !== goal.id || ticket.stepStatus === "in_progress" || actedTicketIds.has(ticket.id)) continue;
+    actedTicketIds.add(ticket.id);
+    const current = stepMap.get(ticket.currentStepId);
+    if (!current) continue;
+    if ((action.action === "run" || action.action === "retry" || action.action === "move") && !dependenciesComplete(ticket, steps)) {
+      ticket.status = "blocked";
       ticket.updatedAt = now();
-      markDirty();
-      broadcastOrchestration({
-        id: createId(), projectId: goal.projectId, goalId: goal.id, ticketId: ticket.id,
-        type: "ticket.status_changed", payload: { status: nextStatus, blockingTicketIds: ticket.blockingTicketIds }, sequence: 0, occurredAt: now(),
-      });
+      continue;
     }
-  }
-
-  const ready = goalTickets.filter(t => isTicketReady(t, store.tickets));
-  if (ready.length === 0) {
-    // Check if all tickets done
-    const allDone = goalTickets.every(t => t.status === "completed" || t.status === "cancelled" || t.status === "failed");
-    const terminalFailure = goalTickets.some((ticket) => ticket.status === "failed");
-    if ((allDone || terminalFailure) && goal.status === "running") {
-      goal.status = "verifying";
-      goal.updatedAt = now();
-      markDirty();
-      broadcastOrchestration({
-        id: createId(), projectId: goal.projectId, goalId: goal.id,
-        type: "goal.status_changed", payload: { status: "verifying" }, sequence: 0, occurredAt: now(),
-      });
-
-      // Auto-verify
-      const hasFailures = goalTickets.some(t => t.status === "failed");
-      goal.status = hasFailures ? "failed" : "completed";
-      goal.lastError = hasFailures ? {
-        phase: "execution",
-        message: "One or more tickets failed and exhausted their retries.",
-        details: goalTickets.filter((ticket) => ticket.status === "failed").map((ticket) => {
-          const run = [...store.agentRuns.values()].reverse().find((candidate) => candidate.ticketId === ticket.id && candidate.status === "failed");
-          return `${ticket.id} ${ticket.title}: ${run?.error || ticket.technicalNotes.at(-1) || "No agent error was recorded"}`;
-        }).join("\n"),
-        occurredAt: now(),
-      } : undefined;
-      goal.completedAt = now();
-      goal.updatedAt = now();
-      markDirty();
-      broadcastOrchestration({
-        id: createId(), projectId: goal.projectId, goalId: goal.id,
-        type: hasFailures ? "goal.failed" : "goal.completed",
-        payload: { status: goal.status },
-        sequence: 0, occurredAt: now(),
-      });
+    if (action.action === "block") {
+      ticket.stepStatus = "blocked"; ticket.status = "blocked"; ticket.technicalNotes.push(`Orchestrator: ${action.reason}`); ticket.updatedAt = now();
+      broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketStepBlocked, { reason: action.reason });
+      continue;
     }
-    return;
-  }
-
-  const runningAgents = [...store.agentRuns.values()].filter(
-    r => r.goalId === goal.id && (r.status === "starting" || r.status === "running"),
-  );
-
-  const available = goal.maxAgents - runningAgents.length;
-  if (available <= 0) return;
-
-  const sorted = sortTickets(ready, store.tickets);
-  const toStart = sorted.slice(0, available);
-  const projectAgents = [...store.agents.values()];
-  const busyAgentIds = new Set(runningAgents.map((run) => run.agentProfileId));
-
-  for (const ticket of toStart) {
-    let profile = selectAgentForTicket(
-      projectAgents.filter((agent) =>
-        (!ticket.requestedProvider || agent.provider === ticket.requestedProvider)
-        && (!ticket.requestedModel || agent.model === ticket.requestedModel)),
-      busyAgentIds,
-    );
-    if (!profile) {
-      profile = createManagerDelegatedWorker(goal, ticket, projectAgents);
-      projectAgents.push(profile);
+    if (action.action === "complete") {
+      if (!current.isTerminal) continue;
+      ticket.stepStatus = "completed"; ticket.status = "completed"; ticket.completedAt = now(); ticket.updatedAt = now();
+      broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketCompleted, { reason: action.reason });
+      continue;
     }
-    busyAgentIds.add(profile.id);
-    void executeTicket(goal, ticket, profile);
+    if (action.action === "move") {
+      const target = stepMap.get(action.targetStepId);
+      if (!target || (!current.allowedNextStepIds.includes(target.id) && !current.allowedPreviousStepIds.includes(target.id))) continue;
+      if (!target.isTerminal && capacity <= 0) continue;
+      ticket.currentStepId = target.id; ticket.stepStatus = null; ticket.status = target.isTerminal ? "completed" : "ready"; ticket.updatedAt = now();
+      if (target.isTerminal) { ticket.stepStatus = "completed"; ticket.completedAt = now(); }
+      broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketStepChanged, { fromStepId: current.id, toStepId: target.id, reason: action.reason });
+      if (target.isTerminal) continue;
+    } else if (action.action !== "run" && action.action !== "retry") {
+      continue;
+    }
+    if (capacity <= 0) continue;
+    const profile = resolveActionAgent(goal, ticket, action, busyAgentIds);
+    if (!profile) continue;
+    capacity--; busyAgentIds.add(profile.id);
+    void executeTicketStep(goal, ticket, stepMap.get(ticket.currentStepId)!, profile);
   }
+  markDirty();
+}
+
+function resolveActionAgent(goal: Goal, ticket: Ticket, action: z.infer<typeof decisionActionSchema>, busyAgentIds: Set<string>): AgentProfile | undefined {
+  const store = getStore();
+  const assigned = ticket.assignedAgentId ? store.agents.get(ticket.assignedAgentId) : undefined;
+  if (assigned?.role === "worker" && assigned.enabled && !busyAgentIds.has(assigned.id)) return assigned;
+  ticket.requestedAgentName = action.agentName || ticket.requestedAgentName;
+  ticket.requestedProvider = action.provider || ticket.requestedProvider;
+  ticket.requestedModel = action.model || ticket.requestedModel;
+  if (!ticket.assignedAgentId) return createManagerDelegatedWorker(goal, ticket);
+  const requested = action.agentId ? store.agents.get(action.agentId) : undefined;
+  if (requested?.role === "worker" && requested.enabled && !busyAgentIds.has(requested.id)) return requested;
+  const profiles = [...store.agents.values()];
+  const matching = selectAgentForTicket(profiles.filter((profile) =>
+    (!action.provider || profile.provider === action.provider) && (!action.model || profile.model === action.model)), busyAgentIds);
+  if (matching) return matching;
+  return createManagerDelegatedWorker(goal, ticket);
+}
+
+function finishGoalIfComplete(goal: Goal, steps: BoardStep[]): void {
+  const store = getStore();
+  const terminalIds = new Set(steps.filter((step) => step.isTerminal).map((step) => step.id));
+  const tickets = [...store.tickets.values()].filter((ticket) => ticket.goalId === goal.id);
+  if (!tickets.length || !tickets.every((ticket) => terminalIds.has(ticket.currentStepId) && ticket.stepStatus === "completed")) return;
+  goal.status = "completed"; goal.completedAt = now(); goal.updatedAt = now(); markDirty();
+  broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, type: WORKFLOW_EVENTS.goalCompleted, payload: { status: goal.status }, sequence: 0, occurredAt: now() });
+}
+
+function broadcastTicketStep(goal: Goal, ticket: Ticket, type: string, payload: Record<string, unknown>): void {
+  broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, ticketId: ticket.id, type, payload: { currentStepId: ticket.currentStepId, stepStatus: ticket.stepStatus, ...payload }, sequence: 0, occurredAt: now() });
 }
 
 /** Reconcile persisted runs with the harness processes before resuming a goal. */
@@ -413,7 +569,12 @@ export function recoverInterruptedGoal(goal: Goal): number {
     run.completedAt = now();
     const ticket = store.tickets.get(run.ticketId);
     if (ticket && (ticket.status === "in_progress" || ticket.status === "review")) {
-      ticket.status = "ready";
+      ticket.status = run.kind === "step" ? "failed" : "ready";
+      if (run.kind === "step") {
+        ticket.stepStatus = "failed";
+        const execution = ticket.stepHistory?.find((item) => item.agentRunId === run.id);
+        if (execution) { execution.status = "failed"; execution.error = run.error; execution.completedAt = run.completedAt; }
+      }
       ticket.assignedAgentId = undefined;
       ticket.updatedAt = now();
     }
@@ -423,7 +584,7 @@ export function recoverInterruptedGoal(goal: Goal): number {
   return recovered;
 }
 
-function createManagerDelegatedWorker(goal: Goal, ticket: Ticket, profiles: AgentProfile[]): AgentProfile {
+function createManagerDelegatedWorker(goal: Goal, ticket: Ticket): AgentProfile {
   const store = getStore();
   const manager = store.agents.get(goal.managerAgentId);
   if (!manager) throw new Error("Goal manager not found");
@@ -434,433 +595,110 @@ function createManagerDelegatedWorker(goal: Goal, ticket: Ticket, profiles: Agen
     provider: ticket.requestedProvider || manager.provider,
     model: ticket.requestedModel || manager.model,
     description: `Delegated to ${ticket.title} for goal ${goal.id}`,
-    systemPrompt: `${manager.systemPrompt}\n\nYou are a worker delegated by the manager. Implement only your assigned ticket using strict TDD.`,
+    systemPrompt: DELEGATED_WORKER_SYSTEM_INSTRUCTIONS,
+    permissionMode: "acceptEdits",
     createdAt: timestamp, updatedAt: timestamp,
   };
   store.agents.set(worker.id, worker); markDirty();
-  broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, agentId: worker.id, type: "agent.created", payload: worker, sequence: 0, occurredAt: timestamp });
+  broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, agentId: worker.id, type: WORKFLOW_EVENTS.agentCreated, payload: worker, sequence: 0, occurredAt: timestamp });
   return worker;
 }
 
-async function executeTicket(goal: Goal, ticket: Ticket, profile: AgentProfile): Promise<void> {
+async function executeTicketStep(goal: Goal, ticket: Ticket, step: BoardStep, profile: AgentProfile): Promise<void> {
   const store = getStore();
-  const provider = profile.provider;
-
-  const agent = getAgent(provider);
-  if (!agent) return;
-
-  // Locate project
   const project = store.projects.get(goal.projectId);
-  if (!project) return;
+  const agent = getAgent(profile.provider);
+  if (!project || !agent || step.isTerminal || ticket.stepStatus === "in_progress") return;
 
-  // Transition ticket to in_progress
-  if (!validateTicketTransition(ticket.status, "in_progress")) return;
-  ticket.status = "in_progress";
-  ticket.startedAt = now();
-  ticket.updatedAt = now();
-  markDirty();
-
-  broadcastOrchestration({
-    id: createId(), projectId: goal.projectId, goalId: goal.id, ticketId: ticket.id,
-    type: "ticket.status_changed", payload: { status: ticket.status }, sequence: 0, occurredAt: now(),
-  });
-
-  // Create worktree
   const branch = createBranchName(goal.id, ticket.id);
-  const wtPath = createWorktreePath(goal.id, ticket.id);
   const directExecution = project.executionMode !== "worktree";
-  const executionPath = directExecution ? project.location : wtPath;
-
   const wtResult = directExecution
     ? { ok: true, output: project.location }
     : ticket.worktreePath
-    ? { ok: true, output: ticket.worktreePath }
-    : await createWorktree(project.location, project.baseBranch, goal.id, ticket.id);
-
+      ? { ok: true, output: ticket.worktreePath }
+      : await createWorktree(project.location, project.baseBranch, goal.id, ticket.id);
   if (!wtResult.ok) {
-    const reason = `Worktree setup failed: ${wtResult.error || "unknown git error"}`;
-    ticket.status = "failed";
-    ticket.technicalNotes.push(reason);
-    ticket.updatedAt = now();
-    markDirty();
-    broadcastOrchestration({
-      id: createId(), projectId: goal.projectId, goalId: goal.id, ticketId: ticket.id,
-      type: "ticket.failed", payload: { status: "failed", error: reason },
-      sequence: 0, occurredAt: now(),
-    });
-    setImmediate(() => {
-      const updatedGoal = store.goals.get(goal.id);
-      if (updatedGoal?.status === "running") void scheduleAndExecute(updatedGoal);
-    });
+    ticket.stepStatus = "failed"; ticket.status = "failed"; ticket.updatedAt = now();
+    ticket.technicalNotes.push(`Worktree setup failed: ${wtResult.error || "unknown git error"}`); markDirty();
+    broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketStepFailed, { error: ticket.technicalNotes.at(-1) });
+    setImmediate(() => void scheduleAndExecute(goal));
     return;
   }
-
+  const executionPath = directExecution ? project.location : wtResult.output;
   ticket.worktreePath = executionPath;
   ticket.branchName = directExecution ? project.baseBranch : branch;
-  markDirty();
+  ticket.stepStatus = "in_progress"; ticket.status = "in_progress"; ticket.assignedAgentId = profile.id;
+  ticket.startedAt ||= now(); ticket.updatedAt = now();
 
-  // Create agent run record
-  const agentRun: AgentRun = {
-    id: createId(),
-    goalId: goal.id,
-    ticketId: ticket.id,
-    agentProfileId: profile.id,
-    provider,
-    model: profile.model,
-    status: "running",
-    sessionId: ticket.id,
-    worktreePath: executionPath,
-    branchName: ticket.branchName,
-    startedAt: now(),
-  };
-  ticket.assignedAgentId = profile.id;
-  store.agentRuns.set(agentRun.id, agentRun);
-  markDirty();
-
-  broadcastOrchestration({
-    id: createId(), projectId: goal.projectId, goalId: goal.id, ticketId: ticket.id,
-    agentId: agentRun.id,
-    type: "agent.started", payload: { agentId: agentRun.id, ticketId: ticket.id },
-    sequence: 0, occurredAt: now(),
-  });
-
-  // Build prompt
-  const prompt = buildTicketPrompt(ticket, goal, project);
-  try {
-    let result;
-    const broadcastFn = (payload: SsePayload) => broadcastAgentStream(payload, {
-      runId: agentRun.id,
-      goalId: goal.id,
-      ticketId: ticket.id,
-      agentProfileId: profile.id,
-    });
-
-    if (provider === "claude") {
-      result = await (agent as ClaudeAgent).run({
-        requestId: agentRun.id,
-        cwd: executionPath,
-        provider: "claude",
-        sessionId: ticket.id,
-        prompt,
-        systemPrompt: buildSystemPrompt(goal, project, profile),
-        model: profile.model,
-        permissionMode: profile.permissionMode,
-      }, broadcastFn);
-    } else if (provider === "codex") {
-      result = await (agent as CodexAgent).run({
-        requestId: agentRun.id,
-        cwd: executionPath,
-        provider: "codex",
-        sessionId: ticket.id,
-        prompt,
-        systemPrompt: buildSystemPrompt(goal, project, profile),
-        model: profile.model,
-      }, broadcastFn);
-    } else {
-      // opencode
-      result = await (agent as OpencodeAgent).run({
-        requestId: agentRun.id,
-        cwd: executionPath,
-        provider: "opencode",
-        sessionId: ticket.id,
-        prompt,
-        systemPrompt: buildSystemPrompt(goal, project, profile),
-        model: profile.model,
-        permissionMode: profile.permissionMode,
-      }, broadcastFn);
-    }
-
-    agentRun.output = result.output;
-    agentRun.sessionId = result.sessionId;
-    agentRun.completedAt = now();
-
-    if (speculativeStops.delete(ticket.id)) {
-      agentRun.status = "aborted";
-      agentRun.error ||= "Speculative work stopped after a dependency review failed";
-      markDirty();
-      return;
-    }
-
-    if (result.success) {
-      const verification = runVerification(ticket, project, executionPath);
-      agentRun.output = `${agentRun.output || ""}\n\nVerification:\n${verification.output}`.trim();
-      if (!verification.success) {
-        throw new Error(verification.error);
-      }
-      const commitResult = directExecution
-        ? { ok: true, output: "Direct execution mode: changes remain in the configured project directory" }
-        : await commitChanges(executionPath, `feat: ${ticket.title}\n\nCloses #${ticket.id}`);
-      if (commitResult.ok) {
-        const diffResult = getDiff(executionPath);
-        const changeSummary = diffResult.ok ? diffResult.output : (agentRun.output || commitResult.output);
-        agentRun.status = "completed";
-
-        ticket.status = "review";
-        ticket.updatedAt = now();
-        markDirty();
-
-        broadcastOrchestration({
-          id: createId(), projectId: goal.projectId, goalId: goal.id,
-          ticketId: ticket.id, agentId: agentRun.id,
-          type: "ticket.status_changed",
-          payload: { status: ticket.status, diff: changeSummary },
-          sequence: 0, occurredAt: now(),
-        });
-
-        // Let downstream tickets start while this manager review is running.
-        // A rejected review aborts those speculative runs below.
-        void scheduleAndExecute(goal);
-
-        const review = goal.requireReview ? await runManagerReview(goal, ticket, project, executionPath, changeSummary) : { approved: true, output: "Review not required" };
-        if (speculativeStops.delete(ticket.id)) {
-          // An upstream review failed while this ticket was itself being
-          // reviewed. Keep it blocked; a fresh run will resume after re-review.
-          ticket.status = "blocked";
-          ticket.updatedAt = now();
-          markDirty();
-          return;
-        }
-        if (review.approved) {
-          ticket.status = "completed";
-          ticket.completedAt = now();
-          ticket.updatedAt = now();
-          markDirty();
-
-          broadcastOrchestration({
-            id: createId(), projectId: goal.projectId, goalId: goal.id,
-            ticketId: ticket.id,
-            type: "ticket.status_changed",
-            payload: { status: "completed" },
-            sequence: 0, occurredAt: now(),
-          });
-        } else {
-          await stopSpeculativeDependents(goal, ticket);
-          ticket.technicalNotes.push(`Manager review: ${review.output}`);
-          ticket.retryCount++;
-          ticket.status = goal.autoRetry && ticket.retryCount <= ticket.maximumRetries ? "ready" : "failed";
-          ticket.updatedAt = now();
-          markDirty();
-          broadcastOrchestration({
-            id: createId(), projectId: goal.projectId, goalId: goal.id, ticketId: ticket.id,
-            type: "ticket.review_rejected", payload: { status: ticket.status, review: review.output }, sequence: 0, occurredAt: now(),
-          });
-        }
-      } else {
-        agentRun.status = "failed";
-        agentRun.error = "Commit failed: " + (commitResult.error || "unknown");
-        agentRun.status = "failed";
-
-        ticket.status = "failed";
-        ticket.updatedAt = now();
-        markDirty();
-      }
-    } else {
-      agentRun.status = "failed";
-      agentRun.error = result.error || "Agent failed";
-      agentRun.status = "failed";
-
-      ticket.status = "failed";
-      ticket.retryCount++;
-      ticket.updatedAt = now();
-
-      // Auto-retry if configured
-      if (goal.autoRetry && ticket.retryCount <= ticket.maximumRetries) {
-        ticket.status = "ready";
-      }
-
-      markDirty();
-      broadcastOrchestration({
-        id: createId(), projectId: goal.projectId, goalId: goal.id,
-        ticketId: ticket.id, agentId: agentRun.id,
-        type: "ticket.failed",
-        payload: { status: ticket.status, error: agentRun.error, retryCount: ticket.retryCount },
-        sequence: 0, occurredAt: now(),
-      });
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (speculativeStops.delete(ticket.id)) {
-      agentRun.status = "aborted";
-      agentRun.error = message;
-      agentRun.completedAt = now();
-      markDirty();
-      return;
-    }
-    agentRun.status = "failed";
-    agentRun.error = message;
-    agentRun.completedAt = now();
-
-    ticket.status = "failed";
-    ticket.retryCount++;
-    ticket.updatedAt = now();
-    if (goal.autoRetry && ticket.retryCount <= ticket.maximumRetries) {
-      ticket.status = "ready";
-    }
-    markDirty();
-
-    broadcastOrchestration({
-      id: createId(), projectId: goal.projectId, goalId: goal.id,
-      ticketId: ticket.id, agentId: agentRun.id,
-      type: "ticket.failed",
-      payload: { error: message, retryCount: ticket.retryCount },
-      sequence: 0, occurredAt: now(),
-    });
-  }
-
-  // Schedule next round
-  setImmediate(() => {
-    const updatedGoal = store.goals.get(goal.id);
-    if (updatedGoal && updatedGoal.status === "running") {
-      scheduleAndExecute(updatedGoal);
-    }
-  });
-}
-
-const speculativeStops = new Set<string>();
-
-async function stopSpeculativeDependents(goal: Goal, rejected: Ticket): Promise<void> {
-  const store = getStore();
-  const descendants = new Set<string>([rejected.id]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const candidate of store.tickets.values()) {
-      if (candidate.goalId !== goal.id || descendants.has(candidate.id)) continue;
-      if (candidate.dependencyIds.some((id) => descendants.has(id))) {
-        descendants.add(candidate.id);
-        changed = true;
-      }
-    }
-  }
-
-  const activeDependents = [...store.tickets.values()].filter((candidate) =>
-    descendants.has(candidate.id) && candidate.id !== rejected.id
-    && (candidate.status === "in_progress" || candidate.status === "review"));
-  for (const dependent of activeDependents) {
-    speculativeStops.add(dependent.id);
-    const run = [...store.agentRuns.values()].reverse().find((candidate) =>
-      candidate.ticketId === dependent.id && (candidate.status === "starting" || candidate.status === "running"));
-    if (run) {
-      const sessionId = run.agentProfileId === goal.managerAgentId
-        ? `review-${dependent.id}-${run.id}`
-        : dependent.id;
-      await getAgent(run.provider)?.abort(sessionId);
-      run.status = "aborted";
-      run.error = `Stopped because review failed for dependency ${rejected.title}`;
-      run.completedAt = now();
-    }
-    dependent.status = "blocked";
-    dependent.blockingTicketIds = [...new Set([...dependent.blockingTicketIds, rejected.id])];
-    dependent.updatedAt = now();
-    broadcastOrchestration({
-      id: createId(), projectId: goal.projectId, goalId: goal.id, ticketId: dependent.id,
-      type: "ticket.speculative_work_stopped",
-      payload: { status: "blocked", rejectedDependencyId: rejected.id }, sequence: 0, occurredAt: now(),
-    });
-  }
-  markDirty();
-}
-
-function buildTicketPrompt(ticket: Ticket, goal: Goal, project: Project): string {
-  return `## Ticket: ${ticket.title}
-
-**Type:** ${ticket.type}
-**Priority:** ${ticket.priority}
-
-### Description
-${ticket.description}
-
-### Acceptance Criteria
-${ticket.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join("\n")}
-
-### Relevant Files
-${ticket.relevantFiles.length > 0 ? ticket.relevantFiles.join("\n") : "Explore the codebase to find relevant files."}
-
-### Test Plan
-${ticket.testPlan.length > 0 ? ticket.testPlan.map((s, i) => `${i + 1}. ${s}`).join("\n") : "Write and run tests to verify the changes."}
-
-### Verification Commands
-${ticket.verificationCommands.length > 0 ? ticket.verificationCommands.join("\n") : "Run the project test suite."}
-
-### Instructions
-1. Follow strict TDD: write a failing test first, then implement
-2. Make minimal changes - do not refactor unrelated code
-3. Do not modify files outside the scope of this ticket
-4. Do not disable existing tests
-5. Do not use --force git operations
-6. Summarize your changes when done`;
-}
-
-function buildSystemPrompt(goal: Goal, project: Project, profile: AgentProfile): string {
-  return `${profile.systemPrompt}\n\nYou are a coding agent working on: ${goal.title}
-
-Project: ${project.name} at ${project.location}
-Base branch: ${project.baseBranch}
-
-Goal: ${goal.description}
-
-Follow strict Test-Driven Development:
-- RED: Write a failing test that proves the missing behavior
-- GREEN: Write the minimum implementation to pass the test
-- REFACTOR: Clean up without changing behavior
-
-Run ${project.testCommand || "the test suite"} after each phase.
-Run ${project.lintCommand || "the linter"} and ${project.typeCheckCommand || "type checker"} during refactor.
-
-Acceptance Criteria:
-${goal.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join("\n")}
-${goal.technicalInstructions ? `\nTechnical Notes:\n${goal.technicalInstructions}` : ""}
-${goal.outOfScopeItems.length > 0 ? `\nDo NOT modify:\n${goal.outOfScopeItems.map(s => `- ${s}`).join("\n")}` : ""}`;
-}
-
-function runVerification(ticket: Ticket, project: Project, cwd: string): { success: boolean; output: string; error?: string } {
-  const commands = [...ticket.verificationCommands];
-  if (commands.length === 0 && project.testCommand) commands.push(project.testCommand);
-  if (project.lintCommand) commands.push(project.lintCommand);
-  if (project.typeCheckCommand) commands.push(project.typeCheckCommand);
-  if (commands.length === 0) return { success: false, output: "", error: "No verification command configured for this ticket or project" };
-  const output: string[] = [];
-  for (const command of [...new Set(commands)]) {
-    try {
-      const result = execSync(command, { cwd, encoding: "utf8", timeout: 120_000, maxBuffer: 5 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-      output.push(`$ ${command}\n${result.trim()}`);
-    } catch (error) {
-      const result = error as { stdout?: string; stderr?: string; message?: string };
-      const detail = [result.stdout, result.stderr, result.message].filter(Boolean).join("\n");
-      output.push(`$ ${command}\n${detail}`);
-      return { success: false, output: output.join("\n\n"), error: `Verification failed: ${command}` };
-    }
-  }
-  return { success: true, output: output.join("\n\n") };
-}
-
-async function runManagerReview(goal: Goal, ticket: Ticket, project: Project, cwd: string, diff: string): Promise<{ approved: boolean; output: string }> {
-  const store = getStore();
-  const manager = store.agents.get(goal.managerAgentId);
-  if (!manager) return { approved: false, output: "Manager profile not found" };
-  const agent = getAgent(manager.provider);
-  if (!agent) return { approved: false, output: "Manager harness not available" };
   const run: AgentRun = {
-    id: createId(), goalId: goal.id, ticketId: ticket.id, agentProfileId: manager.id,
-    provider: manager.provider, model: manager.model, status: "running", worktreePath: cwd,
-    branchName: ticket.branchName || "", startedAt: now(),
+    id: createId(), goalId: goal.id, ticketId: ticket.id, stepId: step.id, kind: "step",
+    agentProfileId: profile.id, provider: profile.provider, model: profile.model, status: "running",
+    worktreePath: executionPath, branchName: ticket.branchName, startedAt: now(),
   };
-  run.sessionId = `review-${ticket.id}-${run.id}`;
-  store.agentRuns.set(run.id, run); markDirty();
-  broadcastOrchestration({ id: createId(), projectId: goal.projectId, goalId: goal.id, ticketId: ticket.id, agentId: manager.id, type: "manager.review_started", payload: { runId: run.id }, sequence: 0, occurredAt: now() });
-  const result = await agent.run({
-    requestId: run.id, cwd, provider: manager.provider, sessionId: run.sessionId,
-    model: manager.model, permissionMode: "plan",
-    systemPrompt: `${manager.systemPrompt}\n\nYou are the goal manager. Review only; do not edit files. Confirm TDD coverage, acceptance criteria, and verification evidence. End with exactly APPROVED or CHANGES_REQUESTED.`,
-    prompt: `Review ticket ${ticket.title}.\n\nAcceptance criteria:\n${ticket.acceptanceCriteria.join("\n")}\n\nCommitted diff summary:\n${diff}`,
-  }, (payload) => broadcastAgentStream(payload, {
-    runId: run.id,
-    goalId: goal.id,
-    ticketId: ticket.id,
-    agentProfileId: manager.id,
-  }));
-  if (run.status !== "aborted") run.status = result.success ? "completed" : "failed";
-  run.output = result.output; run.error ??= result.error; run.completedAt = now(); markDirty();
-  const approved = result.success && /\bAPPROVED\b/i.test(result.output) && !/CHANGES[_ ]REQUESTED/i.test(result.output);
-  return { approved, output: result.output || result.error || "Manager returned no review decision" };
+  run.sessionId = `${ticket.id}-${step.id}-${run.id}`;
+  const execution: TicketStepExecution = {
+    id: createId(), stepId: step.id, status: "in_progress", agentRunId: run.id,
+    agentProfileId: profile.id, startedAt: run.startedAt,
+  };
+  ticket.stepHistory.push(execution); store.agentRuns.set(run.id, run); markDirty();
+  broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketStepStarted, { runId: run.id, agentProfileId: profile.id });
+
+  try {
+    const result = await agent.run({
+      requestId: run.id, cwd: executionPath, provider: profile.provider, sessionId: run.sessionId,
+      model: profile.model, permissionMode: profile.permissionMode,
+      readOnly: false,
+      systemPrompt: buildAgentSystemPrompt(goal, project, profile),
+      prompt: buildStepExecutionPrompt(ticket, step),
+    }, (payload) => broadcastAgentStream(payload, { runId: run.id, goalId: goal.id, ticketId: ticket.id, stepId: step.id, agentProfileId: profile.id }));
+    run.output = result.output; run.error = result.error; run.completedAt = now();
+    if (result.success) {
+      if (!directExecution) {
+        const commit = await commitChanges(executionPath, `${step.name.toLowerCase()}: ${ticket.title}\n\nTicket ${ticket.id}`);
+        if (!commit.ok) throw new Error(`Commit failed: ${commit.error || "unknown error"}`);
+      }
+      run.status = "completed"; execution.status = "completed"; execution.output = result.output;
+      ticket.stepStatus = "completed"; ticket.status = "review"; ticket.updatedAt = now(); execution.completedAt = run.completedAt;
+      broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketStepCompleted, { runId: run.id, output: result.output.slice(0, 2000) });
+      advanceTicketAfterSuccessfulStep(goal, ticket, step);
+    } else {
+      throw new Error(result.error || "Agent step failed");
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    run.status = "failed"; run.error = message; run.completedAt = now();
+    execution.status = "failed"; execution.error = message; execution.completedAt = run.completedAt;
+    ticket.stepStatus = "failed"; ticket.status = "failed"; ticket.retryCount++; ticket.updatedAt = now();
+    broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketStepFailed, { runId: run.id, error: message });
+  }
+  markDirty();
+  setImmediate(() => { const updated = store.goals.get(goal.id); if (updated?.status === "running") void scheduleAndExecute(updated); });
+}
+
+function advanceTicketAfterSuccessfulStep(goal: Goal, ticket: Ticket, step: BoardStep): void {
+  if (step.allowedNextStepIds.length !== 1) return;
+  const store = getStore();
+  const next = store.boardSteps.get(step.allowedNextStepIds[0]!);
+  if (!next) return;
+  const fromStepId = ticket.currentStepId;
+  ticket.currentStepId = next.id;
+  ticket.updatedAt = now();
+  if (next.isTerminal) {
+    ticket.stepStatus = "completed";
+    ticket.status = "completed";
+    ticket.completedAt = ticket.updatedAt;
+  } else {
+    ticket.stepStatus = null;
+    ticket.status = "ready";
+  }
+  broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketStepChanged, {
+    fromStepId,
+    toStepId: next.id,
+    reason: `Worker completed ${step.name}`,
+  });
+  if (next.isTerminal) {
+    broadcastTicketStep(goal, ticket, WORKFLOW_EVENTS.ticketCompleted, { reason: "Completed every workflow step" });
+    syncDependencyStatuses(goal, ensureSeedSteps());
+    finishGoalIfComplete(goal, ensureSeedSteps());
+  }
 }

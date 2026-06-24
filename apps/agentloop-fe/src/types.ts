@@ -41,6 +41,19 @@ export type AgentRunStatus =
   | "failed"
   | "aborted";
 
+export interface BoardStep {
+  id: string;
+  name: string;
+  instructions: string;
+  allowedNextStepIds: string[];
+  allowedPreviousStepIds: string[];
+  isTerminal: boolean;
+  color: "slate" | "blue" | "amber" | "green" | "red";
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -71,10 +84,8 @@ export interface Goal {
   ticketIds: string[];
   maxAgents: number;
   managerAgentId: string;
+  plannerAgentId: string;
   maxRetries: number;
-  autoRetry: boolean;
-  autoMerge: boolean;
-  requireReview: boolean;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -95,12 +106,14 @@ export interface Ticket {
   description: string;
   type: TicketType;
   status: TicketStatus;
+  currentStepId: string;
+  stepStatus: "in_progress" | "completed" | "failed" | "blocked" | null;
+  stepHistory: TicketStepExecution[];
   priority: TicketPriority;
   acceptanceCriteria: string[];
   technicalNotes: string[];
   relevantFiles: string[];
   dependencyIds: string[];
-  blockingTicketIds: string[];
   requestedAgentName?: string;
   requestedProvider?: AgentProvider;
   requestedModel?: string;
@@ -121,6 +134,8 @@ export interface AgentRun {
   id: string;
   goalId: string;
   ticketId: string;
+  stepId?: string;
+  kind?: "planning" | "orchestration" | "step";
   agentProfileId: string;
   provider: AgentProvider;
   model: string;
@@ -149,7 +164,7 @@ export interface AgentProfile {
   id: string;
   name: string;
   description?: string;
-  role: "manager" | "worker";
+  role: "manager" | "planner" | "worker";
   provider: AgentProvider;
   model: string;
   systemPrompt: string;
@@ -157,6 +172,18 @@ export interface AgentProfile {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TicketStepExecution {
+  id: string;
+  stepId: string;
+  status: "in_progress" | "completed" | "failed" | "blocked";
+  agentRunId?: string;
+  agentProfileId?: string;
+  startedAt: string;
+  completedAt?: string;
+  output?: string;
+  error?: string;
 }
 
 export interface OrchestrationEvent {
@@ -194,6 +221,7 @@ export interface AgentStreamEvent {
     runId?: string;
     goalId?: string;
     ticketId?: string;
+    stepId?: string;
     agentProfileId?: string;
     sessionId?: string;
     content?: string;

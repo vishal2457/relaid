@@ -32,6 +32,8 @@ export class CodexAgent {
         workingDirectory: input.cwd,
         skipGitRepoCheck: true,
         model: input.model,
+        sandboxMode: input.readOnly ? "read-only" : "workspace-write",
+        approvalPolicy: "never",
       });
 
       const prompt = input.systemPrompt?.trim()

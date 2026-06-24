@@ -8,6 +8,7 @@ import type {
   AgentProfile,
   AgentStreamEvent,
   AgentStreamEventType,
+  BoardStep,
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_AGENT_SERVER_URL || "http://localhost:3090";
@@ -62,9 +63,6 @@ export const api = {
       technicalInstructions?: string;
       outOfScopeItems?: string[];
       maxRetries?: number;
-      autoRetry?: boolean;
-      autoMerge?: boolean;
-      requireReview?: boolean;
     }) =>
       fetchJson<Goal>("/api/goals", {
         method: "POST",
@@ -79,22 +77,11 @@ export const api = {
           outOfScopeItems: data.outOfScopeItems || [],
           maxAgents: data.maxAgents ?? 3,
           maxRetries: data.maxRetries ?? 3,
-          autoRetry: data.autoRetry ?? true,
-          autoMerge: data.autoMerge ?? false,
-          requireReview: data.requireReview ?? true,
         }),
-      }),
-    updateStatus: (id: string, status: string) =>
-      fetchJson<Goal>(`/api/goals/${id}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
       }),
     execute: (id: string, overrides?: {
       maxAgents?: number;
       maxRetries?: number;
-      autoRetry?: boolean;
-      autoMerge?: boolean;
-      requireReview?: boolean;
     }) =>
       fetchJson<{ goalId: string; status: string }>(`/api/goals/${id}/execute`, {
         method: "POST",
@@ -110,11 +97,6 @@ export const api = {
       fetchJson<Goal>(`/api/goals/${id}/reset`, { method: "POST" }),
     tickets: {
       list: (goalId: string) => fetchJson<Ticket[]>(`/api/goals/${goalId}/tickets`),
-      updateStatus: (goalId: string, ticketId: string, status: string) =>
-        fetchJson<Ticket>(`/api/goals/${goalId}/tickets/${ticketId}/status`, {
-          method: "PATCH",
-          body: JSON.stringify({ status }),
-        }),
     },
     agents: {
       list: (goalId: string) => fetchJson<AgentRun[]>(`/api/goals/${goalId}/agents`),
@@ -134,10 +116,27 @@ export const api = {
     remove: (id: string) => fetch(`${API_BASE}/api/agents/${id}`, { method: "DELETE" }),
   },
 
+  boardSteps: {
+    list: () => fetchJson<BoardStep[]>("/api/board-steps"),
+    create: (data: Pick<BoardStep, "name" | "instructions" | "allowedNextStepIds" | "allowedPreviousStepIds" | "isTerminal" | "color">) =>
+      fetchJson<BoardStep>("/api/board-steps", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Pick<BoardStep, "name" | "instructions" | "allowedNextStepIds" | "allowedPreviousStepIds" | "isTerminal" | "color">>) =>
+      fetchJson<BoardStep>(`/api/board-steps/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    reorder: (ids: string[]) =>
+      fetchJson<BoardStep[]>("/api/board-steps/order", { method: "PUT", body: JSON.stringify({ ids }) }),
+    remove: (id: string) => fetch(`${API_BASE}/api/board-steps/${id}`, { method: "DELETE" }),
+  },
+
   orchestrator: {
     get: () => fetchJson<AgentProfile>("/api/orchestrator"),
     update: (data: Partial<Pick<AgentProfile, "name" | "provider" | "model" | "systemPrompt" | "permissionMode" | "enabled">>) =>
       fetchJson<AgentProfile>("/api/orchestrator", { method: "PUT", body: JSON.stringify(data) }),
+  },
+
+  planningAgent: {
+    get: () => fetchJson<AgentProfile>("/api/planning-agent"),
+    update: (data: Partial<Pick<AgentProfile, "name" | "provider" | "model" | "systemPrompt" | "permissionMode" | "enabled">>) =>
+      fetchJson<AgentProfile>("/api/planning-agent", { method: "PUT", body: JSON.stringify(data) }),
   },
 
   agent: {
@@ -167,6 +166,29 @@ export const api = {
   },
 };
 
+export const ORCHESTRATION_EVENT_TYPES = [
+  "project.created",
+  "goal.created",
+  "goal.execution_started",
+  "goal.paused",
+  "goal.resumed",
+  "goal.cancelled",
+  "goal.tickets_created",
+  "goal.completed",
+  "goal.failed",
+  "agent.created",
+  "orchestrator.updated",
+  "planning_agent.updated",
+  "orchestrator.analysis_started",
+  "orchestrator.analysis_completed",
+  "orchestrator.analysis_failed",
+  "ticket.step_started",
+  "ticket.step_completed",
+  "ticket.step_failed",
+  "ticket.step_blocked",
+  "ticket.step_changed",
+] as const;
+
 export function connectSse(
   onEvent: (event: OrchestrationEvent) => void,
   onAgentEvent?: (event: AgentStreamEvent) => void,
@@ -182,28 +204,8 @@ export function connectSse(
     }
   };
 
-  const orchestrationTypes = [
-    "orchestration:project.created",
-    "orchestration:goal.created",
-    "orchestration:goal.status_changed",
-    "orchestration:goal.execution_started",
-    "orchestration:goal.paused",
-    "orchestration:goal.resumed",
-    "orchestration:goal.cancelled",
-    "orchestration:goal.tickets_created",
-    "orchestration:goal.completed",
-    "orchestration:goal.failed",
-    "orchestration:ticket.status_changed",
-    "orchestration:agent.started",
-    "orchestration:agent.created",
-    "orchestration:orchestrator.updated",
-    "orchestration:ticket.failed",
-    "orchestration:ticket.review_rejected",
-    "orchestration:manager.review_started",
-  ];
-
-  orchestrationTypes.forEach((type) => {
-    eventSource.addEventListener(type, handler);
+  ORCHESTRATION_EVENT_TYPES.forEach((type) => {
+    eventSource.addEventListener(`orchestration:${type}`, handler);
   });
 
   const agentEventTypes: AgentStreamEventType[] = [

@@ -109,12 +109,13 @@ export class OpencodeAgent {
         body: {
           system: input.systemPrompt || undefined,
           model: model ?? undefined,
+          agent: input.readOnly ? "plan" : "build",
           parts: [{ type: "text", text: input.prompt }],
         },
       });
 
       if (input.permissionMode === "bypassPermissions") {
-        this.handlePermissionsAuto(actualSessionId, client, input.cwd, abortController.signal, streamToken);
+        this.handlePermissionsAuto(actualSessionId, abortController.signal, streamToken);
       }
 
       for await (const event of eventsResult.stream) {
@@ -130,7 +131,8 @@ export class OpencodeAgent {
           }
           case "session.idle": {
             if (event.properties.sessionID === actualSessionId) {
-              return this.complete(actualSessionId, emit, output, startedAt, true, 0);
+              const finalOutput = await readFinalAssistantOutput(client, actualSessionId, input.cwd).catch(() => output);
+              return this.complete(actualSessionId, emit, finalOutput || output, startedAt, true, 0);
             }
             break;
           }
@@ -238,8 +240,6 @@ export class OpencodeAgent {
 
   private async handlePermissionsAuto(
     sessionId: string,
-    client: OpencodeClient,
-    cwd: string,
     signal: AbortSignal,
     streamToken: symbol,
   ): Promise<void> {
@@ -254,6 +254,24 @@ export class OpencodeAgent {
       // Silently stop
     }
   }
+}
+
+async function readFinalAssistantOutput(client: OpencodeClient, sessionId: string, directory: string): Promise<string> {
+  const response = await client.session.messages({
+    path: { id: sessionId },
+    query: { directory },
+  });
+  const messages = response.data || [];
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message?.info.role !== "assistant") continue;
+    const text = message.parts
+      .filter((part): part is TextPart => part.type === "text")
+      .map((part) => part.text)
+      .join("");
+    if (text.trim()) return text;
+  }
+  return "";
 }
 
 async function getAvailablePort(): Promise<number> {

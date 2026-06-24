@@ -11,6 +11,7 @@ export interface AgentRunInput {
   model?: string;
   permissionMode?: PermissionMode;
   outputSchema?: Record<string, unknown>;
+  readOnly?: boolean;
 }
 
 export interface AgentRunResult {

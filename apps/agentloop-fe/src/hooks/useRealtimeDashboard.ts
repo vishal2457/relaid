@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api, connectSse } from "../lib/api";
+import { api, connectSse, ORCHESTRATION_EVENT_TYPES } from "../lib/api";
 import type {
   Project,
   Goal,
@@ -9,6 +9,7 @@ import type {
   OrchestrationEvent,
   AgentProfile,
   AgentStreamEvent,
+  BoardStep,
 } from "../types";
 
 const REFRESH_INTERVAL = 5000;
@@ -21,6 +22,8 @@ export function useRealtimeDashboard() {
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [orchestrator, setOrchestrator] = useState<AgentProfile | null>(null);
+  const [planningAgent, setPlanningAgent] = useState<AgentProfile | null>(null);
+  const [boardSteps, setBoardSteps] = useState<BoardStep[]>([]);
   const [agentStreams, setAgentStreams] = useState<Record<string, AgentStreamEvent[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,18 +35,22 @@ export function useRealtimeDashboard() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [projs, gls, harn, profiles, manager] = await Promise.all([
+      const [projs, gls, harn, profiles, manager, planner, steps] = await Promise.all([
         api.projects.list(),
         api.goals.list(),
         api.harnesses.list(),
         api.agents.list(),
         api.orchestrator.get(),
+        api.planningAgent.get(),
+        api.boardSteps.list(),
       ]);
       setProjects(projs);
       setGoals(gls);
       setHarnesses(harn.harnesses);
       setAgents(profiles);
       setOrchestrator(manager);
+      setPlanningAgent(planner);
+      setBoardSteps(steps);
 
       if (gls.length > 0) {
         const allTickets: Ticket[] = [];
@@ -76,16 +83,20 @@ export function useRealtimeDashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [projs, gls, profiles, manager] = await Promise.all([
+      const [projs, gls, profiles, manager, planner, steps] = await Promise.all([
         api.projects.list(),
         api.goals.list(),
         api.agents.list(),
         api.orchestrator.get(),
+        api.planningAgent.get(),
+        api.boardSteps.list(),
       ]);
       setProjects(projs);
       setGoals(gls);
       setAgents(profiles);
       setOrchestrator(manager);
+      setPlanningAgent(planner);
+      setBoardSteps(steps);
 
       if (gls.length > 0) {
         const allTickets: Ticket[] = [];
@@ -123,26 +134,7 @@ export function useRealtimeDashboard() {
   useEffect(() => {
     const cleanup = connectSse((event: OrchestrationEvent) => {
       dataVersionRef.current += 1;
-      // On relevant events, trigger a refresh
-      if (
-        event.type === "project.created" ||
-        event.type === "goal.created" ||
-        event.type === "goal.execution_started" ||
-        event.type === "goal.paused" ||
-        event.type === "goal.resumed" ||
-        event.type === "goal.status_changed" ||
-        event.type === "goal.tickets_created" ||
-        event.type === "goal.completed" ||
-        event.type === "goal.failed" ||
-        event.type === "ticket.status_changed" ||
-        event.type === "agent.started" ||
-        event.type === "agent.created" ||
-        event.type === "orchestrator.updated" ||
-        event.type === "manager.review_started" ||
-        event.type === "ticket.review_rejected" ||
-        event.type === "ticket.speculative_work_stopped" ||
-        event.type === "ticket.failed"
-      ) {
+      if ((ORCHESTRATION_EVENT_TYPES as readonly string[]).includes(event.type)) {
         refresh();
       }
     }, (event) => {
@@ -210,9 +202,50 @@ export function useRealtimeDashboard() {
     }
   }, []);
 
+  const updateAgent = useCallback(async (id: string, data: Partial<AgentProfile>) => {
+    const updated = await api.agents.update(id, data);
+    setAgents((previous) => previous.map((agent) => agent.id === id ? updated : agent));
+    return updated;
+  }, []);
+
+  const deleteAgent = useCallback(async (id: string) => {
+    const response = await api.agents.remove(id);
+    if (!response.ok) throw new Error(`Failed to delete agent (${response.status})`);
+    setAgents((previous) => previous.filter((agent) => agent.id !== id));
+  }, []);
+
+  const addBoardStep = useCallback(async (data: Pick<BoardStep, "name" | "instructions" | "allowedNextStepIds" | "allowedPreviousStepIds" | "isTerminal" | "color">) => {
+    const step = await api.boardSteps.create(data);
+    setBoardSteps((previous) => [...previous, step]);
+    return step;
+  }, []);
+
+  const updateBoardStep = useCallback(async (id: string, data: Partial<Pick<BoardStep, "name" | "instructions" | "allowedNextStepIds" | "allowedPreviousStepIds" | "isTerminal" | "color">>) => {
+    const updated = await api.boardSteps.update(id, data);
+    setBoardSteps((previous) => previous.map((step) => step.id === id ? updated : step));
+    return updated;
+  }, []);
+
+  const deleteBoardStep = useCallback(async (id: string) => {
+    const response = await api.boardSteps.remove(id);
+    if (!response.ok) throw new Error(`Failed to delete step (${response.status})`);
+    setBoardSteps((previous) => previous.filter((step) => step.id !== id).map((step, position) => ({ ...step, position })));
+  }, []);
+
+  const reorderBoardSteps = useCallback(async (ids: string[]) => {
+    const ordered = await api.boardSteps.reorder(ids);
+    setBoardSteps(ordered);
+  }, []);
+
   const updateOrchestrator = useCallback(async (data: Parameters<typeof api.orchestrator.update>[0]) => {
     const updated = await api.orchestrator.update(data);
     setOrchestrator(updated);
+    return updated;
+  }, []);
+
+  const updatePlanningAgent = useCallback(async (data: Parameters<typeof api.planningAgent.update>[0]) => {
+    const updated = await api.planningAgent.update(data);
+    setPlanningAgent(updated);
     return updated;
   }, []);
 
@@ -250,6 +283,8 @@ export function useRealtimeDashboard() {
     harnesses,
     agents,
     orchestrator,
+    planningAgent,
+    boardSteps,
     loading,
     error,
     selectedProjectId,
@@ -259,7 +294,14 @@ export function useRealtimeDashboard() {
     addProject,
     addGoal,
     addAgent,
+    updateAgent,
+    deleteAgent,
+    addBoardStep,
+    updateBoardStep,
+    deleteBoardStep,
+    reorderBoardSteps,
     updateOrchestrator,
+    updatePlanningAgent,
     executeGoal,
     pauseGoal,
     resumeGoal,

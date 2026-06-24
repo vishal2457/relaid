@@ -71,7 +71,7 @@ export class ClaudeAgent {
       options: {
         cwd: input.cwd,
         model: input.model,
-        permissionMode: input.permissionMode,
+        permissionMode: input.readOnly ? "plan" : input.permissionMode,
         allowDangerouslySkipPermissions: input.permissionMode === "bypassPermissions",
         sessionId,
         persistSession: true,

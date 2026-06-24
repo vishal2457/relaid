@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 export type TicketType =
   | "research" | "test" | "implementation" | "refactor"
   | "integration" | "verification" | "documentation";
@@ -14,12 +12,26 @@ export type GoalStatus =
 
 export type TicketPriority = "low" | "medium" | "high" | "critical";
 export type HarnessProvider = "claude" | "codex" | "opencode";
+export type TicketStepStatus = "in_progress" | "completed" | "failed" | "blocked";
+
+export interface BoardStep {
+  id: string;
+  name: string;
+  instructions: string;
+  allowedNextStepIds: string[];
+  allowedPreviousStepIds: string[];
+  isTerminal: boolean;
+  color: "slate" | "blue" | "amber" | "green" | "red";
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface AgentProfile {
   id: string;
   name: string;
   description?: string;
-  role: "manager" | "worker";
+  role: "manager" | "planner" | "worker";
   provider: HarnessProvider;
   model: string;
   systemPrompt: string;
@@ -59,10 +71,8 @@ export interface Goal {
   ticketIds: string[];
   maxAgents: number;
   managerAgentId: string;
+  plannerAgentId: string;
   maxRetries: number;
-  autoRetry: boolean;
-  autoMerge: boolean;
-  requireReview: boolean;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -83,12 +93,14 @@ export interface Ticket {
   description: string;
   type: TicketType;
   status: TicketStatus;
+  currentStepId: string;
+  stepStatus: TicketStepStatus | null;
+  stepHistory: TicketStepExecution[];
   priority: TicketPriority;
   acceptanceCriteria: string[];
   technicalNotes: string[];
   relevantFiles: string[];
   dependencyIds: string[];
-  blockingTicketIds: string[];
   requestedAgentName?: string;
   requestedProvider?: HarnessProvider;
   requestedModel?: string;
@@ -109,6 +121,8 @@ export interface AgentRun {
   id: string;
   goalId: string;
   ticketId: string;
+  stepId?: string;
+  kind?: "planning" | "orchestration" | "step";
   agentProfileId: string;
   provider: HarnessProvider;
   model: string;
@@ -122,11 +136,16 @@ export interface AgentRun {
   error?: string;
 }
 
-export interface TddEvidence {
-  ticketId: string;
-  red: { command: string; exitCode: number; output: string; recordedAt: string };
-  green: { command: string; exitCode: number; output: string; recordedAt: string };
-  refactor: { commands: string[]; results: { command: string; exitCode: number; output: string }[]; recordedAt: string };
+export interface TicketStepExecution {
+  id: string;
+  stepId: string;
+  status: TicketStepStatus;
+  agentRunId?: string;
+  agentProfileId?: string;
+  startedAt: string;
+  completedAt?: string;
+  output?: string;
+  error?: string;
 }
 
 export interface OrchestrationEvent {
@@ -139,38 +158,4 @@ export interface OrchestrationEvent {
   payload: unknown;
   sequence: number;
   occurredAt: string;
-}
-
-const VALID_TICKET_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
-  backlog: ["ready", "blocked", "cancelled"],
-  ready: ["blocked", "in_progress", "cancelled"],
-  blocked: ["ready", "cancelled"],
-  in_progress: ["review", "failed", "cancelled"],
-  review: ["completed", "ready", "failed", "cancelled"],
-  failed: ["ready", "cancelled"],
-  completed: [],
-  cancelled: [],
-};
-
-const VALID_GOAL_TRANSITIONS: Record<GoalStatus, GoalStatus[]> = {
-  draft: ["planning", "cancelled"],
-  planning: ["ready", "cancelled"],
-  ready: ["running", "cancelled"],
-  running: ["paused", "verifying", "failed", "cancelled"],
-  paused: ["running", "cancelled"],
-  blocked: ["running", "cancelled"],
-  verifying: ["completed", "running", "failed", "cancelled"],
-  completed: [],
-  failed: [],
-  cancelled: ["running"],
-};
-
-export function validateTicketTransition(from: TicketStatus, to: TicketStatus): boolean {
-  const allowed = VALID_TICKET_TRANSITIONS[from];
-  return allowed?.includes(to) ?? false;
-}
-
-export function validateGoalTransition(from: GoalStatus, to: GoalStatus): boolean {
-  const allowed = VALID_GOAL_TRANSITIONS[from];
-  return allowed?.includes(to) ?? false;
 }

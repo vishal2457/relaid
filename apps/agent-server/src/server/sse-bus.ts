@@ -114,7 +114,3 @@ export function replayMissedEvents(
     write(event.event, event.payload, event.id);
   }
 }
-
-export function getClientCount(): number {
-  return clients.length;
-}

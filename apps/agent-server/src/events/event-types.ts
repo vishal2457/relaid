@@ -4,18 +4,9 @@ export interface AgentStreamContext {
   runId?: string;
   goalId?: string;
   ticketId?: string;
+  stepId?: string;
   agentProfileId?: string;
 }
-
-export type SseEventType =
-  | `${AgentProvider}:text_delta`
-  | `${AgentProvider}:reasoning_delta`
-  | `${AgentProvider}:tool_use`
-  | `${AgentProvider}:tool_result`
-  | `${AgentProvider}:permission_request`
-  | `${AgentProvider}:status`
-  | `${AgentProvider}:turn_complete`
-  | `${AgentProvider}:error`;
 
 export interface TextDeltaPayload extends AgentStreamContext {
   sessionId: string;
@@ -81,7 +72,3 @@ export type SsePayload =
   | { type: "status"; provider: AgentProvider; data: StatusPayload }
   | { type: "turn_complete"; provider: AgentProvider; data: TurnCompletePayload }
   | { type: "error"; provider: AgentProvider; data: ErrorPayload };
-
-export function sseEventName(payload: SsePayload): SseEventType {
-  return `${payload.provider}:${payload.type}`;
-}

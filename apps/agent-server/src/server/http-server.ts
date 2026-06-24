@@ -9,6 +9,8 @@ import { createGoalRoutes } from "./routes/goals.js";
 import { createHarnessRoutes } from "./routes/harnesses.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createOrchestratorRoutes } from "./routes/orchestrator.js";
+import { createBoardStepRoutes } from "./routes/board-steps.js";
+import { createPlanningAgentRoutes } from "./routes/planning-agent.js";
 import sseRouter from "./routes/sse.js";
 import { setAgentInstances } from "../orchestrator/scheduler.js";
 
@@ -30,6 +32,8 @@ export function createServer() {
   app.use("/api/harnesses", createHarnessRoutes());
   app.use("/api/agents", createAgentRoutes());
   app.use("/api/orchestrator", createOrchestratorRoutes());
+  app.use("/api/board-steps", createBoardStepRoutes());
+  app.use("/api/planning-agent", createPlanningAgentRoutes());
 
   app.get("/health", (_req, res) => {
     res.json({

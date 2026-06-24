@@ -2,7 +2,8 @@ import { createServer } from "./server/http-server.js";
 import { isStoreLoaded, waitForSave } from "./server/store.js";
 import { detectHarnesses } from "./server/routes/harnesses.js";
 import { initializeModelCatalog } from "./harnesses/model-catalog.js";
-import { ensureOrchestrator } from "./orchestrator/orchestrator-profile.js";
+import { ensureOrchestrator, ensurePlanningAgent } from "./orchestrator/orchestrator-profile.js";
+import { ensureSeedSteps } from "./server/routes/board-steps.js";
 
 interface ParsedArgs {
   port: number;
@@ -38,6 +39,8 @@ async function main() {
   console.log("Loading harness model catalogs...");
   await initializeModelCatalog();
   ensureOrchestrator();
+  ensurePlanningAgent();
+  ensureSeedSteps();
   const harnesses = detectHarnesses();
   console.log("Available harnesses:");
   for (const h of harnesses) {

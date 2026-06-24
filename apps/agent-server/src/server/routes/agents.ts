@@ -18,7 +18,7 @@ export function createAgentRoutes(): Router {
   const router = Router();
   const store = getStore();
 
-  router.get("/", (req, res) => {
+  router.get("/", (_req, res) => {
     res.json([...store.agents.values()].filter((agent) => agent.role === "worker"));
   });
 
